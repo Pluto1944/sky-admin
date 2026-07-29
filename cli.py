@@ -23,6 +23,7 @@ from modules.coc_sync.service import CocSyncService
 from modules.cwl_registration.importer import RegistrationImporter
 from modules.cwl_registration.repository import RegistrationRepository
 from modules.cwl_registration.roster import LeagueArranger
+from modules.cwl_registration.config import COMBAT_MIN_MATCH_VALUE, TEAMS
 from modules.player.exporter import PlayerExporter
 from modules.player.repository import PlayerRepository
 from modules.player.service import PlayerService
@@ -86,6 +87,81 @@ def cmd_import_reg(args) -> None:
     print(f"已导入 {n} 条报名（{args.period}，来源：{where}）")
 
 
+def _print_arrange_report(ordered: list[dict], team_results: list[dict],
+                          period: str, where: str) -> None:
+    """输出编排全量统计报告，使系统行为可观测。"""
+    total = len(ordered)
+    combat_count = sum(1 for x in ordered if x["league_type"] == config.LEAGUE_COMBAT)
+    shell_count = total - combat_count
+    assigned = sum(1 for x in ordered if x.get("team_name"))
+    unassigned = total - assigned
+
+    # 总览
+    print()
+    print("=" * 60)
+    print(f"  名单编排报告  period={period}  输出={where}")
+    print("=" * 60)
+    print(f"  总人数  : {total}")
+    print(f"    已入队: {assigned}  ({assigned * 100 // total}%)")
+    print(f"    未分配: {unassigned}  ({unassigned * 100 // total}%)")
+    print()
+
+    # 联赛类型分布
+    print(f"  联赛分类:")
+    print(f"    实战 (combat): {combat_count} 人")
+    print(f"    壳子 (shell) : {shell_count} 人")
+    print(f"    实战最低匹配值门槛: {COMBAT_MIN_MATCH_VALUE}")
+    print()
+
+    # 队伍配置容量
+    combat_teams = [t for t in TEAMS if t["category"] == config.LEAGUE_COMBAT]
+    shell_teams  = [t for t in TEAMS if t["category"] == config.LEAGUE_SHELL]
+    combat_cap = sum(t["member_count"] for t in combat_teams)
+    shell_cap  = sum(t["member_count"] for t in shell_teams)
+    print(f"  队伍容量:")
+    print(f"    实战: {combat_cap} 位 ({len(combat_teams)} 队)")
+    print(f"    壳子: {shell_cap} 位 ({len(shell_teams)} 队)")
+    print(f"    合计: {combat_cap + shell_cap} 位")
+    print()
+
+    # 逐队详情
+    print(f"  队伍分配:")
+    for tr in team_results:
+        cat_label = "实战" if tr["category"] == config.LEAGUE_COMBAT else "壳子"
+        name   = tr["team_name"]
+        filled = tr["filled_count"]
+        cap    = tr["member_count"]
+        reserved = tr.get("reserved_empty", 0)
+
+        if filled == cap and reserved == 0:
+            status = " 已满"
+        elif reserved > 0:
+            status = f" 实{filled}/{cap - reserved}+预留{reserved}"
+        elif filled > cap:
+            status = f" 溢出+{filled - cap}"
+        else:
+            status = f" 缺{cap - filled}"
+
+        print(f"    [{cat_label}] {name:<10}  {filled}/{cap}{status}")
+    print()
+
+    # 未分配明细
+    if unassigned > 0:
+        unassigned_combat = sum(
+            1 for x in ordered
+            if not x.get("team_name") and x["league_type"] == config.LEAGUE_COMBAT
+        )
+        unassigned_shell = unassigned - unassigned_combat
+        print(f"  未分配详情 ({unassigned} 人):")
+        if unassigned_combat:
+            print(f"    实战未入队: {unassigned_combat} 人（溢出，已注入壳子池参与排序）")
+        if unassigned_shell:
+            print(f"    壳子未入队: {unassigned_shell} 人（匹配值靠后，超出队伍容量）")
+        print()
+    print("=" * 60)
+    print()
+
+
 def cmd_arrange(args) -> None:
     """生成联赛名单并写入表格（本地 xlsx 或腾讯在线文档）。
 
@@ -111,16 +187,11 @@ def cmd_arrange(args) -> None:
     player_service = PlayerService(PlayerRepository(db.conn))
     reg_repo = RegistrationRepository(db.conn)
     arranger = LeagueArranger(player_service, reg_repo, make_excel_io(to))
-    ordered, sheet_name = arranger.arrange_and_export(
+    ordered, team_results, sheet_name = arranger.arrange_and_export(
         args.period, target, sheet=args.sheet
     )
-    combat = sum(1 for x in ordered if x["league_type"] == config.LEAGUE_COMBAT)
-    shell = len(ordered) - combat
     where = f"腾讯文档 {target}" if to == "tencent" else target
-    print(
-        f"已生成名单 -> {where}[sheet: {sheet_name}]"
-        f"（实战 {combat} 人，壳子 {shell} 人）"
-    )
+    _print_arrange_report(ordered, team_results, args.period, where)
 
 
 def cmd_import_result(args) -> None:

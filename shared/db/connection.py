@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS {table} (
     league_type   TEXT,                    -- 编排产物
     rank_order    INTEGER,                 -- 编排产物
     player_tag    TEXT,                    -- 可空：命中的真实账号 tag，作关联缓存（无 FK）
+    team_name     TEXT,                    -- 分配到哪个队伍（如"实战一队"），NULL=未分配
     UNIQUE(account_name, period)
 );
 """
@@ -159,6 +160,10 @@ class Database:
             else:
                 self.conn.execute("ALTER TABLE registrations ADD COLUMN prev_rank INTEGER")
 
+        # 队伍分配列
+        if "team_name" not in reg_cols:
+            self.conn.execute("ALTER TABLE registrations ADD COLUMN team_name TEXT")
+
         acc_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(accounts)")}
         # 回填下沉列：仅当报名行 account_type 为空时，取该账号旧 accounts 上的值补入
         # （camp_order 语义已废弃为上月排名，不再从旧 accounts 回填）
@@ -215,13 +220,14 @@ class Database:
             f"""
             INSERT OR IGNORE INTO registrations_new
                 (id, account_name, player_name, period, match_value, join_combat,
-                 account_type, prev_rank, league_type, rank_order, player_tag)
+                 account_type, prev_rank, league_type, rank_order, player_tag, team_name)
             SELECT r.id,
                    COALESCE(a.account_name, r.player_tag),
                    a.player_name,
                    r.period, r.match_value, r.join_combat,
                    r.account_type, {prev_src}, r.league_type, r.rank_order,
-                   r.player_tag
+                   r.player_tag,
+                   r.team_name
             FROM registrations r
             LEFT JOIN accounts a ON a.player_tag = r.player_tag
             """

@@ -1,6 +1,6 @@
 # 联赛报名与名单编排管理系统 — 设计方案
 
-> 版本：v2.2
+> 版本：v2.3
 > 说明：本文档为编码前的完整设计，并已随真实报名表结构落地更新（见 §5.x）。IO 层采用可替换适配器，第一版走本地 xlsx，预留腾讯文档 API 接口；战绩计算做成可插拔的空函数，后续补充公式。
 >
 > **v2.0 架构升级**：由"技术分层"（core/io_adapter/db）重构为"业务领域分模块"（player 中枢 + cwl_registration + war_result + coc_sync），详见 §十三。原设计中的分层思想（纯函数 / IO 抽象 / 存储抽象 / 依赖注入）在新架构中完整保留，只是按领域重新组织归属。
@@ -8,6 +8,8 @@
 > **v2.1 表结构瘦身**：accounts 只留账号级事实（21→16 列），按月维度字段（`account_type` / `camp_order` / `latest_match_value` / `join_combat`）下沉 registrations，`last_reg_period` 改为读取时派生；旧库经回填 + 重建表迁移，详见 §13.5。
 >
 > **v2.2 报名解耦（B 方案）**：`registrations` 从"accounts 的子表"升级为**自包含的报名事实源**——自持 `account_name`（报名昵称，主标识）/ `player_name`（主号归属），`player_tag` 降为可空的关联缓存、**去外键**，唯一键 `(player_tag, period)` → `(account_name, period)`。报名导入**不再写 accounts、不再临时建档、不再需要合并**：`accounts` 完全由 COC 权威建档，报名侧只读反查真实 Tag 做缓存。"报名有 / COC 无"的新人照常入 `registrations`、排序得 0 分，主表零污染。由此**退休** `is_provisional` 临时账号建档 / `merge_provisional` 合并 / `unmatched.py` 未匹配钩子 / coc-sync 残留告警等一整套复杂度，详见 §13.6 与 §十四。
+>
+> **v2.3 队伍分配**：在排序名单基础上新增**自动队伍填充**（`team_filler.py`，纯函数）——按 `TEAMS` 配置将排序后人员逐队分配，支持实战最低匹配值门槛、预留位置、最后一个实战队边界处理（刚好/溢出协调壳子/缺口<5 协调壳子），结果同时回写 `registrations.team_name` 列和在同一 sheet 下半部分输出队伍明细，详见 §5.x.4 步骤 3.5 与 §5.x.8。
 
 ---
 
@@ -119,9 +121,10 @@ IO 层用抽象基类 `ExcelIO`，定义 `read_sheet()` / `write_sheet()`。当�
 | join_combat | INTEGER | 是否参加实战 (0/1) |
 | account_type | TEXT | 本月账号分类 `combat` 战营 / `normal` 普通（v2.1 由 accounts 下沉） |
 | camp_order | INTEGER | 本月战营名单顺序，仅战营账号有值（v2.1 由 accounts 下沉） |
-| league_type | TEXT | 编排结果：`combat` 实战 / `shell` 壳子 |
+| league_type | TEXT | 编排结果（最终类别）：`combat` 实战 / `shell` 壳子 |
 | rank_order | INTEGER | 名单内排序位次 |
 | player_tag | TEXT | **可空、无 FK**：命中真实账号时缓存其 Tag，作关联缓存供排序取分；未命中留空（v2.2） |
+| team_name | TEXT | 分配到哪个队伍（如"实战一队"），NULL=未分配（v2.3） |
 | — | — | 唯一约束 `(account_name, period)` 防重复导入（v2.2 由 `(player_tag, period)` 改；player_tag 多为 NULL 不能做唯一键） |
 
 ### results（月度战绩，多指标）
@@ -226,10 +229,16 @@ flowchart TD
   │   │   ├─ _is_combat_league() 分组     → combat_camp / combat_normal / shell
   │   │   ├─ camp_sort_key() 排序         → 战营按奖杯降序
   │   │   └─ 全局编号 rank_order
-  │   └─ update_arrangement() × N         → 回写 league_type / rank_order
+  │   ├─ fill_teams(ordered, TEAMS, threshold) → 纯函数队伍分配
+  │   │   ├─ _split_by_threshold()        → 低匹配值普通实战账号 → shell（战营账号豁免）
+  │   │   ├─ 逐队填充实战队伍             → 含 reserved_slots 处理
+  │   │   ├─ 最后实战队边界处理           → ③a/③b/③c/③d
+  │   │   └─ 填充壳子队伍
+  │   ├─ update_arrangement() × N         → 回写 league_type / rank_order
+  │   └─ update_team_name() × N           → 回写 team_name
   │
   └─ [阶段3 导出] arrange_and_export()
-      └─ write_sheet(target, rows, sheet)  → 写入新 sheet（名单_<period>）
+      └─ write_sheet(target, rows, sheet)  → 写入新 sheet（名单_<period>，含排序名单+队伍明细）
 ```
 
 #### 5.x.2 配置体系
@@ -245,7 +254,10 @@ flowchart TD
 | `REGISTRATION_TAG_SOURCE` | `str` | 账号标识来源，当前 `"account_name"`（昵称反查） |
 | `REGISTRATION_DEDUP` | `str` | 去重策略：`"latest_submit"` |
 | `JOIN_COMBAT_TRUE_TEXTS` | `set[str]` | "想实战"真值文本集合 |
-| `ARRANGEMENT_OUTPUT_HEADERS` | `list[str]` | 名单输出列顺序 |
+| `ARRANGEMENT_OUTPUT_HEADERS` | `list[str]` | 名单输出列顺序（含 `team_name` 列） |
+| `TEAM_OUTPUT_HEADERS` | `list[str]` | 队伍明细输出列顺序 |
+| `TEAMS` | `list[dict]` | 队伍配置列表（详见 §5.x.8）：每队含 name/member_count/league_level/clan_tag/manager/category/reserved_slots |
+| `COMBAT_MIN_MATCH_VALUE` | `float` | 实战最低匹配值门槛（低于此值的 combat 账号强制转壳子） |
 
 公共常量在 `shared/config/common.py`：
 | 常量 | 值 | 说明 |
@@ -309,11 +321,25 @@ flowchart TD
 - 壳子：按综合分降序。
 - 全局编号 `rank_order` 从 1 开始。
 
-**4. 回写** → `RegistrationRepository.update_arrangement(reg_id, league_type, rank_order)`
-- 把编排结果写回 `registrations` 表对应行。
+**4. 队伍填充** → `team_filler.fill_teams()`（纯函数）
+- 在排序名单基础上，按 `TEAMS` 配置将人员分配到各队伍。
+- 规则（详见 §5.x.8）：
+  - **阈值过滤**：`match_value < COMBAT_MIN_MATCH_VALUE` 的普通实战账号强制转为 shell；战营账号（`account_type=combat`）不受阈值影响，始终留在实战池。
+  - **按序填充**：逐队从头消费排序池，含 `reserved_slots` 处理（>0 留空位 / <0 多招备选）
+  - **最后一个实战队边界**：
+    - ③a 刚好满员 → 不做修改
+    - ③b 实战人溢出 → 溢出者注入 shell_pool，按匹配值降序重排
+    - ③c 实战缺口 <5 → 从 shell_pool 取匹配值与最后实战人最接近的 N 人补入
+    - ③d 实战缺口 ≥5 → 不协调，队伍不满员
+- 返回 `(含 team_name 的排序名单, 队伍分配结果列表)`，`league_type` 同步更新为最终分类。
 
-**5. 导出** → `arrange_and_export(period, target, sheet)`
+**5. 回写** → `Repository` 两步回写
+- `update_arrangement(reg_id, league_type, rank_order)` — 编排结果（排序阶段）
+- `update_team_name(reg_id, team_name)` — 队伍分配结果（填充阶段）
+
+**6. 导出** → `arrange_and_export(period, target, sheet)`
 - 调用 `arrange()` → `write_sheet()` 写入目标工作簿新 sheet（缺省名 `名单_<period>`）。
+- 同一 sheet 包含两部分：上半部分排序名单（含 `team_name` 列），下半部分按队伍分组展示分配明细。
 
 #### 5.x.5 数据库表结构（报名视角）
 
@@ -341,9 +367,10 @@ flowchart TD
 | `join_combat` | INTEGER | | 是否实战 (0/1) |
 | `account_type` | TEXT | | 本月分类：combat/normal |
 | `prev_rank` | INTEGER | | 上月排名 |
-| `league_type` | TEXT | | 编排结果：combat/shell |
+| `league_type` | TEXT | | 编排结果（最终类别）：combat/shell |
 | `rank_order` | INTEGER | | 名单位次 |
 | `player_tag` | TEXT | 可空，无 FK | 真实 Tag 关联缓存 |
+| `team_name` | TEXT | 可空 | 分配到哪个队伍（如"实战一队"），NULL=未分配（v2.3） |
 
 #### 5.x.6 关键设计决策
 
@@ -371,12 +398,70 @@ accounts (COC权威)                    registrations (报名自包含)
 │ clan_tag         │─→ 战营成员 ──→│ account_type              │
 │ status           │←─ 状态刷新 ───│ league_type / rank_order  │
 └──────────────────┘                 │ player_tag (缓存, 可空)   │
+                                     │ team_name (队伍分配)      │
                                      └──────────────────────────┘
 
 导入阶段：报名表 → parse → dedup → merge camp → resolve_tag → registrations
-排序阶段：registrations → load(过滤排除名单) → sort → update → export
+编排阶段：registrations → load(过滤排除名单) → sort → fill_teams → update(league_type/rank_order/team_name) → export(排序名单+队伍明细)
 状态刷新：registrations 本月报名集合 → infer_status → accounts.status
 ```
+
+#### 5.x.8 队伍分配详解（v2.3）
+
+在排序 4~6 步（§5.x.4）中，`fill_teams()` 是新增的纯函数核心算法。下面是完整规则：
+
+**队伍配置结构（`TEAMS`）**：
+
+```python
+{
+    "name": "实战一队",          # 队伍名称
+    "member_count": 15,          # 标准人数（15 或 30）
+    "league_level": "冠军一",    # 联赛等级
+    "clan_tag": "#XXXXX",        # 部落标签
+    "manager": "xxx",            # 管理员
+    "category": "combat",        # combat=实战 / shell=壳子
+    "reserved_slots": 0,         # >0 留空位 / 0 不预留 / <0 多招备选
+}
+```
+
+**分配流程**：
+
+```mermaid
+flowchart TD
+    A[sort_accounts 排序结果] --> B["① 阈值过滤<br/>普通实战账号 match_value < 门槛 → 转壳子<br/>（战营账号不受阈值影响）"]
+    B --> C["② 拆分 combat_pool / shell_pool"]
+    C --> D["③ 逐队填充前 N-1 个实战队伍<br/>含 reserved_slots 处理"]
+    D --> E{"④ 最后一个实战队状态？"}
+    E -->|"③a 刚好满员"| F["→ 填充壳子队伍"]
+    E -->|"③b 实战人溢出"| G["溢出实战人 → 注入 shell_pool<br/>按匹配值降序重排 → 填充壳子队伍"]
+    E -->|"③c 实战缺口 <5"| H["取最后实战入选人匹配值为 ref<br/>从 shell_pool 找最相近 N 人补入<br/>→ 剩余壳子池填充壳子队伍"]
+    E -->|"③d 缺口 ≥5"| I["不协调，队伍不满员<br/>→ 壳子池填充壳子队伍"]
+    F --> J["⑤ 回写 team_name + 输出"]
+    G --> J
+    H --> J
+    I --> J
+```
+
+> **阈值过滤例外**：战营账号（`account_type=combat`）不受 `COMBAT_MIN_MATCH_VALUE` 影响，始终留在实战池中——即使 `match_value` 为空（未报名自动纳入）或低于门槛也不会被转壳子。这样保证战营成员优先进入实战队伍，不会因未报名而无队可归。
+
+**预留位置（`reserved_slots`）语义**：
+
+| reserved_slots | 实际容量 | 说明 |
+|----------------|---------|------|
+| `0` | `member_count` | 标准人数，不预留 |
+| `>0`（如 2） | `member_count - 2` | 留空位给后续手动安排 |
+| `<0`（如 -2） | `member_count + 2` | 多招备选，超出标准人数 |
+
+**协调匹配值相近成员（③c）**：
+
+当最后一个实战队缺口 <5 时，取最后一个实战入选者的 `match_value` 作为参考值，从壳子池中选取差值绝对值最小的 N 人补入（`_pick_closest_by_match_value`），补入者 `league_type` 更新为 combat。
+
+**输出格式**：
+
+- `fill_teams()` 返回 `(ordered_with_team, team_results)`
+- `ordered_with_team`：原排序名单每项追加 `team_name` 字段，`league_type` 同步为最终分类
+- `team_results`：`[{team_name, category, member_count, filled_count, reserved_empty, members: [...]}, ...]`
+- 同一 sheet 导出时上半部分为排序名单，下半部分按队伍分组展示明细
 
 ---
 
@@ -474,6 +559,7 @@ flowchart TD
 |------|------|------|---------|
 | `cwl_registration/rank_score.py` | `compute_rank_score`(默认实现，纯函数) | 无 | 纯输入输出断言 |
 | `cwl_registration/sorter.py` | 分组 + 按综合分降序（纯函数，调用 rank_score） | 无 | 纯输入输出断言 |
+| `cwl_registration/team_filler.py` | 队伍分配（纯函数，v2.3 新增） | 无 | 纯输入输出断言 |
 | `war_result/history_score.py` | `compute_history_score`(占位，纯函数) | 无 | 纯输入输出断言 |
 | `player/status_rule.py` | 账号状态推断（纯函数） | 无 | 纯输入输出断言 |
 | `shared/io_adapter/base.py` | ExcelIO 抽象接口 | 无 | 契约测试 |
@@ -481,7 +567,7 @@ flowchart TD
 | `shared/db/connection.py` + `*/repository.py` | 连接管理 + 三表数据访问 | sqlite3 | `:memory:` 内存库 |
 | `player/service.py` | PlayerService：账号读写统一接口 | 注入 Repo | 内存库集成 |
 | `cwl_registration/importer.py` | 编排：导入报名 | 注入 PlayerService+Repo+IO | 注入 Fake IO |
-| `cwl_registration/roster.py` | 编排：生成名单（含排除名单过滤） | 注入 PlayerService+Repo+IO | 注入 Fake IO |
+| `cwl_registration/roster.py` | 编排：生成名单+队伍分配（含排除名单过滤） | 注入 PlayerService+Repo+IO | 注入 Fake IO |
 | `war_result/importer.py` | 编排：导入战绩 | 注入 PlayerService+Repo+IO | 注入 Fake IO |
 
 ### 测试用例覆盖场景
@@ -490,10 +576,11 @@ flowchart TD
   - `compute_rank_score`：归一化正确；最大=最小时除零保护返回 0；权重调整生效；只有匹配值/只有历史分的边界。
   - `compute_history_score`：占位函数当前返回默认分（补全公式后再扩展用例）。
 - **test_sorter**：战营排普通前面；组内按综合分降序；匹配值全相同退回历史分；空名单；单账号。
+- **test_team_filler**（v2.3 新增，36 个用例）：基本填队、阈值转壳、预留位置正/负/零、③a 刚好/③b 溢出/③c 缺口<5 协调/③d 缺口≥5 不协调、空名单、空队伍、容量不足、仅实战/仅壳子、rank_order 保持等纯函数场景。
 - **test_status_rule**：本月报名→active；漏报 1 月→missed；连续 ≥N 月→maybe_left；漏报后又报名→回 active。
 - **test_repository**：插入/查询账号；`(tag, period)` 唯一约束防重复导入；更新历史分。
 - **test_local_xlsx**：写入再读回一致（round-trip）；列名映射正确；缺列报明确错误。
-- **集成测试**：Fake 依赖跑完整"导入报名→生成名单"，断言输出顺序与分组正确。
+- **集成测试**：Fake 依赖跑完整"导入报名→生成名单+队伍分配"，断言输出顺序、分组、队伍分配正确。
 
 ---
 
@@ -518,10 +605,11 @@ sky-admin/
 │   │   └── config.py                   # MAYBE_LEFT_MONTHS
 │   ├── cwl_registration/               # ② CWL 报名
 │   │   ├── importer.py                 # 功能①：报名结果 → registrations（自包含事实；昵称→真实Tag 只读反查缓存）
-│   │   ├── roster.py                   # 功能②：报名快照 + 账号得分 → 联赛名单（含 EXCLUDED_CAMP_NAMES 过滤）
+│   │   ├── roster.py                   # 功能②：报名快照 + 账号得分 → 联赛名单（含 EXCLUDED_CAMP_NAMES 过滤 + 队伍分配）
 │   │   ├── sorter.py                   # 分组排序纯函数
+│   │   ├── team_filler.py              # 队伍填充纯函数（v2.3 新增）
 │   │   ├── rank_score.py               # 名单排序综合分（纯函数）
-│   │   ├── repository.py               # registrations 表数据访问（自持列 + last_period_of）
+│   │   ├── repository.py               # registrations 表数据访问（自持列 + last_period_of + update_team_name）
 │   │   └── config.py                   # 列关键词/战营/权重/输出列
 │   ├── war_result/                     # ③ 战绩
 │   │   ├── importer.py                 # 战绩导入 Excel → player 历史分（昵称→真实Tag 反查）
@@ -539,7 +627,7 @@ sky-admin/
 │   ├── fakes.py                        # FakeExcelIO / FakeCocApiClient + seed 助手
 │   ├── shared/    (test_local_xlsx / test_repositories)
 │   ├── player/    (test_status_rule / test_service)
-│   ├── cwl_registration/ (test_rank_score / test_sorter / test_importer / test_roster)
+│   ├── cwl_registration/ (test_rank_score / test_sorter / test_team_filler / test_importer / test_roster)
 │   ├── war_result/       (test_history_score / test_importer)
 │   └── coc_sync/         (test_mapper / test_service)
 ├── scripts/                            # 运维脚本

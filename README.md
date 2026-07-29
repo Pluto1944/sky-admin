@@ -22,7 +22,7 @@ python cli.py coc-sync --clan '#2QQ' --clan '#XX'   # 临时只同步指定部�
 # 1. 导入报名表（写入 registrations 报名事实；按昵称反查真实 Tag 缓存，并刷新账号报名状态）
 python cli.py import-reg 报名表.xlsx --period 2026-07
 
-# 2. 生成实战/壳子名单并导出
+# 2. 生成实战/壳子名单、队伍分配并导出（同一 sheet：排序名单 + 队伍明细）
 python cli.py arrange --period 2026-07 -o 名单.xlsx
 
 # 3. 联赛结束后导入战绩，更新历史分
@@ -67,7 +67,7 @@ cli.py                       # 命令行入口
 shared/                      # 基础设施：config/common、columns、io_adapter、db/connection
 modules/
   player/                    # ① 玩家中枢：PlayerService（账号读写唯一入口）+ repository + status_rule
-  cwl_registration/          # ② CWL 报名：importer(报名→registrations) + roster(报名快照→名单，含排除名单过滤) + sorter + rank_score
+  cwl_registration/          # ② CWL 报名：importer(报名→registrations) + roster(报名快照→名单+队伍分配，含排除名单过滤) + sorter + rank_score + team_filler
   war_result/                # ③ 战绩：importer(→历史分) + history_score + repository
   coc_sync/                  # ④ COC 同步：api_client(底层HTTP) + mapper(纯函数映射) + config(部落清单) + service(唯一API编排出口)
 scripts/                     # 运维脚本：register_and_arrange.sh（报名一体化）/ sync_and_export.sh（长期维护）/ load_env.sh（凭证加载）
@@ -81,6 +81,40 @@ tests/                       # 按模块归类：shared / player / cwl_registrat
 - `modules/war_result/history_score.py :: compute_history_score()` — 历史战绩综合分，**占位待补公式**。
 - `modules/cwl_registration/rank_score.py :: compute_rank_score()` — 名单排序综合分，**已给归一化加权默认实现**，可深入替换。
 
+## 队伍分配（在排序名单基础上自动分区）
+
+`arrange` 命令在生成排序名单后，会**自动按 `TEAMS` 配置将人员分配到各队伍**，并输出到同一 sheet 的下半部分。
+
+### 队伍配置 (`TEAMS`)
+
+每队包含以下字段：
+
+| 字段 | 说明 |
+|------|------|
+| `name` | 队伍名称，如"实战一队" |
+| `member_count` | 标准人数（15 或 30） |
+| `league_level` | 联赛等级，如"冠军一" |
+| `clan_tag` | 部落标签 `#XXXXX` |
+| `manager` | 管理员名称 |
+| `category` | `combat`（实战）或 `shell`（壳子） |
+| `reserved_slots` | 预留位置：`>0` 留空位 / `0` 不预留 / `<0` 多招备选 |
+
+### 分配规则
+
+1. **阈值过滤**：`match_value < COMBAT_MIN_MATCH_VALUE` 的**普通实战账号**强制参加壳子（战营账号 `account_type=combat` 不受阈值影响，始终留在实战池）
+2. **按序填充**：按排序名单顺序依次分配到各队伍
+3. **最后一个实战队边界处理**：
+   - ③a 人数刚好 → 不做修改
+   - ③b 实战人溢出 → 多的人注入壳子池，按匹配值重新排序
+   - ③c 实战缺口 <5 → 从壳子池协调匹配值相近的成员过来
+   - ③d 实战缺口 ≥5 → 不协调，队伍不满员
+
+### 输出格式
+
+同一 sheet 分为两个区域：
+- **上半部分**：完整排序名单（含 `team_name` 列标注每人所属队伍）
+- **下半部分**：按队伍分组展示分配明细
+
 ## 配置说明
 
 | 配置项 | 位置 | 说明 |
@@ -88,6 +122,8 @@ tests/                       # 按模块归类：shared / player / cwl_registrat
 | `SORT_WEIGHTS` | `cwl_registration/config.py` | 排序权重：匹配值 0.6 / 历史分 0.4 |
 | `CAMP_CLAN_TAG` | `cwl_registration/config.py` | 战营部落标签（`#2QQ`，成员即战营账号） |
 | `EXCLUDED_CAMP_NAMES` | `cwl_registration/config.py` | 战营排除名单：不参与排序的账号昵称集合，在导入和排序两阶段过滤 |
+| `TEAMS` | `cwl_registration/config.py` | 队伍配置列表：每队含名称/人数/联赛等级/标签/管理/类别(combat\|shell)/预留位置 |
+| `COMBAT_MIN_MATCH_VALUE` | `cwl_registration/config.py` | 实战最低匹配值门槛：低于此值的 combat 账号强制转壳子 |
 | `IO_ADAPTER` | `shared/config/common.py` | IO 适配器：`tencent`（腾讯文档）或默认本地 xlsx |
 
 ## 运行测试

@@ -6,19 +6,25 @@ B 方案数据流（报名不建行）：
 2. 名字 -> tag -> 得分：优先用报名行缓存的 player_tag，没有则按 account_name 只读
    反查真实账号；命中则取其 history_score，未命中（"报名有 / COC 无"的新人）得 0 分。
 3. 调用纯函数 sort_accounts 完成分组 + 排序（输入口径不变）。
-4. 回写每条报名的 league_type / rank_order 到 registrations 表。
-5. 通过 ExcelIO 输出名单表。
+4. 调用 fill_teams 将排序结果分配到配置的队伍中。
+5. 回写每条报名的 league_type / rank_order / team_name 到 registrations 表。
+6. 通过 ExcelIO 输出名单表（同一 sheet 含排序名单 + 队伍分配明细）。
 """
 from __future__ import annotations
 
 from modules.cwl_registration.config import (
     ARRANGEMENT_OUTPUT_HEADERS,
+    COMBAT_MIN_MATCH_VALUE,
     EXCLUDED_CAMP_NAMES,
     SORT_WEIGHTS,
+    TEAM_OUTPUT_HEADERS,
+    TEAMS,
 )
 from modules.cwl_registration.repository import RegistrationRepository
 from modules.cwl_registration.sorter import sort_accounts
+from modules.cwl_registration.team_filler import fill_teams
 from modules.player.service import PlayerService
+from shared.config.common import LEAGUE_COMBAT, LEAGUE_SHELL
 from shared.io_adapter.base import ExcelIO
 
 
@@ -92,17 +98,47 @@ class LeagueArranger:
             )
         return merged
 
-    def arrange(self, period: str, weights: dict | None = None) -> list[dict]:
-        """生成排序后的名单，并回写数据库。返回排序结果列表。"""
+    def arrange(
+        self,
+        period: str,
+        weights: dict | None = None,
+        teams: list[dict] | None = None,
+        combat_min_match_value: float | None = None,
+    ) -> tuple[list[dict], list[dict]]:
+        """生成排序名单 + 队伍分配，并回写数据库。
+
+        返回 (含 team_name 的排序名单, 队伍分配结果列表)。
+        同时回写 league_type / rank_order / team_name 到 registrations。
+        """
         accounts = self._load_accounts(period)
         ordered = sort_accounts(accounts, weights or SORT_WEIGHTS)
 
+        # 回写 league_type / rank_order
         for item in ordered:
             if item.get("reg_id") is not None:
                 self.reg_repo.update_arrangement(
                     item["reg_id"], item["league_type"], item["rank_order"]
                 )
-        return ordered
+
+        # 队伍填充
+        teams_cfg = teams if teams is not None else TEAMS
+        threshold = (
+            combat_min_match_value
+            if combat_min_match_value is not None
+            else COMBAT_MIN_MATCH_VALUE
+        )
+        ordered_with_team, team_results = fill_teams(
+            ordered, teams_cfg, threshold
+        )
+
+        # 回写 team_name
+        for item in ordered_with_team:
+            if item.get("reg_id") is not None and item.get("team_name"):
+                self.reg_repo.update_team_name(
+                    item["reg_id"], item["team_name"]
+                )
+
+        return ordered_with_team, team_results
 
     def arrange_and_export(
         self,
@@ -110,19 +146,72 @@ class LeagueArranger:
         target: str,
         weights: dict | None = None,
         sheet: str | None = None,
-    ) -> tuple[list[dict], str]:
+        teams: list[dict] | None = None,
+        combat_min_match_value: float | None = None,
+    ) -> tuple[list[dict], list[dict], str]:
         """生成名单并导出到表格的新 sheet。
 
-        sheet 缺省按月份命名为 "名单_<period>"，写入时在目标工作簿中新建该
-        sheet（若文件已存在则保留其余 sheet，同名 sheet 覆盖重建）。
-        返回 (排序结果列表, 实际写入的 sheet 名)。
+        同一 sheet 包含两部分：上半部分为排序名单（含 team_name 列），
+        下半部分按队伍分组展示分配明细。
+        sheet 缺省按月份命名为 "名单_<period>"。
+        返回 (含 team_name 排序名单, 队伍分配结果, 实际 sheet 名)。
         """
-        ordered = self.arrange(period, weights)
-        rows = [
-            {h: item.get(h) for h in ARRANGEMENT_OUTPUT_HEADERS} for item in ordered
+        ordered, team_results = self.arrange(
+            period, weights, teams, combat_min_match_value
+        )
+
+        # 拼接输出行：排序名单 + 空白分隔 + 队伍明细
+        # 第一部分：排序名单（使用排序名单表头）
+        combined_rows: list[dict] = [
+            {h: item.get(h) for h in ARRANGEMENT_OUTPUT_HEADERS}
+            for item in ordered
         ]
+
+        # 分隔符：两行空白 + 标题行
+        for _ in range(2):
+            combined_rows.append({h: None for h in ARRANGEMENT_OUTPUT_HEADERS})
+        combined_rows.append(
+            {
+                **{h: None for h in ARRANGEMENT_OUTPUT_HEADERS},
+                "rank_order": "=== 战队分配 ===",
+            }
+        )
+
+        # 第二部分：逐队展示
+        combat_label = {LEAGUE_COMBAT: "实战", LEAGUE_SHELL: "壳子"}
+        for tr in team_results:
+            cat = combat_label.get(tr["category"], tr["category"])
+            if tr["reserved_empty"] > 0:
+                cap_info = f"{tr['filled_count']}/{tr['member_count'] - tr['reserved_empty']}+{tr['reserved_empty']}"
+            else:
+                cap_info = f"{tr['filled_count']}/{tr['member_count']}"
+            title = (
+                f"{cat}: {tr['team_name']} "
+                f"({tr.get('league_level', '')}) "
+                f"{tr.get('clan_tag', '')} "
+                f"管理:{tr.get('manager', '')} "
+                f"满员:{cap_info}"
+            )
+            # 队伍标题行
+            combined_rows.append(
+                {
+                    **{h: None for h in ARRANGEMENT_OUTPUT_HEADERS},
+                    "rank_order": title,
+                }
+            )
+            # 队伍成员行
+            for m in tr["members"]:
+                combined_rows.append(
+                    {h: m.get(h) for h in ARRANGEMENT_OUTPUT_HEADERS}
+                )
+            # 队伍之间空一行
+            combined_rows.append({h: None for h in ARRANGEMENT_OUTPUT_HEADERS})
+
         sheet_name = sheet or f"名单_{period}"
         self.excel_io.write_sheet(
-            target, rows, headers=ARRANGEMENT_OUTPUT_HEADERS, sheet=sheet_name
+            target,
+            combined_rows,
+            headers=ARRANGEMENT_OUTPUT_HEADERS,
+            sheet=sheet_name,
         )
-        return ordered, sheet_name
+        return ordered, team_results, sheet_name

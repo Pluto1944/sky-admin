@@ -72,6 +72,7 @@ CAMP_COLUMN_KEYWORDS = {
 ARRANGEMENT_OUTPUT_HEADERS = [
     "rank_order",
     "league_type",
+    "team_name",        # 队伍分配结果
     "player_tag",
     "account_name",
     "player_name",
@@ -79,5 +80,57 @@ ARRANGEMENT_OUTPUT_HEADERS = [
     "prev_rank",
     "trophies",
     "match_value",
+    "history_score",
+]
+
+
+# ---------------------------------------------------------------------------
+# 队伍填充配置（队伍分配阶段使用）
+# ---------------------------------------------------------------------------
+
+# 参加实战的最低匹配值：低于此值的账号强制转为壳子
+COMBAT_MIN_MATCH_VALUE = 600
+
+# TEAMS 列表：按顺序定义所有联赛队伍，"category"列决定收 combat 还是 shell。
+# reserved_slots: >0 留空位 / 0 不预留 / <0 多招备选(容量=member_count+abs(reserved))
+# 列表顺序即分配优先级：实战团队从前到后依次填充，壳子团队同理。
+TEAMS = [
+    # ===== 实战队伍 =====
+    {"name": "实战一队", "member_count": 15, "league_level": "冠军一",
+     "clan_tag": "#XXXXX", "manager": "xxx",
+     "category": "combat", "reserved_slots": 0},
+    {"name": "实战二队", "member_count": 15, "league_level": "冠军二",
+     "clan_tag": "#YYYYY", "manager": "yyy",
+     "category": "combat", "reserved_slots": 0},
+    {"name": "实战三队", "member_count": 15, "league_level": "冠军三",
+     "clan_tag": "#ZZZZZ", "manager": "zzz",
+     "category": "combat", "reserved_slots": 0},
+    {"name": "实战四队", "member_count": 15, "league_level": "冠军四",
+     "clan_tag": "#WWWWW", "manager": "www",
+     "category": "combat", "reserved_slots": 0},
+
+    # ===== 壳子队伍 =====
+    {"name": "壳子一队", "member_count": 15, "league_level": "大师一",
+     "clan_tag": "#AAAAA", "manager": "aaa",
+     "category": "shell", "reserved_slots": 0},
+    {"name": "壳子二队", "member_count": 15, "league_level": "大师二",
+     "clan_tag": "#BBBBB", "manager": "bbb",
+     "category": "shell", "reserved_slots": 0},
+    {"name": "壳子三队", "member_count": 15, "league_level": "大师三",
+     "clan_tag": "#CCCCC", "manager": "ccc",
+     "category": "shell", "reserved_slots": 0},
+    {"name": "壳子四队", "member_count": 15, "league_level": "大师四",
+     "clan_tag": "#DDDDD", "manager": "ddd",
+     "category": "shell", "reserved_slots": 0},
+]
+
+# 队伍分配输出表头（队伍详情的列）
+TEAM_OUTPUT_HEADERS = [
+    "rank_order",
+    "account_name",
+    "player_name",
+    "match_value",
+    "league_type",
+    "trophies",
     "history_score",
 ]

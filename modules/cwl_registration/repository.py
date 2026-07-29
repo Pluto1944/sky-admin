@@ -93,3 +93,11 @@ class RegistrationRepository:
             (league_type, rank_order, reg_id),
         )
         self.conn.commit()
+
+    def update_team_name(self, reg_id: int, team_name: str) -> None:
+        """回写该报名记录分配到哪个队伍。"""
+        self.conn.execute(
+            "UPDATE registrations SET team_name = ? WHERE id = ?",
+            (team_name, reg_id),
+        )
+        self.conn.commit()
