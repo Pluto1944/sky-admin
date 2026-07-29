@@ -415,9 +415,10 @@ accounts (COC权威)                    registrations (报名自包含)
 ```python
 {
     "name": "实战一队",          # 队伍名称
-    "member_count": 15,          # 标准人数（15 或 30）
-    "league_level": "冠军一",    # 联赛等级
     "clan_tag": "#XXXXX",        # 部落标签
+    "leader": "",                # 领队（默认空）
+    "member_count": 15,          # 标准人数（15 或 30）
+    "league_level": "",          # 联赛等级（默认空）
     "manager": "xxx",            # 管理员
     "category": "combat",        # combat=实战 / shell=壳子
     "reserved_slots": 0,         # >0 留空位 / 0 不预留 / <0 多招备选

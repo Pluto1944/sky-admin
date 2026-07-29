@@ -50,9 +50,10 @@ def _make_team(name: str, member_count: int, category: str,
                reserved_slots: int = 0) -> dict:
     return {
         "name": name,
-        "member_count": member_count,
-        "league_level": "冠军一",
         "clan_tag": "#TAG",
+        "leader": "",
+        "member_count": member_count,
+        "league_level": "",
         "manager": "admin",
         "category": category,
         "reserved_slots": reserved_slots,

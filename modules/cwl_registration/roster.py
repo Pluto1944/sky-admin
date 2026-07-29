@@ -185,10 +185,13 @@ class LeagueArranger:
                 cap_info = f"{tr['filled_count']}/{tr['member_count'] - tr['reserved_empty']}+{tr['reserved_empty']}"
             else:
                 cap_info = f"{tr['filled_count']}/{tr['member_count']}"
+            league_info = f"({tr.get('league_level')}) " if tr.get("league_level") else ""
+            leader_info = f"领队:{tr.get('leader', '')} " if tr.get("leader") else ""
             title = (
                 f"{cat}: {tr['team_name']} "
-                f"({tr.get('league_level', '')}) "
+                f"{league_info}"
                 f"{tr.get('clan_tag', '')} "
+                f"{leader_info}"
                 f"管理:{tr.get('manager', '')} "
                 f"满员:{cap_info}"
             )

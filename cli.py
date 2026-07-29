@@ -132,6 +132,11 @@ def _print_arrange_report(ordered: list[dict], team_results: list[dict],
         filled = tr["filled_count"]
         cap    = tr["member_count"]
         reserved = tr.get("reserved_empty", 0)
+        clan_tag  = tr.get("clan_tag", "")
+        leader    = tr.get("leader", "")
+        extra = f" {clan_tag}" if clan_tag else ""
+        if leader:
+            extra += f" 领队:{leader}"
 
         if filled == cap and reserved == 0:
             status = " 已满"
@@ -142,7 +147,7 @@ def _print_arrange_report(ordered: list[dict], team_results: list[dict],
         else:
             status = f" 缺{cap - filled}"
 
-        print(f"    [{cat_label}] {name:<10}  {filled}/{cap}{status}")
+        print(f"    [{cat_label}] {name:<10}{extra}  {filled}/{cap}{status}")
     print()
 
     # 未分配明细

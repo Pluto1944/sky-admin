@@ -92,9 +92,10 @@ tests/                       # 按模块归类：shared / player / cwl_registrat
 | 字段 | 说明 |
 |------|------|
 | `name` | 队伍名称，如"实战一队" |
-| `member_count` | 标准人数（15 或 30） |
-| `league_level` | 联赛等级，如"冠军一" |
 | `clan_tag` | 部落标签 `#XXXXX` |
+| `leader` | 领队（默认空字符串） |
+| `member_count` | 标准人数（15 或 30） |
+| `league_level` | 联赛等级（默认空字符串） |
 | `manager` | 管理员名称 |
 | `category` | `combat`（实战）或 `shell`（壳子） |
 | `reserved_slots` | 预留位置：`>0` 留空位 / `0` 不预留 / `<0` 多招备选 |

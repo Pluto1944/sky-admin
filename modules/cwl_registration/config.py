@@ -96,32 +96,19 @@ COMBAT_MIN_MATCH_VALUE = 600
 # 列表顺序即分配优先级：实战团队从前到后依次填充，壳子团队同理。
 TEAMS = [
     # ===== 实战队伍 =====
-    {"name": "实战一队", "member_count": 15, "league_level": "冠军一",
-     "clan_tag": "#XXXXX", "manager": "xxx",
-     "category": "combat", "reserved_slots": 0},
-    {"name": "实战二队", "member_count": 15, "league_level": "冠军二",
-     "clan_tag": "#YYYYY", "manager": "yyy",
-     "category": "combat", "reserved_slots": 0},
-    {"name": "实战三队", "member_count": 15, "league_level": "冠军三",
-     "clan_tag": "#ZZZZZ", "manager": "zzz",
-     "category": "combat", "reserved_slots": 0},
-    {"name": "实战四队", "member_count": 15, "league_level": "冠军四",
-     "clan_tag": "#WWWWW", "manager": "www",
-     "category": "combat", "reserved_slots": 0},
+    {"name": "泰坦二",    "clan_tag": "#2QQ",       "leader": "", "member_count": 15, "league_level": "", "manager": "xxx", "category": "combat", "reserved_slots": 0},
+    {"name": "冠一 一队",  "clan_tag": "#2GGGGGGG",  "leader": "", "member_count": 15, "league_level": "", "manager": "yyy", "category": "combat", "reserved_slots": 0},
+    {"name": "冠一 二队",  "clan_tag": "#2JP8PLQLJ", "leader": "", "member_count": 15, "league_level": "", "manager": "zzz", "category": "combat", "reserved_slots": 0},
+    {"name": "冠三",      "clan_tag": "#2QQQQ2G",   "leader": "", "member_count": 15, "league_level": "", "manager": "www", "category": "combat", "reserved_slots": 0},
+    {"name": "大一",      "clan_tag": "#2R8RCPY0J",  "leader": "", "member_count": 15, "league_level": "", "manager": "www", "category": "combat", "reserved_slots": 0},
+    {"name": "大一",      "clan_tag": "#2C9QCL892",  "leader": "", "member_count": 30, "league_level": "", "manager": "www", "category": "combat", "reserved_slots": 0},
+    {"name": "大一",      "clan_tag": "#2CU9JPYU8",  "leader": "", "member_count": 30, "league_level": "", "manager": "www", "category": "combat", "reserved_slots": 0},
 
     # ===== 壳子队伍 =====
-    {"name": "壳子一队", "member_count": 15, "league_level": "大师一",
-     "clan_tag": "#AAAAA", "manager": "aaa",
-     "category": "shell", "reserved_slots": 0},
-    {"name": "壳子二队", "member_count": 15, "league_level": "大师二",
-     "clan_tag": "#BBBBB", "manager": "bbb",
-     "category": "shell", "reserved_slots": 0},
-    {"name": "壳子三队", "member_count": 15, "league_level": "大师三",
-     "clan_tag": "#CCCCC", "manager": "ccc",
-     "category": "shell", "reserved_slots": 0},
-    {"name": "壳子四队", "member_count": 15, "league_level": "大师四",
-     "clan_tag": "#DDDDD", "manager": "ddd",
-     "category": "shell", "reserved_slots": 0},
+    {"name": "大一",      "clan_tag": "#AAAAA",      "leader": "", "member_count": 30, "league_level": "", "manager": "aaa", "category": "shell",  "reserved_slots": 0},
+    {"name": "大三",      "clan_tag": "#BBBBB",      "leader": "", "member_count": 30, "league_level": "", "manager": "bbb", "category": "shell",  "reserved_slots": 0},
+    {"name": "水一",      "clan_tag": "#CCCCC",      "leader": "", "member_count": 30, "league_level": "", "manager": "ccc", "category": "shell",  "reserved_slots": 0},
+    {"name": "水二",      "clan_tag": "#DDDDD",      "leader": "", "member_count": 30, "league_level": "", "manager": "ddd", "category": "shell",  "reserved_slots": 0},
 ]
 
 # 队伍分配输出表头（队伍详情的列）

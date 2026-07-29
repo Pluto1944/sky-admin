@@ -102,6 +102,7 @@ def _build_team_result(team: dict, members: list[dict]) -> dict:
         "team_name": team["name"],
         "category": team["category"],
         "clan_tag": team.get("clan_tag"),
+        "leader": team.get("leader", ""),
         "league_level": team.get("league_level"),
         "manager": team.get("manager"),
         "member_count": team["member_count"],
