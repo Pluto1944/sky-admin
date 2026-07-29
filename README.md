@@ -124,7 +124,7 @@ tests/                       # 按模块归类：shared / player / cwl_registrat
 | `CAMP_CLAN_TAG` | `cwl_registration/config.py` | 战营部落标签（`#2QQ`，成员即战营账号） |
 | `EXCLUDED_CAMP_NAMES` | `cwl_registration/config.py` | 战营排除名单：不参与排序的账号昵称集合，在导入和排序两阶段过滤 |
 | `TEAMS` | `cwl_registration/config.py` | 队伍配置列表：每队含名称/人数/联赛等级/标签/管理/类别(combat\|shell)/预留位置 |
-| `COMBAT_MIN_MATCH_VALUE` | `cwl_registration/config.py` | 实战最低匹配值门槛：低于此值的 combat 账号强制转壳子 |
+| `COMBAT_MIN_MATCH_VALUE` | `cwl_registration/config.py` | 实战最低匹配值门槛：低于此值的普通实战账号强制转壳子（战营账号豁免） |
 | `IO_ADAPTER` | `shared/config/common.py` | IO 适配器：`tencent`（腾讯文档）或默认本地 xlsx |
 
 ## 运行测试
