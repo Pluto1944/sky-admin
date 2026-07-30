@@ -73,6 +73,7 @@ ARRANGEMENT_OUTPUT_HEADERS = [
     "rank_order",
     "league_type",
     "team_name",        # 队伍分配结果
+    "movement",         # 升降级标识（v2.4）↑升级/↓降级/空
     "player_tag",
     "account_name",
     "player_name",
