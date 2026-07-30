@@ -236,22 +236,32 @@ class LeagueArranger:
             # 交换后重建 ordered_with_team 的 team_name 映射
             rebuild_assignment_map(ordered_with_team, team_results)
 
-            # 注入升降级标识到成员数据（供导出展示）
+            # 注入升降级 + 新人标识到成员数据（供导出展示）
+            movement_map: dict[str, str] = {}
             if movements:
-                movement_map: dict[str, str] = {}
                 for m in movements:
                     direction = "↑升级" if m["direction"] == "promotion" else "↓降级"
                     movement_map[m["account_name"]] = f"{direction}({m['total_stars']}★)"
-                for tr in team_results:
-                    for member in tr["members"]:
-                        name = member.get("account_name")
-                        if name and name in movement_map:
-                            member["movement"] = movement_map[name]
-                for item in ordered_with_team:
-                    name = item.get("account_name")
-                    if name and name in movement_map:
-                        item["movement"] = movement_map[name]
 
+            new_count = 0
+            for tr in team_results:
+                if tr["category"] != LEAGUE_COMBAT:
+                    continue
+                for member in tr["members"]:
+                    name = member.get("account_name")
+                    if not name:
+                        continue
+                    if name in movement_map:
+                        member["movement"] = movement_map[name]
+                    elif name not in star_data:
+                        member["movement"] = "新"
+                        new_count += 1
+            for item in ordered_with_team:
+                name = item.get("account_name")
+                if name and name in movement_map:
+                    item["movement"] = movement_map[name]
+
+            if movements:
                 print("\n[升降级] 本月人员调整：")
                 for m in movements:
                     print(
@@ -259,6 +269,8 @@ class LeagueArranger:
                         f"{movement_map[m['account_name']]}: "
                         f"{m['from_team']} → {m['to_team']}"
                     )
+            if new_count:
+                print(f"\n[新人] {new_count} 名实战队员本月新进（上月未参赛）")
 
         # 回写 team_name（升降级后可能已变化）
         for item in ordered_with_team:
