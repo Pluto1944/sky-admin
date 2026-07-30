@@ -31,7 +31,7 @@ from modules.cwl_registration.sorter import sort_accounts
 from modules.cwl_registration.team_filler import fill_teams
 from modules.player.service import PlayerService
 from modules.war_result.repository import ResultRepository
-from shared.config.common import LEAGUE_COMBAT, LEAGUE_SHELL
+from shared.config.common import LEAGUE_COMBAT, LEAGUE_SHELL, MEMBERSHIP_LEFT
 from shared.io_adapter.base import ExcelIO
 
 
@@ -174,6 +174,40 @@ class LeagueArranger:
                     star_data[account_name] = stars
         return star_data
 
+    def _load_combat_team_map(
+        self, period: str
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        """从 results 表加载 CWL 队伍归属。
+
+        返回 (prev_teams, team_clan_tags):
+          - prev_teams: {account_name: team_name}，用于"未报名/离开"人员原队查找。
+          - team_clan_tags: {team_name: clan_tag}，用于显示层补充 clan_tag
+            （覆盖 TEAMS 配置中未单独列出的队伍名，如"大一 A/B/C"）。
+
+        team_name / clan_tag 存储在 raw_metrics 中（由 fetch_cwl_data 导入时写入）。
+        与 _load_combat_star_data 同源（同为 results 表同 period），保证队伍
+        信息和星数一致。替代反查 registrations（后者依赖 arrange 回写 team_name，
+        冷启动场景容易缺失）。
+        """
+        if self.result_repo is None:
+            return {}, {}
+
+        rows = self.result_repo.get_results_by_period(period, league_type=LEAGUE_COMBAT)
+        team_map: dict[str, str] = {}
+        team_clan_tags: dict[str, str] = {}
+        for r in rows:
+            tag = r.get("player_tag")
+            metrics = r.get("raw_metrics") or {}
+            team_name = metrics.get("team_name")
+            clan_tag = metrics.get("clan_tag")
+            if tag and team_name:
+                account_name = self.player_service.resolve_name_by_tag(tag)
+                if account_name:
+                    team_map[account_name] = team_name
+                if clan_tag:
+                    team_clan_tags.setdefault(team_name, clan_tag)
+        return team_map, team_clan_tags
+
     def arrange(
         self,
         period: str,
@@ -286,15 +320,33 @@ class LeagueArranger:
             all_absent = [(n, star_data[n]) for n in sorted(star_data)
                           if n in star_data and n not in combat_names]
             to_shell = [(n, s) for n, s in all_absent if n in shell_names]
-            left = [(n, s) for n, s in all_absent if n not in shell_names]
+            absent_not_in_shell = [(n, s) for n, s in all_absent if n not in shell_names]
+
+            # 区分"未报名" vs "离开"：查 accounts.membership_status
+            not_registered: list[tuple[str, int]] = []
+            left_camp: list[tuple[str, int]] = []
+            for name, stars in absent_not_in_shell:
+                tag = self.player_service.resolve_tag_by_name(name)
+                if tag:
+                    acc = self.player_service.get(tag)
+                    if acc and acc.get("membership_status") == MEMBERSHIP_LEFT:
+                        left_camp.append((name, stars))
+                    else:
+                        not_registered.append((name, stars))
+                else:
+                    left_camp.append((name, stars))
 
             if to_shell:
                 print(f"\n[转壳] {len(to_shell)} 人从实战队转到壳子队：")
                 for name, stars in to_shell:
                     print(f"  {name} ({stars}星)")
-            if left:
-                print(f"\n[离开] {len(left)} 人离开战营或未报名：")
-                for name, stars in left:
+            if not_registered:
+                print(f"\n[未报名] {len(not_registered)} 人仍在联盟但未报名：")
+                for name, stars in not_registered:
+                    print(f"  {name} ({stars}星)")
+            if left_camp:
+                print(f"\n[离开] {len(left_camp)} 人已退出联盟：")
+                for name, stars in left_camp:
                     print(f"  {name} ({stars}星)")
 
             if new_count:
@@ -394,12 +446,51 @@ class LeagueArranger:
             }
             all_absent = [(n, star_data[n]) for n in sorted(star_data) if n not in combat_names]
             to_shell = [(n, s) for n, s in all_absent if n in shell_names]
-            left = [(n, s) for n, s in all_absent if n not in shell_names]
+            absent_not_in_shell = [(n, s) for n, s in all_absent if n not in shell_names]
 
-            if to_shell or left:
-                prev_assign = _prev_period(_prev_period(period))
-                prev_teams = self.reg_repo.prev_team_assignments(prev_assign) if prev_assign else {}
+            # 区分"未报名" vs "离开"：查 accounts.membership_status
+            not_registered: list[tuple[str, int]] = []
+            left_camp: list[tuple[str, int]] = []
+            for name, stars in absent_not_in_shell:
+                tag = self.player_service.resolve_tag_by_name(name)
+                if tag:
+                    acc = self.player_service.get(tag)
+                    if acc and acc.get("membership_status") == MEMBERSHIP_LEFT:
+                        left_camp.append((name, stars))
+                    else:
+                        not_registered.append((name, stars))
+                else:
+                    left_camp.append((name, stars))
+
+            if to_shell or not_registered or left_camp:
+                # "未报名/离开"人员的原队直接从 results 表查（CWL 星数同源），
+                # 替代反查 registrations（后者依赖 arrange 回写 team_name，冷启动易缺失）
+                reg_period = _prev_period(period)
+                if reg_period:
+                    prev_teams, team_clan_tags = self._load_combat_team_map(reg_period)
+                else:
+                    prev_teams, team_clan_tags = {}, {}
                 team_order = [t["name"] for t in (teams or TEAMS)]
+
+                # 构建队伍信息查找表：{name: "泰坦二 (大师一 #2QQ)"}
+                _tcfg = teams or TEAMS
+                team_info: dict[str, str] = {}
+                for t in _tcfg:
+                    name = t["name"]
+                    parts = [name]
+                    extras = [x for x in (t.get("league_level"), t.get("clan_tag")) if x]
+                    if extras:
+                        parts.append(f"({' '.join(extras)})")
+                    info = " ".join(parts)
+                    if name in team_info:
+                        team_info[name] = f"{team_info[name]} | {info}"
+                    else:
+                        team_info[name] = info
+
+                # 补充 results 中 TEAMS 配置未列出的队伍（如"大一 A/B/C"）的 clan_tag
+                for tn, ct in team_clan_tags.items():
+                    if tn not in team_info and ct:
+                        team_info[tn] = f"{tn} ({ct})"
 
                 combined_rows.append({h: None for h in ARRANGEMENT_OUTPUT_HEADERS})
                 combined_rows.append({
@@ -407,13 +498,16 @@ class LeagueArranger:
                     "rank_order": f"=== 缺席老兵（共{len(all_absent)}人，上月有CWL星数，本月未进实战队）===",
                 })
 
-                for label, group in [("转壳", to_shell), ("离开/未报名", left)]:
+                tag_map = {"转壳": "↓转壳", "未报名": "未报名", "离开": "离开"}
+                for label, group in [("转壳", to_shell), ("未报名", not_registered), ("离开", left_camp)]:
                     if not group:
                         continue
+
                     combined_rows.append({
                         **{h: None for h in ARRANGEMENT_OUTPUT_HEADERS},
                         "rank_order": f"  [{label}] {len(group)}人",
                     })
+
                     # 按原队分组
                     by_team: dict[str, list[tuple[str, int]]] = {}
                     for name, stars in group:
@@ -424,14 +518,17 @@ class LeagueArranger:
                                 [t for t in sorted(by_team) if t not in team_order]
                     for t in ordered_t:
                         members = by_team[t]
+                        t_display = team_info.get(t, t)
                         for name, stars in sorted(members, key=lambda x: -x[1]):
-                            tag = "↓转壳" if label == "转壳" else "离开"
                             combined_rows.append({
                                 **{h: None for h in ARRANGEMENT_OUTPUT_HEADERS},
                                 "account_name": name,
-                                "movement": f"{tag}({stars}★)",
-                                "team_name": t if t != "未知" else "",
+                                "player_tag": self.player_service.resolve_tag_by_name(name),
+                                "movement": f"{tag_map[label]}({stars}★)",
+                                "team_name": t_display,
                             })
+                        # 队伍之间空行
+                        combined_rows.append({h: None for h in ARRANGEMENT_OUTPUT_HEADERS})
 
         sheet_name = sheet or f"名单_{period}"
         self.excel_io.write_sheet(

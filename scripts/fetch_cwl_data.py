@@ -20,8 +20,10 @@ import os
 import sqlite3
 import sys
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -52,8 +54,28 @@ def _normalize_tag(tag: str) -> str:
     return tag.strip().lstrip("#").upper()
 
 
+def _fetch_one_war(client: CocApiClient, wt: str, normalized_tag: str) -> dict | None:
+    """拉取单场 war 详情，返回我方成员数据（失败返回 None）。"""
+    try:
+        d = client._get(f"/clanwarleagues/wars/{client._encode_tag(wt)}")
+    except Exception:
+        return None
+
+    clan_side = d.get("clan", {})
+    opp_side = d.get("opponent", {})
+
+    if _normalize_tag(clan_side.get("tag", "")) == normalized_tag:
+        my_side = clan_side
+    elif _normalize_tag(opp_side.get("tag", "")) == normalized_tag:
+        my_side = opp_side
+    else:
+        return None
+
+    return {"members": my_side.get("members", [])}
+
+
 def _fetch_team_cwl(client: CocApiClient, team_name: str, clan_tag: str) -> dict | None:
-    """拉取一个队伍的 CWL 战绩。"""
+    """拉取一个队伍的 CWL 战绩（并发拉取 war 详情）。"""
     encoded = client._encode_tag(clan_tag)
     normalized = _normalize_tag(clan_tag)
 
@@ -63,42 +85,39 @@ def _fetch_team_cwl(client: CocApiClient, team_name: str, clan_tag: str) -> dict
         print(f"  {team_name}({clan_tag}): ❌ {e}")
         return None
 
-    my_war_tags = []
+    my_war_tags: list[str] = []
     for rd in lg.get("rounds", []):
         my_war_tags.extend(rd.get("warTags", []))
 
-    print(f"  {team_name}: {len(lg.get('clans',[]))}部 {len(lg.get('rounds',[]))}轮 {len(my_war_tags)}wars")
+    print(f"  {team_name}: {len(lg.get('clans',[]))}部 {len(lg.get('rounds',[]))}轮 {len(my_war_tags)}wars", end="", flush=True)
 
     player_stats: dict[str, dict] = defaultdict(
         lambda: {"tag": "", "name": "", "total_stars": 0, "total_attacks": 0},
     )
     n_wars = 0
 
-    for wt in my_war_tags:
-        try:
-            d = client._get(f"/clanwarleagues/wars/{client._encode_tag(wt)}")
-        except Exception:
-            continue
+    # 并发拉取所有 war 详情
+    max_workers = min(8, len(my_war_tags))
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {
+            pool.submit(_fetch_one_war, client, wt, normalized): wt
+            for wt in my_war_tags
+        }
+        for future in as_completed(futures):
+            result = future.result()
+            if result is None:
+                continue
+            n_wars += 1
+            for m in result.get("members", []):
+                ptag = m["tag"]
+                stars = sum(a.get("stars", 0) for a in m.get("attacks", []))
+                rec = player_stats[ptag]
+                rec["tag"] = ptag
+                rec["name"] = m["name"]
+                rec["total_stars"] += stars
+                rec["total_attacks"] += len(m.get("attacks", []))
 
-        clan_side = d.get("clan", {})
-        opp_side = d.get("opponent", {})
-
-        if _normalize_tag(clan_side.get("tag", "")) == normalized:
-            my_side = clan_side
-        elif _normalize_tag(opp_side.get("tag", "")) == normalized:
-            my_side = opp_side
-        else:
-            continue
-
-        n_wars += 1
-        for m in my_side.get("members", []):
-            ptag = m["tag"]
-            stars = sum(a.get("stars", 0) for a in m.get("attacks", []))
-            rec = player_stats[ptag]
-            rec["tag"] = ptag
-            rec["name"] = m["name"]
-            rec["total_stars"] += stars
-            rec["total_attacks"] += len(m.get("attacks", []))
+    print(f" → {n_wars}场已解析")
 
     max_possible = 3 * n_wars
     players = []
@@ -189,7 +208,11 @@ def _import_to_results(data_dir: Path, reg_period: str) -> tuple[int, int]:
                    VALUES (?, ?, ?, ?)
                    ON CONFLICT(player_tag, period, league_type) DO UPDATE SET
                    raw_metrics = excluded.raw_metrics""",
-                (tag, reg_period, LEAGUE_COMBAT, json.dumps({"total_stars": p["total_stars"]})),
+                (tag, reg_period, LEAGUE_COMBAT, json.dumps({
+                    "total_stars": p["total_stars"],
+                    "team_name": team.get("team_name"),
+                    "clan_tag": team.get("clan_tag"),
+                })),
             )
             n_ok += 1
     conn.commit()

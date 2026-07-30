@@ -54,7 +54,7 @@ JOIN_COMBAT_TRUE_TEXTS = {"是", "yes", "y", "true", "1", "参加"}
 #     不参与排序、不出现在最终联赛名单中。此层保证旧残留记录也一并过滤。
 # ---------------------------------------------------------------------------
 CAMP_CLAN_TAG = "#2QQ"                       # 战营部落标签（成员即战营账号）
-EXCLUDED_CAMP_NAMES: set[str] = {"Pluto2QQ", "落花归尘", "misael", "AltriaPendragon", "葉丶"} # 排除名单（不参与排序），如 {"张三", "李四"}
+EXCLUDED_CAMP_NAMES: set[str] = {"Pluto2QQ", "落花归尘", "misael", "AltriaPendragon", "葉丶", "飞的煎饼"} # 排除名单（不参与排序），如 {"张三", "李四"}
 
 # 旧的 Excel 战营名单 sheet 配置（已弃用，保留仅为兼容历史报名表结构解析）。
 CAMP_SHEET_NAME = "战营名单"
