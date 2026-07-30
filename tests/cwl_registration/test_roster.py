@@ -26,7 +26,7 @@ def test_arrange_orders_combat_camp_first_then_normal_then_shell(player_service,
     arranger = LeagueArranger(player_service, reg_repo, FakeExcelIO())
 
     # 报名在 2026-07，联赛在 2026-08
-    ordered, _team_results, _movements = arranger.arrange("2026-08", combat_min_match_value=0)
+    ordered, _team_results, _movements, _star_data = arranger.arrange("2026-08", combat_min_match_value=0)
 
     # 战营 #B 排最前，其次普通实战 #A，最后壳子 #C
     assert [x["player_tag"] for x in ordered] == ["#B", "#A", "#C"]
@@ -40,7 +40,7 @@ def test_arrange_assigns_team_names(player_service, reg_repo):
     _seed(player_service, reg_repo)
     arranger = LeagueArranger(player_service, reg_repo, FakeExcelIO())
 
-    ordered, team_results, _movements = arranger.arrange("2026-08", combat_min_match_value=0)
+    ordered, team_results, _movements, _star_data = arranger.arrange("2026-08", combat_min_match_value=0)
 
     # 3 人应分配到队伍
     assert all(x.get("team_name") for x in ordered)

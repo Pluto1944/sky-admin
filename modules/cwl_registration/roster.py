@@ -294,7 +294,7 @@ class LeagueArranger:
                     item["reg_id"], item["team_name"]
                 )
 
-        return ordered_with_team, team_results, movements
+        return ordered_with_team, team_results, movements, star_data
 
     def arrange_and_export(
         self,
@@ -313,7 +313,7 @@ class LeagueArranger:
         sheet 缺省按月份命名为 "名单_<period>"。
         返回 (含 team_name 排序名单, 队伍分配结果, 升降级日志, 实际 sheet 名)。
         """
-        ordered, team_results, movements = self.arrange(
+        ordered, team_results, movements, star_data = self.arrange(
             period, weights, teams, combat_min_match_value, star_data
         )
 
@@ -366,6 +366,50 @@ class LeagueArranger:
                 )
             # 队伍之间空一行
             combined_rows.append({h: None for h in ARRANGEMENT_OUTPUT_HEADERS})
+
+        # 第三部分：缺席老兵（上月有星数但本月未分配）
+        if star_data:
+            combat_names = {
+                m.get("account_name")
+                for tr in team_results if tr["category"] == LEAGUE_COMBAT
+                for m in tr["members"]
+            }
+            # 缺席：有星数但不在任何实战队
+            absent = [(n, s) for n, s in star_data.items() if n not in combat_names]
+            if absent:
+                # 上上次编排的队伍归属
+                prev_assign = _prev_period(_prev_period(period))
+                prev_teams = self.reg_repo.prev_team_assignments(prev_assign) if prev_assign else {}
+                # 按原来队伍分组
+                by_team: dict[str, list[tuple[str, int]]] = {}
+                for name, stars in absent:
+                    t = prev_teams.get(name, "未知")
+                    by_team.setdefault(t, []).append((name, stars))
+
+                # 队伍排序：先按实战队优先级，再壳子队
+                team_order = [t["name"] for t in (teams or TEAMS)]
+                ordered_teams = [t for t in team_order if t in by_team] + \
+                                [t for t in sorted(by_team) if t not in team_order]
+
+                combined_rows.append({h: None for h in ARRANGEMENT_OUTPUT_HEADERS})
+                combined_rows.append({
+                    **{h: None for h in ARRANGEMENT_OUTPUT_HEADERS},
+                    "rank_order": f"=== 缺席老兵（共{len(absent)}人，上月有CWL星数，本月未进实战队）===",
+                })
+
+                for t in ordered_teams:
+                    members = by_team[t]
+                    combined_rows.append({
+                        **{h: None for h in ARRANGEMENT_OUTPUT_HEADERS},
+                        "rank_order": f"原队: {t} ({len(members)}人)",
+                    })
+                    for name, stars in sorted(members, key=lambda x: -x[1]):
+                        combined_rows.append({
+                            **{h: None for h in ARRANGEMENT_OUTPUT_HEADERS},
+                            "account_name": name,
+                            "movement": f"缺席({stars}★)",
+                            "team_name": prev_teams.get(name, ""),
+                        })
 
         sheet_name = sheet or f"名单_{period}"
         self.excel_io.write_sheet(
