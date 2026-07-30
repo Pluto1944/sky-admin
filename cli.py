@@ -320,6 +320,37 @@ def cmd_coc_sync(args) -> None:
         print(f"[warn] 以下部落同步失败：{', '.join(stats['failed_clans'])}", file=sys.stderr)
 
 
+def cmd_publish_results(args) -> None:
+    """将编排结果（Part4 网格）发布到最终报名结果公示文档。
+
+    从 registrations 表读取编排数据，重建 Part4 网格，写入 PUBLISH_DOC_FILE_ID。
+    文档结构：前 20 行固定文字（硬编码） + Part4 队伍编排网格。
+    """
+    to = args.to or config.IO_ADAPTER
+    if to != "tencent":
+        print("错误: publish-results 仅支持腾讯文档（--to tencent）。", file=sys.stderr)
+        raise SystemExit(1)
+
+    target = args.file_id or os.environ.get("PUBLISH_DOC_FILE_ID")
+    if not target:
+        print(
+            "错误: 需用 --file-id 指定目标文档，或设置环境变量 PUBLISH_DOC_FILE_ID。",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    db = make_db()
+    player_service = PlayerService(PlayerRepository(db.conn))
+    reg_repo = RegistrationRepository(db.conn)
+    result_repo = ResultRepository(db.conn)
+    arranger = LeagueArranger(player_service, reg_repo, make_excel_io(to), result_repo)
+    sheet_name = arranger.publish_part4_to_doc(
+        args.period,
+        target,
+    )
+    print(f"已发布报名结果: {sheet_name} → 腾讯文档 {target}")
+
+
 def cmd_reset_db(args) -> None:
     if not args.yes:
         ans = input("将清空并重建 accounts/registrations/results（历史数据不可恢复），输入 yes 确认: ")
@@ -412,6 +443,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="部落标签，如 '#2QQ'；可多次指定，覆盖 config.CLANS（不传则用配置）",
     )
     p5.set_defaults(func=cmd_coc_sync)
+
+    p_pub = sub.add_parser("publish-results", help="发布编排结果（Part4）到最终报名结果公示文档")
+    p_pub.add_argument("--period", required=True, help="联赛月份，如 2026-08")
+    p_pub.add_argument(
+        "--file-id", default=None,
+        help="目标腾讯文档 fileId（缺省读 PUBLISH_DOC_FILE_ID）",
+    )
+    p_pub.add_argument(
+        "--to", choices=("local", "tencent"), default="tencent",
+        help="写入目标（仅支持 tencent）",
+    )
+    p_pub.set_defaults(func=cmd_publish_results)
 
     p6 = sub.add_parser("reset-db", help="清空并重建数据库（历史数据清零）")
     p6.add_argument("-y", "--yes", action="store_true", help="跳过二次确认")

@@ -603,3 +603,150 @@ class LeagueArranger:
             highlight_rows=highlight_rows,
         )
         return ordered, team_results, movements, sheet_name
+
+    # 公示文档前 20 行固定文字（不随月份变化）
+    PUBLISH_FIXED_ROWS: list[list[str]] = [
+        ["苍穹联赛报名", "", "", "", ""],
+        ["联赛开始，各部落暗号为999，加盟部落暗号找自己首领", "", "", "", ""],
+        ["惑音天城 群英殿 火星 souls Avalon默认不开联赛", "", "", "", ""],
+        ["1号下午4点～晚上10点开联赛，从上往下开，人够就发车，早点到", "", "", "", ""],
+        ["miss想念香香", "", "", "", ""],
+        ["打壳子的规则：前12小时打对位，后12小时随意打。", "", "", "", ""],
+        ["额外规则：冠二、冠三保级和大一定级管理捐联赛防守援兵给一份额外，壳子管理给一份额外", "", "", "", ""],
+        ["额外规则：混营日常捐 部落战防守援兵给一份额外：天下恶魔 Ik8888 日界定", "", "", "", ""],
+        ["额外规则：其余按排行榜从上往下分配，壳子中多次向下偷星的跳过", "", "", "", ""],
+        ["", "", "", "", ""],
+        ["报名填以下收集表", "", "", "", ""],
+        ["【腾讯文档】苍穹联盟联赛报名表（正式）", "", "", "", ""],
+        ["https://docs.qq.com/form/page/DUnlNeWlyQ21RVElX", "", "", "", ""],
+        ["", "", "", "", ""],
+        ["这里仅展示最终报名结果", "", "", "", ""],
+        ["月底30号这里展示联赛安排，等群里通知", "", "", "", ""],
+        ["", "", "", "", ""],
+        ["Excel工作薄", "", "", "", ""],
+        ["sheet名称", "\"公式一\"", "", "", ""],
+        ["", "", "", "", ""],
+    ]
+
+    def publish_part4_to_doc(
+        self,
+        period: str,
+        publish_doc_id: str,
+    ) -> str:
+        """将 Part4（联赛名单排布网格）发布到最终报名结果公示文档。
+
+        文档结构：前 20 行固定文字 + 第 21 行起为 Part4 队伍编排网格。
+
+        Args:
+            period: 联赛月份，如 "2026-08"
+            publish_doc_id: 目标腾讯文档 fileId
+
+        Returns:
+            实际创建的 sheet 名称
+        """
+        from shared.io_adapter.tencent_doc import TencentDocAdapter
+        if not isinstance(self.excel_io, TencentDocAdapter):
+            raise RuntimeError("publish_part4_to_doc 仅支持腾讯文档适配器")
+
+        # 1. 计算目标 sheet 名
+        y, m = period.split("-")
+        short_year = y[2:]  # "26"
+        month_num = str(int(m))  # "8"
+        sheet_name = f"{short_year}.{month_num}月联赛 报名结果"
+
+        # 2. 从 registrations 表重建 team_results
+        team_results = self._rebuild_team_results(period)
+
+        # 3. 生成 Part4 网格
+        grid, _title_indices = self._build_part4_grid(team_results)
+
+        # 4. 拼接：前 20 行固定文字 + Part4 网格
+        combined_rows = self.PUBLISH_FIXED_ROWS + grid
+
+        # 5. 计算需要的行列数
+        need_cols = max((len(row) for row in combined_rows), default=1) or 1
+        need_rows = len(combined_rows)
+
+        # 6. 写入目标文档
+        self._write_publish_sheet(
+            publish_doc_id, sheet_name, combined_rows, need_rows, need_cols
+        )
+
+        return sheet_name
+
+    def _rebuild_team_results(self, period: str) -> list[dict]:
+        """从 registrations 表重建 team_results（与 fill_teams 输出格式一致）。
+
+        同一个 team_name 可能有多个队伍配置（如"大一"有多个 clan_tag），
+        按 TEAMS 配置逐条重建，每条的 key 为 (name, clan_tag)。
+        """
+        regs = self.reg_repo.get_registrations(period)
+        # 按 (team_name, clan_tag) 分组
+        by_key: dict[tuple[str, str], list[dict]] = {}
+        for r in regs:
+            tn = r.get("team_name")
+            if not tn:
+                continue
+            # 找到对应的 clan_tag
+            ct = ""
+            for t in TEAMS:
+                if t["name"] == tn:
+                    ct = t.get("clan_tag", "")
+                    break
+            key = (tn, ct)
+            by_key.setdefault(key, []).append(r)
+
+        # 按 TEAMS 配置顺序输出
+        results = []
+        for t_cfg in TEAMS:
+            name = t_cfg["name"]
+            ct = t_cfg.get("clan_tag", "")
+            members = by_key.get((name, ct), [])
+            if not members:
+                continue
+            results.append({
+                "team_name": name,
+                "category": t_cfg.get("category", ""),
+                "clan_tag": ct,
+                "manager": t_cfg.get("manager", ""),
+                "member_count": t_cfg.get("member_count", len(members)),
+                "filled_count": len(members),
+                "members": members,
+            })
+        return results
+
+
+
+    def _write_publish_sheet(
+        self,
+        doc_id: str,
+        sheet_name: str,
+        combined_rows: list[list[str]],
+        row_count: int,
+        col_count: int,
+    ) -> None:
+        """直接将 2D 数据写入腾讯文档（跳过 write_sheet 的 dict 转换）。
+
+        直接使用 TencentDocAdapter 的底层 API，避免 dict 格式转换的开销。
+        """
+        from shared.io_adapter.tencent_doc import TencentDocAdapter
+        adapter = self.excel_io
+
+        # 先查是否已有同名 sheet，有则删后重建
+        props = adapter._list_sheets(doc_id)
+        existing = adapter._find_sheet(props, sheet_name)
+        if existing is not None:
+            sheet_id = adapter._recreate_sheet(
+                doc_id, existing["sheetId"], sheet_name, row_count, col_count
+            )
+        else:
+            sheet_id = adapter._add_sheet(
+                doc_id, sheet_name, row_count=row_count, col_count=col_count
+            )
+
+        # 转换为腾讯文档 cell 格式并写入
+        matrix = [
+            [adapter._cell(v) for v in row]
+            for row in combined_rows
+        ]
+        adapter._write_range(doc_id, sheet_id, matrix)
