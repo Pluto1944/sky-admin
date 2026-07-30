@@ -28,42 +28,6 @@ from modules.coc_sync.api_client import CocApiClient, CocApiError  # noqa: E402
 
 
 # ============================================================
-# 猴子补丁：给 CocApiClient 临时添加 3 个 CWL 相关方法
-# ============================================================
-
-def _patched_get_clan_warlog(self, clan_tag: str, limit: int | None = None) -> list[dict]:
-    """GET /clans/{clanTag}/warlog"""
-    path = f"/clans/{self._encode_tag(clan_tag)}/warlog"
-    if limit:
-        path += f"?limit={limit}"
-    data = self._get(path)
-    return data.get("items", [])
-
-
-def _patched_get_cwl_war(self, war_tag: str) -> dict:
-    """GET /clanwarleagues/wars/{warTag}"""
-    path = f"/clanwarleagues/wars/{self._encode_tag(war_tag)}"
-    return self._get(path)
-
-
-def _patched_get_league_group(self, clan_tag: str) -> dict | None:
-    """GET /clans/{clanTag}/currentwar/leaguegroup"""
-    try:
-        path = f"/clans/{self._encode_tag(clan_tag)}/currentwar/leaguegroup"
-        return self._get(path)
-    except CocApiError as e:
-        if "404" in str(e) or "403" in str(e):
-            return None
-        raise
-
-
-# 安装猴子补丁
-CocApiClient.get_clan_warlog = _patched_get_clan_warlog
-CocApiClient.get_cwl_war = _patched_get_cwl_war
-CocApiClient.get_league_group = _patched_get_league_group
-
-
-# ============================================================
 # 核心探测逻辑
 # ============================================================
 

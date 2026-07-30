@@ -55,6 +55,41 @@ class CocApiClient:
         return self._get(f"/players/{self._encode_tag(player_tag)}")
 
     # ------------------------------------------------------------------
+    # CWL 相关接口
+    # ------------------------------------------------------------------
+    def get_clan_warlog(self, clan_tag: str, limit: int | None = None) -> list[dict]:
+        """查询部落战争日志。GET /clans/{clanTag}/warlog
+
+        返回战争列表，每条含 result / teamSize / opponent / endTime 等。
+        注意：warlog 不含 warTag 字段，不能用于回溯 CWL 明细。
+        """
+        path = f"/clans/{self._encode_tag(clan_tag)}/warlog"
+        if limit is not None:
+            path += f"?limit={limit}"
+        data = self._get(path)
+        return data.get("items", [])
+
+    def get_cwl_war(self, war_tag: str) -> dict:
+        """查询单场 CWL 战争详情。GET /clanwarleagues/wars/{warTag}
+
+        返回 clan / opponent 双方的成员名单及每人每场进攻明细（stars / attacks）。
+        """
+        return self._get(f"/clanwarleagues/wars/{self._encode_tag(war_tag)}")
+
+    def get_league_group(self, clan_tag: str) -> dict | None:
+        """查询部落当前联赛组信息。GET /clans/{clanTag}/currentwar/leaguegroup
+
+        仅在 CWL 周返回有效数据；非 CWL 周或部落未参赛时返回 None。
+        返回含 season / state / rounds[].warTags[] 等。
+        """
+        try:
+            return self._get(f"/clans/{self._encode_tag(clan_tag)}/currentwar/leaguegroup")
+        except CocApiError as e:
+            if "404" in str(e) or "403" in str(e):
+                return None
+            raise
+
+    # ------------------------------------------------------------------
     # 内部工具
     # ------------------------------------------------------------------
     @staticmethod

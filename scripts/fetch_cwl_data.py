@@ -57,7 +57,7 @@ def _normalize_tag(tag: str) -> str:
 def _fetch_one_war(client: CocApiClient, wt: str, normalized_tag: str) -> dict | None:
     """拉取单场 war 详情，返回我方成员数据（失败返回 None）。"""
     try:
-        d = client._get(f"/clanwarleagues/wars/{client._encode_tag(wt)}")
+        d = client.get_cwl_war(wt)
     except Exception:
         return None
 
@@ -76,11 +76,10 @@ def _fetch_one_war(client: CocApiClient, wt: str, normalized_tag: str) -> dict |
 
 def _fetch_team_cwl(client: CocApiClient, team_name: str, clan_tag: str) -> dict | None:
     """拉取一个队伍的 CWL 战绩（并发拉取 war 详情）。"""
-    encoded = client._encode_tag(clan_tag)
     normalized = _normalize_tag(clan_tag)
 
     try:
-        lg = client._get(f"/clans/{encoded}/currentwar/leaguegroup")
+        lg = client.get_league_group(clan_tag)
     except Exception as e:
         print(f"  {team_name}({clan_tag}): ❌ {e}")
         return None
