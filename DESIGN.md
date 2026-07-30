@@ -1,6 +1,6 @@
 # 联赛报名与名单编排管理系统 — 设计方案
 
-> 版本：v2.3
+> 版本：v2.4
 > 说明：本文档为编码前的完整设计，并已随真实报名表结构落地更新（见 §5.x）。IO 层采用可替换适配器，第一版走本地 xlsx，预留腾讯文档 API 接口；战绩计算做成可插拔的空函数，后续补充公式。
 >
 > **v2.0 架构升级**：由"技术分层"（core/io_adapter/db）重构为"业务领域分模块"（player 中枢 + cwl_registration + war_result + coc_sync），详见 §十三。原设计中的分层思想（纯函数 / IO 抽象 / 存储抽象 / 依赖注入）在新架构中完整保留，只是按领域重新组织归属。
@@ -10,6 +10,8 @@
 > **v2.2 报名解耦（B 方案）**：`registrations` 从"accounts 的子表"升级为**自包含的报名事实源**——自持 `account_name`（报名昵称，主标识）/ `player_name`（主号归属），`player_tag` 降为可空的关联缓存、**去外键**，唯一键 `(player_tag, period)` → `(account_name, period)`。报名导入**不再写 accounts、不再临时建档、不再需要合并**：`accounts` 完全由 COC 权威建档，报名侧只读反查真实 Tag 做缓存。"报名有 / COC 无"的新人照常入 `registrations`、排序得 0 分，主表零污染。由此**退休** `is_provisional` 临时账号建档 / `merge_provisional` 合并 / `unmatched.py` 未匹配钩子 / coc-sync 残留告警等一整套复杂度，详见 §13.6 与 §十四。
 >
 > **v2.3 队伍分配**：在排序名单基础上新增**自动队伍填充**（`team_filler.py`，纯函数）——按 `TEAMS` 配置将排序后人员逐队分配，支持实战最低匹配值门槛、预留位置、最后一个实战队边界处理（刚好/溢出协调壳子/缺口<5 协调壳子），结果同时回写 `registrations.team_name` 列和在同一 sheet 下半部分输出队伍明细，详见 §5.x.4 步骤 3.5 与 §5.x.8。
+>
+> **v2.4 升降级**：新增**实战队伍升降级系统**（`promotion.py`，纯函数）——在 `fill_teams()` 后根据 CWL 星数在相邻实战队伍间交换人员（≤18 星逐级下沉，满星 21 逐级上升）。引入**联赛时间 vs 报名时间**双层月份语义（详见下表），`fetch_cwl_data.py` 合并 COC API 拉取 + results 表导入 + 冷启动回退，按队伍级缓存和容错。详见 `docs/promotion_relegation_design.md`。
 
 ---
 
@@ -234,8 +236,10 @@ flowchart TD
   │   │   ├─ 逐队填充实战队伍             → 含 reserved_slots 处理
   │   │   ├─ 最后实战队边界处理           → ③a/③b/③c/③d
   │   │   └─ 填充壳子队伍
+  │   ├─ apply_promotion_relegation()     → 升降级交换（v2.4 新增）：≤18↓ / 满星21↑
+  │   ├─ rebuild_assignment_map()         → 升降级后修复 team_name 映射
   │   ├─ update_arrangement() × N         → 回写 league_type / rank_order
-  │   └─ update_team_name() × N           → 回写 team_name
+  │   └─ update_team_name() × N           → 回写 team_name（升降级后可能变化）
   │
   └─ [阶段3 导出] arrange_and_export()
       └─ write_sheet(target, rows, sheet)  → 写入新 sheet（名单_<period>，含排序名单+队伍明细）
@@ -258,6 +262,7 @@ flowchart TD
 | `TEAM_OUTPUT_HEADERS` | `list[str]` | 队伍明细输出列顺序 |
 | `TEAMS` | `list[dict]` | 队伍配置列表（详见 §5.x.8）：每队含 name/member_count/league_level/clan_tag/manager/category/reserved_slots |
 | `COMBAT_MIN_MATCH_VALUE` | `float` | 实战最低匹配值门槛（低于此值的 combat 账号强制转壳子） |
+| `PROMOTION_RELEGATION_CONFIG` | `dict` | v2.4 新增：升降级参数（count/promotion_min_stars/relegation_max_stars） |
 
 公共常量在 `shared/config/common.py`：
 | 常量 | 值 | 说明 |
@@ -609,6 +614,7 @@ sky-admin/
 │   │   ├── roster.py                   # 功能②：报名快照 + 账号得分 → 联赛名单（含 EXCLUDED_CAMP_NAMES 过滤 + 队伍分配）
 │   │   ├── sorter.py                   # 分组排序纯函数
 │   │   ├── team_filler.py              # 队伍填充纯函数（v2.3 新增）
+│   │   ├── promotion.py               # 升降级纯函数（v2.4 新增）
 │   │   ├── rank_score.py               # 名单排序综合分（纯函数）
 │   │   ├── repository.py               # registrations 表数据访问（自持列 + last_period_of + update_team_name）
 │   │   └── config.py                   # 列关键词/战营/权重/输出列
@@ -628,13 +634,16 @@ sky-admin/
 │   ├── fakes.py                        # FakeExcelIO / FakeCocApiClient + seed 助手
 │   ├── shared/    (test_local_xlsx / test_repositories)
 │   ├── player/    (test_status_rule / test_service)
-│   ├── cwl_registration/ (test_rank_score / test_sorter / test_team_filler / test_importer / test_roster)
+│   ├── cwl_registration/ (test_rank_score / test_sorter / test_team_filler / test_promotion / test_importer / test_roster)
 │   ├── war_result/       (test_history_score / test_importer)
 │   └── coc_sync/         (test_mapper / test_service)
 ├── scripts/                            # 运维脚本
 │   ├── load_env.sh                     # 公共环境变量加载器（从 .env 安全解析，防注入）
 │   ├── register_and_arrange.sh         # 报名一体化入口：导入报名 → 生成名单（详见 §十五）
 │   ├── sync_and_export.sh              # 长期维护入口：COC 同步 → 导出玩家档案（详见 §十五）
+│   ├── fetch_cwl_data.py               # v2.4 新增：拉取+导入DB+回退（合并 fetch+cold_start）
+│   ├── fetch_cwl_data.sh               # v2.4 新增：仅拉 JSON 的便捷包装
+│   ├── probe_cwl_data.py               # v2.4 新增：COC API 端点探测
 │   ├── dump_clans_to_xlsx.py           # 工具：导出 COC 部落数据到本地 xlsx（调试用）
 │   ├── dump_clans_to_xlsx.sh           # 工具：同上（带 .env 加载的 shell 包装）
 │   ├── probe_coc_clan.py               # 工具：探测 COC 部落成员（调试用）
@@ -649,19 +658,31 @@ sky-admin/
 
 ## 九、使用流程（每月循环）
 
-1. 导入报名、更新状态：
-   ```bash
-   python cli.py import-reg 报名表.xlsx --period 2026-07
-   ```
-2. 生成实战 / 壳子名单（写入名单.xlsx 的新 sheet「名单_2026-07」）：
-   ```bash
-   python cli.py arrange --period 2026-07 -o 名单.xlsx
-   # 可选自定义 sheet 名：--sheet 我的名单
-   ```
-3. 联赛结束后导入战绩、更新历史分：
-   ```bash
-   python cli.py import-result 战绩表.xlsx --period 2026-07
-   ```
+### 时间语义
+
+| 接口 | period 含义 | 示例 |
+|------|------------|------|
+| `import-reg` | 报名时间（报名表提交月） | `--period 2026-07` |
+| `fetch_cwl_data.py` | 报名时间（CWL 实际发生月） | `--period 2026-07` |
+| `arrange` | 联赛时间（安排哪月联赛） | `--period 2026-08` |
+| `register_and_arrange.sh` | 联赛时间（一站式入口） | `2026-08` |
+
+### 每月流程（以 8 月联赛为例）
+
+```bash
+# 一站式（推荐）
+scripts/register_and_arrange.sh 2026-08
+
+# 或分步执行：
+# 1) 拉上月 CWL 战绩 → results 表（报名时间）
+python scripts/fetch_cwl_data.py --period 2026-07
+
+# 2) 导入报名表（报名时间）
+python cli.py import-reg 报名表.xlsx --period 2026-07
+
+# 3) 编排名单（联赛时间）
+python cli.py arrange --period 2026-08 -o 2026-08名单.xlsx
+```
 
 ---
 

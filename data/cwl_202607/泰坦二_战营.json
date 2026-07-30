@@ -1,0 +1,132 @@
+{
+  "team_name": "泰坦二(战营)",
+  "clan_tag": "#2QQ",
+  "season": "2026-07",
+  "state": "ended",
+  "data_source": "manual",
+  "n_wars": 7,
+  "n_players": 15,
+  "fetched_at": "2026-07-30T13:41:15.166250",
+  "players": [
+    {
+      "tag": "#LRYY0PYL0",
+      "name": "CJ❤️✨Kudoxinlun",
+      "total_stars": 21,
+      "total_attacks": 7,
+      "three_star_rate": 1.0,
+      "avg_stars": 3.0
+    },
+    {
+      "tag": "#8U2RUPVJL",
+      "name": "Nike",
+      "total_stars": 21,
+      "total_attacks": 7,
+      "three_star_rate": 1.0,
+      "avg_stars": 3.0
+    },
+    {
+      "tag": "#P2CLCU0QL",
+      "name": "CJ❤️✨Lun",
+      "total_stars": 20,
+      "total_attacks": 7,
+      "three_star_rate": 0.9524,
+      "avg_stars": 2.86
+    },
+    {
+      "tag": "#G9C9GU0PG",
+      "name": "逸仙",
+      "total_stars": 20,
+      "total_attacks": 7,
+      "three_star_rate": 0.9524,
+      "avg_stars": 2.86
+    },
+    {
+      "tag": "#GPCVG9G9C",
+      "name": "＊┅\"阿凡﹏",
+      "total_stars": 20,
+      "total_attacks": 7,
+      "three_star_rate": 0.9524,
+      "avg_stars": 2.86
+    },
+    {
+      "tag": "#QUQUP99PL",
+      "name": "CJ❤✨Holmelun",
+      "total_stars": 19,
+      "total_attacks": 7,
+      "three_star_rate": 0.9048,
+      "avg_stars": 2.71
+    },
+    {
+      "tag": "#LYVPLQJ2",
+      "name": "Sunrider",
+      "total_stars": 19,
+      "total_attacks": 7,
+      "three_star_rate": 0.9048,
+      "avg_stars": 2.71
+    },
+    {
+      "tag": "#GJLQUVVJC",
+      "name": "Lot",
+      "total_stars": 19,
+      "total_attacks": 7,
+      "three_star_rate": 0.9048,
+      "avg_stars": 2.71
+    },
+    {
+      "tag": "#QGUQL9VRR",
+      "name": "10°C✨Godwin",
+      "total_stars": 19,
+      "total_attacks": 7,
+      "three_star_rate": 0.9048,
+      "avg_stars": 2.71
+    },
+    {
+      "tag": "#G2R2UU20",
+      "name": "听雨-⭐★★99%!?♨️",
+      "total_stars": 19,
+      "total_attacks": 7,
+      "three_star_rate": 0.9048,
+      "avg_stars": 2.71
+    },
+    {
+      "tag": "#Q88LPL89L",
+      "name": "招财匠",
+      "total_stars": 18,
+      "total_attacks": 7,
+      "three_star_rate": 0.8571,
+      "avg_stars": 2.57
+    },
+    {
+      "tag": "#LJ8U9QR9",
+      "name": "楪祈",
+      "total_stars": 18,
+      "total_attacks": 7,
+      "three_star_rate": 0.8571,
+      "avg_stars": 2.57
+    },
+    {
+      "tag": "#QRRYURCQ0",
+      "name": "鸟不拉不拉",
+      "total_stars": 18,
+      "total_attacks": 7,
+      "three_star_rate": 0.8571,
+      "avg_stars": 2.57
+    },
+    {
+      "tag": "#QVPQ9Q2R2",
+      "name": "Utopia",
+      "total_stars": 17,
+      "total_attacks": 7,
+      "three_star_rate": 0.8095,
+      "avg_stars": 2.43
+    },
+    {
+      "tag": "#QCRGU229R",
+      "name": "李逍遥",
+      "total_stars": 17,
+      "total_attacks": 7,
+      "three_star_rate": 0.8095,
+      "avg_stars": 2.43
+    }
+  ]
+}

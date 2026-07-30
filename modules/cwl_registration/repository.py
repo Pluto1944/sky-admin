@@ -101,3 +101,15 @@ class RegistrationRepository:
             (team_name, reg_id),
         )
         self.conn.commit()
+
+    def prev_team_assignments(self, period: str) -> dict[str, str]:
+        """返回某月 {account_name: team_name} 分配结果（仅取已分配队伍的行）。
+
+        供升降级时确认每个账号上月所在队伍，也可用于核对本月分配与上月的差异。
+        """
+        rows = self.conn.execute(
+            "SELECT account_name, team_name FROM registrations "
+            "WHERE period = ? AND team_name IS NOT NULL",
+            (period,),
+        ).fetchall()
+        return {r["account_name"]: r["team_name"] for r in rows if r["account_name"]}

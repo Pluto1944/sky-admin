@@ -44,9 +44,28 @@ class ResultRepository:
         rows = self.conn.execute(
             "SELECT * FROM results WHERE player_tag = ?", (player_tag,)
         ).fetchall()
-        out = []
-        for r in rows:
-            d = dict(r)
-            d["raw_metrics"] = json.loads(d["raw_metrics"]) if d["raw_metrics"] else {}
-            out.append(d)
-        return out
+        return [self._row_to_dict(r) for r in rows]
+
+    def get_results_by_period(
+        self, period: str, league_type: str | None = None
+    ) -> list[dict]:
+        """按月份（+ 可选联赛类型）批量查战绩，供升降级读取上月星数。
+
+        league_type=None 时返回该月全部战绩；指定时按类型过滤。
+        """
+        if league_type is not None:
+            rows = self.conn.execute(
+                "SELECT * FROM results WHERE period = ? AND league_type = ?",
+                (period, league_type),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM results WHERE period = ?", (period,)
+            ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    @staticmethod
+    def _row_to_dict(row: sqlite3.Row) -> dict:
+        d = dict(row)
+        d["raw_metrics"] = json.loads(d["raw_metrics"]) if d["raw_metrics"] else {}
+        return d

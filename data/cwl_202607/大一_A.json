@@ -1,0 +1,173 @@
+{
+  "team_name": "大一 A",
+  "clan_tag": "#2R8RCPY0J",
+  "season": "2026-07-01",
+  "state": "ended",
+  "league_clans": [
+    {
+      "tag": "#U808C99P",
+      "name": "2018 Clan India",
+      "level": 28
+    },
+    {
+      "tag": "#2GJUVRCYJ",
+      "name": "CLASH⭕️FWAR",
+      "level": 19
+    },
+    {
+      "tag": "#P2UYV0VR",
+      "name": "French Army",
+      "level": 29
+    },
+    {
+      "tag": "#8PV9RCV9",
+      "name": "JOKERMALAYA™",
+      "level": 30
+    },
+    {
+      "tag": "#2J8LVGQJ9",
+      "name": "BTR GIN FAM",
+      "level": 17
+    },
+    {
+      "tag": "#2GGJY9LGV",
+      "name": "星落湖",
+      "level": 4
+    },
+    {
+      "tag": "#2R8RCPY0J",
+      "name": "苍穹定级26.2",
+      "level": 7
+    },
+    {
+      "tag": "#2L0Y8U8U9",
+      "name": "Việt Nam",
+      "level": 25
+    }
+  ],
+  "n_wars": 7,
+  "n_players": 15,
+  "fetched_at": "2026-07-30T14:58:46.595849",
+  "players": [
+    {
+      "tag": "#PG2YLRU2",
+      "name": "你若不离不弃.我必生死相依",
+      "total_stars": 21,
+      "total_attacks": 7,
+      "three_star_rate": 1.0,
+      "avg_stars": 3.0
+    },
+    {
+      "tag": "#GP22J9RYP",
+      "name": "Orange",
+      "total_stars": 21,
+      "total_attacks": 7,
+      "three_star_rate": 1.0,
+      "avg_stars": 3.0
+    },
+    {
+      "tag": "#QJJ2JC09Q",
+      "name": "TT",
+      "total_stars": 21,
+      "total_attacks": 7,
+      "three_star_rate": 1.0,
+      "avg_stars": 3.0
+    },
+    {
+      "tag": "#Q0YPLGUP0",
+      "name": "CJ❤️✨Baili Dlun",
+      "total_stars": 21,
+      "total_attacks": 7,
+      "three_star_rate": 1.0,
+      "avg_stars": 3.0
+    },
+    {
+      "tag": "#29YJJUQ9",
+      "name": "Roc",
+      "total_stars": 20,
+      "total_attacks": 7,
+      "three_star_rate": 0.9524,
+      "avg_stars": 2.86
+    },
+    {
+      "tag": "#G9PP8RUGC",
+      "name": "CJ❤️✨Kuro Kilun",
+      "total_stars": 20,
+      "total_attacks": 7,
+      "three_star_rate": 0.9524,
+      "avg_stars": 2.86
+    },
+    {
+      "tag": "#P8RGY0CYR",
+      "name": "Eatchel",
+      "total_stars": 20,
+      "total_attacks": 7,
+      "three_star_rate": 0.9524,
+      "avg_stars": 2.86
+    },
+    {
+      "tag": "#G2JVQYPUC",
+      "name": "夏沫",
+      "total_stars": 19,
+      "total_attacks": 7,
+      "three_star_rate": 0.9048,
+      "avg_stars": 2.71
+    },
+    {
+      "tag": "#G2JVVGVL0",
+      "name": "安烨",
+      "total_stars": 19,
+      "total_attacks": 7,
+      "three_star_rate": 0.9048,
+      "avg_stars": 2.71
+    },
+    {
+      "tag": "#8PPPYVUVL",
+      "name": "asianoah",
+      "total_stars": 18,
+      "total_attacks": 7,
+      "three_star_rate": 0.8571,
+      "avg_stars": 2.57
+    },
+    {
+      "tag": "#QV0JVCLRQ",
+      "name": "CJ❤️✨99 Yulun",
+      "total_stars": 18,
+      "total_attacks": 7,
+      "three_star_rate": 0.8571,
+      "avg_stars": 2.57
+    },
+    {
+      "tag": "#9J8C9RU8J",
+      "name": "SKB HLWAN GYI 1",
+      "total_stars": 18,
+      "total_attacks": 7,
+      "three_star_rate": 0.8571,
+      "avg_stars": 2.57
+    },
+    {
+      "tag": "#GYLLVPP9R",
+      "name": "炳炳",
+      "total_stars": 18,
+      "total_attacks": 7,
+      "three_star_rate": 0.8571,
+      "avg_stars": 2.57
+    },
+    {
+      "tag": "#GP2CGYLR9",
+      "name": "小巴辣子",
+      "total_stars": 17,
+      "total_attacks": 7,
+      "three_star_rate": 0.8095,
+      "avg_stars": 2.43
+    },
+    {
+      "tag": "#2QC9CV2QL",
+      "name": "小小龙",
+      "total_stars": 16,
+      "total_attacks": 7,
+      "three_star_rate": 0.7619,
+      "avg_stars": 2.29
+    }
+  ]
+}

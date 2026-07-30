@@ -191,8 +191,9 @@ def cmd_arrange(args) -> None:
     db = make_db()
     player_service = PlayerService(PlayerRepository(db.conn))
     reg_repo = RegistrationRepository(db.conn)
-    arranger = LeagueArranger(player_service, reg_repo, make_excel_io(to))
-    ordered, team_results, sheet_name = arranger.arrange_and_export(
+    result_repo = ResultRepository(db.conn)
+    arranger = LeagueArranger(player_service, reg_repo, make_excel_io(to), result_repo)
+    ordered, team_results, _movements, sheet_name = arranger.arrange_and_export(
         args.period, target, sheet=args.sheet
     )
     where = f"腾讯文档 {target}" if to == "tencent" else target

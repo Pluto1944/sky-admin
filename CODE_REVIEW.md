@@ -8,6 +8,8 @@
 >
 > **v2.3 队伍分配（本次更新）**：在排序名单基础上新增**自动队伍填充**（`team_filler.py`，纯函数，36 个单测）——按 `TEAMS` 配置将排序后人员逐队分配到具体部落队伍中。支持实战最低匹配值门槛（低于阈值的 combat → shell）、预留位置（`reserved_slots`：>0 留空位 / <0 多招备选）、最后一个实战队边界处理（③a 刚好 / ③b 溢出入壳子 / ③c 缺口<5 从壳子协调 / ③d 缺口≥5 不协调）。`registrations` 新增 `team_name` 列，同一 sheet 导出时上半部分排序名单 + 下半部分队伍明细。`arrange()` / `arrange_and_export()` 签名改为返回三元组。详见 `DESIGN.md` §5.x.8。
 >
+> **v2.4 升降级（本次更新）**：新增**实战队伍升降级系统**（`promotion.py`，纯函数，12 个单测）——在 `fill_teams()` 后根据 CWL 星数在相邻实战队伍间交换人员（≤18 星逐级下沉，21 满星逐级上升）。引入**联赛时间 vs 报名时间**双层月份语义：`arrange`/`register_and_arrange.sh` 用联赛时间；`import-reg`/`fetch_cwl_data.py` 用报名时间（实际发生月）。`fetch_cwl_data.py` 合并 COC API 拉取 + results 表导入 + 冷启动回退，按队伍级缓存和容错。`war_result/repository.py` 新增 `get_results_by_period()`，`player/service.py` 新增 `resolve_name_by_tag()`。详见 `docs/promotion_relegation_design.md`。
+>
 > **部落成员身份体系**：`accounts.membership_status`（`member`/`left`）与 **coc-sync 退部对账**——与报名维度 `status` 完全解耦。详见 `DESIGN.md` §八、§十三、§十四（§14.6 退部对账 / §14.7 大本等级预留）。
 
 ---
@@ -150,11 +152,12 @@ flowchart TD
    - **Step 7** `_save()` × N：`resolve_tag_by_name()` 按昵称只读反查 `accounts` 真实 Tag（命中缓存到 `player_tag`，未命中留空）→ `RegistrationRepository.add_registration()` upsert 落库（`ON CONFLICT(account_name, period) DO UPDATE`）→ **不建 accounts 行**。
    - 最后 `PlayerService.refresh_status()` 按本月报名集合刷新全体账号状态。
 
-9. **`cwl_registration/roster.py`（`LeagueArranger`）** — 功能②「名单编排、队伍分配与导出」。
+9. **`cwl_registration/roster.py`（`LeagueArranger`）** — 功能②「名单编排、队伍分配与导出 + 升降级」。
 
    - `_load_accounts(period)`：读 `registrations` 本月报名 → 过滤 `EXCLUDED_CAMP_NAMES` → 优先用缓存 `player_tag`，空则 live 反查 `resolve_tag_by_name()` → `PlayerService.get(tag)` 取 `trophies` + `history_score` → 上月排名反查上月 `registrations.rank_order` → 输出排序列表。
-   - `arrange(period, weights, teams, combat_min_match_value)`（v2.3 签名为 `(有序名单, 队伍结果)` 元组）：调 `sort_accounts()` → 调 `fill_teams()` 队伍分配 → `update_arrangement()` 回写 `league_type/rank_order` → `update_team_name()` 回写 `team_name`。
-   - `arrange_and_export(period, target, sheet, teams, combat_min_match_value)`（v2.3 返回三元组）：`arrange()` + `write_sheet()` 导出到新 sheet（缺省名 `名单_<period>`），同一 sheet 上半部分排序名单、下半部分队伍明细。
+   - `arrange(period, weights, teams, combat_min_match_value, star_data)`（v2.4 返回三元组 `(有序名单, 队伍结果, 升降级日志)`）：参数 `period` 为**联赛时间**（实际打 CWL 的月份），内部 `reg_period = _prev_period(period)` 推算报名时间 → 调 `sort_accounts()` → 调 `fill_teams()` → 调 `apply_promotion_relegation()` 升降级 → `rebuild_assignment_map()` 修复 team_name → `update_arrangement()` + `update_team_name()` 回写。
+   - `_load_combat_star_data(period)`（v2.4 新增）：从 `results` 表按 `period + league_type='combat'` 读取星数，经 `resolve_name_by_tag()` 反查 `{account_name: total_stars}`。
+   - `arrange_and_export(...)`（v2.4 返回四元组）：`arrange()` + `write_sheet()` 导出到新 sheet（缺省名 `名单_<period>`），同一 sheet 上半部分排序名单、下半部分队伍明细。
 
 10. **`cwl_registration/sorter.py`** — 纯函数 `sort_accounts(accounts, weights)`。
     - `_extents()` 计算全体 match_value / history_score 极值。
@@ -171,6 +174,11 @@ flowchart TD
     - **`_pick_closest_by_match_value(pool, n, ref_value)`**：从池中选取匹配值与 ref 最接近的 n 人。
     - **主流程**：逐队填充前 N-1 个实战队伍 → 处理最后一个实战队边界（③a 刚好 / ③b 溢出注入 shell_pool 并重排 / ③c 缺口 <5 从 shell 协调 / ③d 缺口 ≥5 不协调）→ 填充壳子队伍 → 返回 `(含 team_name 的排序名单, 队伍结果列表)`，`league_type` 同步更新为最终分类。
     - 无 IO、无全局状态，可纯输入输出单测。36 个单测覆盖全部场景。
+
+11b. **`cwl_registration/promotion.py`** — 纯函数（v2.4 新增）。
+    - `apply_promotion_relegation(team_results, star_data, config)`：在相邻实战队伍间执行升降级交换。筛选降级候选（`total_stars ≤ relegation_max_stars`，默认 18）和升级候选（`total_stars ≥ promotion_min_stars`，默认 21），配对交换；`moved` 集合保证每人每月最多跳 1 级。返回 `(调整后的 team_results, 升降级日志列表)`。
+    - `rebuild_assignment_map(ordered_with_team, team_results)`：升降级交换后重建 `ordered_with_team` 中各成员的 `team_name` 映射。
+    - 无 IO、无全局状态，12 个单测覆盖全部场景（基本/候选不足/无候选/安全区/新人跳过/moved 保护/级联/空队/仅壳子/自定义配置/映射回写）。
 
 12. **`cwl_registration/rank_score.py`** — 纯函数 `compute_rank_score(account, match_min, match_max, hist_min, hist_max, weights)`。
     - `_normalize(value, lo, hi)` 归一化到 [0,1]，含除零保护（`hi<=lo` 返回 0）和 None 保护。
@@ -195,6 +203,7 @@ flowchart TD
     - `ARRANGEMENT_OUTPUT_HEADERS`：名单输出列顺序（含 `team_name` 列，v2.3）。
     - `TEAMS`：队伍配置列表（v2.3 新增），每队含 `name/member_count/league_level/clan_tag/manager/category/reserved_slots`。
     - `COMBAT_MIN_MATCH_VALUE`：实战最低匹配值门槛（v2.3 新增）。
+    - `PROMOTION_RELEGATION_CONFIG`：升降级参数 `{count, promotion_min_stars, relegation_max_stars}`（v2.4 新增）。
 
 ### ③ war_result —— 战绩
 
@@ -217,7 +226,7 @@ flowchart TD
 
    **报名相关命令**：
    - `import-reg`（`cmd_import_reg`）：装配 `RegistrationImporter(player_service, reg_repo, excel_io)` → `import_from(source, period, sheet)`。支持 `--to tencent`（腾讯文档 fileId）和 `--to local`（本地 xlsx 路径）。
-   - `arrange`（`cmd_arrange`）：装配 `LeagueArranger(player_service, reg_repo, excel_io)` → `arrange_and_export(period, target, sheet)`。输出实战/壳子人数统计 + 各队伍分配统计（v2.3）。
+   - `arrange`（`cmd_arrange`）：装配 `LeagueArranger(player_service, reg_repo, excel_io, result_repo)` → `arrange_and_export(period, target, sheet)`。period 为联赛时间（如 2026-08），内部自动推算报名时间。输出实战/壳子人数统计 + 各队伍分配统计 + 升降级日志（v2.4）。
 
    **其他命令**：`coc-sync` / `import-result` / `accounts` / `player-export` / `reset-db`。
 
@@ -227,6 +236,9 @@ flowchart TD
 26. **`scripts/register_and_arrange.sh`** — 报名一体化入口：三步串联「COC 同步（已注释）→ `import-reg --to tencent` → `arrange --to tencent`」，每月开赛前跑一次。`period` 支持命令行参数或环境变量 `LEAGUE_PERIOD`，含格式校验；报名子表名支持自动推算（Python 精确计算当月末日）。所有凭证从 `.env` 读取。
 27. **`scripts/sync_and_export.sh`** — 长期维护入口：两步串联「`coc-sync` → `player-export --to tencent`」，适合 cron 定时执行，保持 player 数据库与 COC 官方同步。
 28. **`scripts/probe_coc_clan.py/.sh`** / **`scripts/dump_clans_to_xlsx.py/.sh`** — 调试工具：探测部落成员 / 导出数据到本地 xlsx。
+29. **`scripts/fetch_cwl_data.py`**（v2.4 新增）— 合并拉取+导入+回退：对 6 支实战队伍调用 leaguegroup API 获取 warTag → 逐场拉明细 → 存 JSON → 导入 results 表。API 失败自动回退到本地 JSON，按队伍级缓存（<2h 跳过），缺数据的相邻对自动跳过升降级。`--period` 为联赛时间，`--fetch-only` 仅拉 JSON。
+30. **`scripts/fetch_cwl_data.sh`**（v2.4 新增）— `fetch_cwl_data.py --fetch-only` 的便捷包装。
+31. **`scripts/probe_cwl_data.py`**（v2.4 新增）— COC API 端点探测：测试 warlog/leaguegroup/warDetail 端点，验证数据可用性。
 
 ---
 
@@ -243,8 +255,9 @@ flowchart TD
 | `rank_score.py` | `cwl_registration/test_rank_score.py` | 良好 | 归一化 / 除零 / 权重 / None |
 | `sorter.py` | `cwl_registration/test_sorter.py` | 良好 | 战营优先 / 组内降序 / 空 / 单账号 / 全等 / camp_order |
 | `team_filler.py` | `cwl_registration/test_team_filler.py` | 良好（v2.3 新增，36 个用例） | 基本填队 / 阈值转壳 / 预留位置正负零 / ③a 刚好 / ③b 溢出 / ③c 缺口<5 协调 / ③d 缺口≥5 不协调 / 空名单 / 空队伍 / 容量不足 / 仅实战/仅壳子 / rank_order 保持 |
+| `promotion.py` | `cwl_registration/test_promotion.py` | 良好（v2.4 新增，12 个用例） | 基本升降级 / 候选不足 / 无候选 / 安全区不动 / 新人跳过 / moved 保护 / 级联 / 空队 / 仅壳子 / 自定义配置 / 映射回写 |
 | `importer.py`（报名） | `cwl_registration/test_importer.py` | 良好 | 关键词映射 / 战营合并 / 去重 / 重导 / 状态 / **反查真实账号回填 tag 缓存 / 未匹配新人只落报名不建账号** |
-| `roster.py` | `cwl_registration/test_roster.py` | 良好 | 分组顺序 / 回写 league_type + team_name / 导出含队伍分配区域（v2.3 更新） |
+| `roster.py` | `cwl_registration/test_roster.py` | 良好 | 分组顺序 / 回写 league_type + team_name / 导出含队伍分配区域（v2.3 更新；v2.4 适配联赛时间 + 三元组返回值） |
 | `history_score.py` | `war_result/test_history_score.py` | 占位 | 当前返回 0，补公式后再扩展 |
 | `importer.py`（战绩） | `war_result/test_importer.py` | 良好 | **#9 补齐**：同时验证 #1（重导覆盖）/#2（未知账号跳过告警）/#3（关键词映射取 tag） |
 | `mapper.py` | `coc_sync/test_mapper.py` | 良好 | 字段映射 / tag 规范化 / coc_raw |
@@ -253,7 +266,7 @@ flowchart TD
 | `api_client.py`（COC HTTP） | **无** | ❌ 无 | 涉及真实网络，仅靠 Fake 间接覆盖编排；SSRF/编码逻辑本身未单测 |
 | `scripts/*.sh` | **无** | ❌ 无 | 运维脚本无自动化测试（依赖真实 COC API / 腾讯文档 API，手动验证） |
 
-> 整体覆盖显著优于 v1.x：曾经零覆盖的战绩导入（#9）已补齐，新增的 player 中枢、coc_sync、team_filler（v2.3，36 个用例）均有测试；v2.2 报名解耦后测试同步对齐新模型（报名不建行、tag 缓存），删除了已失效的 provisional/merge 用例。剩余缺口集中在 `cli.py` 与 `CocApiClient` 的纯 HTTP/安全逻辑。
+> 整体覆盖显著优于 v1.x：曾经零覆盖的战绩导入（#9）已补齐，新增的 player 中枢、coc_sync、team_filler（v2.3，36 个用例）、**promotion（v2.4，12 个用例）**均有测试；v2.2 报名解耦后测试同步对齐新模型（报名不建行、tag 缓存），删除了已失效的 provisional/merge 用例。总计 **135 个测试全绿通过**。剩余缺口集中在 `cli.py` 与 `CocApiClient` 的纯 HTTP/安全逻辑。
 
 ---
 
