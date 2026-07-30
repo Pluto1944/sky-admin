@@ -244,18 +244,20 @@ class LeagueArranger:
                     movement_map[m["account_name"]] = f"{direction}({m['total_stars']}★)"
 
             new_count = 0
+            shell_count = 0
             for tr in team_results:
-                if tr["category"] != LEAGUE_COMBAT:
-                    continue
                 for member in tr["members"]:
                     name = member.get("account_name")
                     if not name:
                         continue
                     if name in movement_map:
                         member["movement"] = movement_map[name]
-                    elif name not in star_data:
+                    elif tr["category"] == LEAGUE_COMBAT and name not in star_data:
                         member["movement"] = "新"
                         new_count += 1
+                    elif tr["category"] == LEAGUE_SHELL and name in star_data:
+                        member["movement"] = f"↓转壳({star_data[name]}★)"
+                        shell_count += 1
             for item in ordered_with_team:
                 name = item.get("account_name")
                 if name and name in movement_map:
@@ -269,19 +271,30 @@ class LeagueArranger:
                         f"{movement_map[m['account_name']]}: "
                         f"{m['from_team']} → {m['to_team']}"
                     )
-            # 缺席老人：上月有星数但本月不在任何实战队
+
+            # 缺席分析：上月有星数但本月不在任何实战队
             combat_names = {
                 m.get("account_name")
                 for tr in team_results if tr["category"] == LEAGUE_COMBAT
                 for m in tr["members"]
             }
-            absent_veterans = [
-                (n, star_data[n]) for n in sorted(star_data)
-                if n in star_data and n not in combat_names
-            ]
-            if absent_veterans:
-                print(f"\n[缺席] {len(absent_veterans)} 名上月参赛者本月未进实战队：")
-                for name, stars in absent_veterans:
+            shell_names = {
+                m.get("account_name")
+                for tr in team_results if tr["category"] == LEAGUE_SHELL
+                for m in tr["members"]
+            }
+            all_absent = [(n, star_data[n]) for n in sorted(star_data)
+                          if n in star_data and n not in combat_names]
+            to_shell = [(n, s) for n, s in all_absent if n in shell_names]
+            left = [(n, s) for n, s in all_absent if n not in shell_names]
+
+            if to_shell:
+                print(f"\n[转壳] {len(to_shell)} 人从实战队转到壳子队：")
+                for name, stars in to_shell:
+                    print(f"  {name} ({stars}星)")
+            if left:
+                print(f"\n[离开] {len(left)} 人离开战营或未报名：")
+                for name, stars in left:
                     print(f"  {name} ({stars}星)")
 
             if new_count:
@@ -367,49 +380,58 @@ class LeagueArranger:
             # 队伍之间空一行
             combined_rows.append({h: None for h in ARRANGEMENT_OUTPUT_HEADERS})
 
-        # 第三部分：缺席老兵（上月有星数但本月未分配）
+        # 第三部分：缺席老兵（上月有星数但本月未进实战队）
         if star_data:
             combat_names = {
                 m.get("account_name")
                 for tr in team_results if tr["category"] == LEAGUE_COMBAT
                 for m in tr["members"]
             }
-            # 缺席：有星数但不在任何实战队
-            absent = [(n, s) for n, s in star_data.items() if n not in combat_names]
-            if absent:
-                # 上上次编排的队伍归属
+            shell_names = {
+                m.get("account_name")
+                for tr in team_results if tr["category"] == LEAGUE_SHELL
+                for m in tr["members"]
+            }
+            all_absent = [(n, star_data[n]) for n in sorted(star_data) if n not in combat_names]
+            to_shell = [(n, s) for n, s in all_absent if n in shell_names]
+            left = [(n, s) for n, s in all_absent if n not in shell_names]
+
+            if to_shell or left:
                 prev_assign = _prev_period(_prev_period(period))
                 prev_teams = self.reg_repo.prev_team_assignments(prev_assign) if prev_assign else {}
-                # 按原来队伍分组
-                by_team: dict[str, list[tuple[str, int]]] = {}
-                for name, stars in absent:
-                    t = prev_teams.get(name, "未知")
-                    by_team.setdefault(t, []).append((name, stars))
-
-                # 队伍排序：先按实战队优先级，再壳子队
                 team_order = [t["name"] for t in (teams or TEAMS)]
-                ordered_teams = [t for t in team_order if t in by_team] + \
-                                [t for t in sorted(by_team) if t not in team_order]
 
                 combined_rows.append({h: None for h in ARRANGEMENT_OUTPUT_HEADERS})
                 combined_rows.append({
                     **{h: None for h in ARRANGEMENT_OUTPUT_HEADERS},
-                    "rank_order": f"=== 缺席老兵（共{len(absent)}人，上月有CWL星数，本月未进实战队）===",
+                    "rank_order": f"=== 缺席老兵（共{len(all_absent)}人，上月有CWL星数，本月未进实战队）===",
                 })
 
-                for t in ordered_teams:
-                    members = by_team[t]
+                for label, group in [("转壳", to_shell), ("离开/未报名", left)]:
+                    if not group:
+                        continue
                     combined_rows.append({
                         **{h: None for h in ARRANGEMENT_OUTPUT_HEADERS},
-                        "rank_order": f"原队: {t} ({len(members)}人)",
+                        "rank_order": f"  [{label}] {len(group)}人",
                     })
-                    for name, stars in sorted(members, key=lambda x: -x[1]):
-                        combined_rows.append({
-                            **{h: None for h in ARRANGEMENT_OUTPUT_HEADERS},
-                            "account_name": name,
-                            "movement": f"缺席({stars}★)",
-                            "team_name": prev_teams.get(name, ""),
-                        })
+                    # 按原队分组
+                    by_team: dict[str, list[tuple[str, int]]] = {}
+                    for name, stars in group:
+                        t = prev_teams.get(name, "未知")
+                        by_team.setdefault(t, []).append((name, stars))
+
+                    ordered_t = [t for t in team_order if t in by_team] + \
+                                [t for t in sorted(by_team) if t not in team_order]
+                    for t in ordered_t:
+                        members = by_team[t]
+                        for name, stars in sorted(members, key=lambda x: -x[1]):
+                            tag = "↓转壳" if label == "转壳" else "离开"
+                            combined_rows.append({
+                                **{h: None for h in ARRANGEMENT_OUTPUT_HEADERS},
+                                "account_name": name,
+                                "movement": f"{tag}({stars}★)",
+                                "team_name": t if t != "未知" else "",
+                            })
 
         sheet_name = sheet or f"名单_{period}"
         self.excel_io.write_sheet(
