@@ -269,6 +269,21 @@ class LeagueArranger:
                         f"{movement_map[m['account_name']]}: "
                         f"{m['from_team']} → {m['to_team']}"
                     )
+            # 缺席老人：上月有星数但本月不在任何实战队
+            combat_names = {
+                m.get("account_name")
+                for tr in team_results if tr["category"] == LEAGUE_COMBAT
+                for m in tr["members"]
+            }
+            absent_veterans = [
+                (n, star_data[n]) for n in sorted(star_data)
+                if n in star_data and n not in combat_names
+            ]
+            if absent_veterans:
+                print(f"\n[缺席] {len(absent_veterans)} 名上月参赛者本月未进实战队：")
+                for name, stars in absent_veterans:
+                    print(f"  {name} ({stars}星)")
+
             if new_count:
                 print(f"\n[新人] {new_count} 名实战队员本月新进（上月未参赛）")
 
