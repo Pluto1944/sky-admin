@@ -103,6 +103,7 @@ class TencentDocAdapter(ExcelIO):
         sheet: str | None = None,
         auto_filter: bool = False,
         freeze_header: bool = False,
+        highlight_rows: set[int] | None = None,
     ) -> None:
         """把行字典列表覆盖写入在线表格；数据超单表容量时自动分页到多个子表。
 
@@ -119,6 +120,7 @@ class TencentDocAdapter(ExcelIO):
         上一次多出来的分页子表。
 
         auto_filter / freeze_header：v3 无对应能力，忽略（数据照写）。
+        highlight_rows: 需要红色字体+浅绿背景的数据行索引集合（0-based，不含表头行）。
         """
         file_id = self._require_file_id(target)
         title = sheet or "名单"
@@ -128,8 +130,14 @@ class TencentDocAdapter(ExcelIO):
 
         need_cols = max(len(headers), 1)
         header_row = [self._cell(h) for h in headers] if headers else None
+
+        _highlight = highlight_rows or set()
+        # 腾讯文档 v3 字体颜色用 RGBA 对象；v3 不支持背景填充色
+        _highlight_fmt = {"fontColor": {"red": 255, "green": 0, "blue": 0, "alpha": 255}}
         data_rows = [
-            [self._cell(row.get(h)) for h in headers] for row in rows
+            [self._cell(row.get(h), _highlight_fmt if idx in _highlight else None)
+             for h in headers]
+            for idx, row in enumerate(rows)
         ]
 
         # 每页容量：受 addSheet 单表单元格上限约束，行数（含表头）<= 10000/列数。
@@ -411,15 +419,35 @@ class TencentDocAdapter(ExcelIO):
     # 值编解码
     # ------------------------------------------------------------------
     @staticmethod
-    def _cell(value) -> dict:
-        """单元格值 -> cellValue：数字用 number，其余转文本。"""
+    def _cell(value, fmt: dict | None = None) -> dict:
+        """单元格值 -> cellValue：数字用 number，其余转文本。
+
+        可选 fmt 字典设置 cellFormat（腾讯文档 v3 格式）：
+          - {"fontColor": {"red":255,"green":0,"blue":0,"alpha":255}}
+            字体颜色（RGBA）
+          - {"bold": True}
+            加粗
+        注意：v3 API 不支持单元格背景填充色（fill/backgroundColor）。
+        """
         if value is None:
-            return {"cellValue": {"text": ""}}
-        if isinstance(value, bool):
-            return {"cellValue": {"text": "是" if value else "否"}}
-        if isinstance(value, (int, float)):
-            return {"cellValue": {"number": value}}
-        return {"cellValue": {"text": str(value)}}
+            entry = {"cellValue": {"text": ""}}
+        elif isinstance(value, bool):
+            entry = {"cellValue": {"text": "是" if value else "否"}}
+        elif isinstance(value, (int, float)):
+            entry = {"cellValue": {"number": value}}
+        else:
+            entry = {"cellValue": {"text": str(value)}}
+
+        if fmt:
+            text_format: dict = {}
+            if "fontColor" in fmt:
+                text_format["color"] = fmt["fontColor"]
+            if "bold" in fmt:
+                text_format["bold"] = fmt["bold"]
+            if text_format:
+                entry["cellFormat"] = {"textFormat": text_format}
+
+        return entry
 
     def _grid_to_rows(self, grid: dict) -> list[dict]:
         """gridData -> 行字典列表（首行表头，跳过全空行）。"""

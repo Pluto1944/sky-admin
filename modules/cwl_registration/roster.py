@@ -363,6 +363,49 @@ class LeagueArranger:
 
         return ordered_with_team, team_results, movements, star_data
 
+    def _build_part4_grid(
+        self, team_results: list[dict]
+    ) -> tuple[list[list[str]], list[int]]:
+        """构建 Part4 联赛名单排布网格（备份留底）。
+
+        返回 (grid, title_row_indices):
+          - grid: list[list[str]]，每行 5 列，可直接拼入 combined_rows
+          - title_row_indices: 抬头行在 grid 中的行索引列表
+        """
+        grid: list[list[str]] = []
+        title_indices: list[int] = []
+
+        for i, tr in enumerate(team_results):
+            cat = "实战" if tr["category"] == LEAGUE_COMBAT else "壳子"
+            # 记录抬头行索引
+            title_indices.append(len(grid))
+            # 抬头拆成 3 列：队伍信息 | clan_tag | 空 | 空 | 管理
+            cap_info = f"{tr['filled_count']}/{tr['member_count']}"
+            col1 = f"{cat}: {tr['team_name']} {cap_info}"
+            col2 = tr.get("clan_tag", "")
+            col3 = f"管理:{tr.get('manager', '')}"
+            grid.append([col1, col2, "", "", col3])
+
+            members = tr["members"]
+            is_shell = tr["category"] == LEAGUE_SHELL
+            for j in range(0, len(members), 5):
+                chunk = members[j:j + 5]
+                row: list[str] = []
+                for m in chunk:
+                    name = m.get("account_name", "")
+                    if is_shell:
+                        mv = int(m.get("match_value") or 0)
+                        row.append(f"{name} {mv}")
+                    else:
+                        row.append(name)
+                row.extend([""] * (5 - len(row)))
+                grid.append(row)
+
+            if i < len(team_results) - 1:
+                grid.append(["", "", "", "", ""])
+
+        return grid, title_indices
+
     def arrange_and_export(
         self,
         period: str,
@@ -532,11 +575,31 @@ class LeagueArranger:
                         # 队伍之间空行
                         combined_rows.append({h: None for h in ARRANGEMENT_OUTPUT_HEADERS})
 
+        # ===== Part 4: 联赛名单排布（备份留底） =====
+        _PART4_COLS = ARRANGEMENT_OUTPUT_HEADERS[:5]
+        combined_rows.append({h: None for h in ARRANGEMENT_OUTPUT_HEADERS})
+        combined_rows.append({
+            **{h: None for h in ARRANGEMENT_OUTPUT_HEADERS},
+            "rank_order": "=== 联赛名单排布（备份留底） ===",
+        })
+
+        grid, title_indices = self._build_part4_grid(team_results)
+        # 计算抬头行在 combined_rows 中的绝对索引（Part4 标题占 2 行 + grid 偏移）
+        part4_start = len(combined_rows)
+        highlight_rows = {part4_start + idx for idx in title_indices}
+
+        for row in grid:
+            combined_rows.append({
+                **{h: "" for h in ARRANGEMENT_OUTPUT_HEADERS},
+                **{_PART4_COLS[k]: row[k] for k in range(min(5, len(row)))},
+            })
+
         sheet_name = sheet or f"名单_{period}"
         self.excel_io.write_sheet(
             target,
             combined_rows,
             headers=ARRANGEMENT_OUTPUT_HEADERS,
             sheet=sheet_name,
+            highlight_rows=highlight_rows,
         )
         return ordered, team_results, movements, sheet_name

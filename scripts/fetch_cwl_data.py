@@ -84,6 +84,10 @@ def _fetch_team_cwl(client: CocApiClient, team_name: str, clan_tag: str) -> dict
         print(f"  {team_name}({clan_tag}): ❌ {e}")
         return None
 
+    if lg is None:
+        print(f"  {team_name}({clan_tag}): ⚠️ 无联赛组数据（非CWL周或API拒绝访问）")
+        return None
+
     my_war_tags: list[str] = []
     for rd in lg.get("rounds", []):
         my_war_tags.extend(rd.get("warTags", []))

@@ -48,6 +48,7 @@ class FakeExcelIO:
         sheet: str | None = None,
         auto_filter: bool = False,
         freeze_header: bool = False,
+        highlight_rows: set[int] | None = None,
     ) -> None:
         self.last_written_target = target
         self.last_written_rows = copy.deepcopy(rows)

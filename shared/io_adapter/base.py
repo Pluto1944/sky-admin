@@ -36,11 +36,14 @@ class ExcelIO(ABC):
         sheet: str | None = None,
         auto_filter: bool = False,
         freeze_header: bool = False,
+        highlight_rows: set[int] | None = None,
     ) -> None:
         """写出行字典列表到表格。headers 指定列顺序；为空则用首行的 keys。
 
         auto_filter=True：在表头行开启自动筛选（阅读者可直接按列筛选/排序）。
         freeze_header=True：冻结首行表头（滚动时表头常驻）。
         两者均为展示层可选项，不支持的适配器可忽略（默认 False 向后兼容）。
+        highlight_rows: 需要红色字体的数据行索引集合（0-based，不含表头行）。
+            背景填充色暂不支持（腾讯文档 v3 API 限制）。
         """
         ...
