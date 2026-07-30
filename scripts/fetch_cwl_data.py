@@ -1,7 +1,7 @@
 """拉取 CWL 数据 + 导入 results 表（含回退逻辑）。
 
---period 语义：报名时间（CWL 实际发生的月份）。
-  - 8 月联赛 → 7 月 CWL 数据 → --period 2026-07
+--period 语义：CWL 实际发生月（拉哪个月的 CWL 就传哪个月）。
+  - 编排 8 月联赛 → 需要 7 月 CWL 数据 → --period 2026-07
 
 回退顺序：
   1. COC API 拉取 CWL 战绩 → JSON → 导入 results 表
@@ -185,7 +185,7 @@ def _fetch_from_api(data_dir: Path) -> list[str]:
 # 导入 results 表
 # ═══════════════════════════════════════════════════════════════════════
 
-def _import_to_results(data_dir: Path, reg_period: str) -> tuple[int, int]:
+def _import_to_results(data_dir: Path, cwl_period: str) -> tuple[int, int]:
     """将 JSON 导入 results 表。返回 (ok, skip)。"""
     if not data_dir.exists():
         return 0, 0
@@ -208,7 +208,7 @@ def _import_to_results(data_dir: Path, reg_period: str) -> tuple[int, int]:
                    VALUES (?, ?, ?, ?)
                    ON CONFLICT(player_tag, period, league_type) DO UPDATE SET
                    raw_metrics = excluded.raw_metrics""",
-                (tag, reg_period, LEAGUE_COMBAT, json.dumps({
+                (tag, cwl_period, LEAGUE_COMBAT, json.dumps({
                     "total_stars": p["total_stars"],
                     "team_name": team.get("team_name"),
                     "clan_tag": team.get("clan_tag"),
@@ -219,7 +219,7 @@ def _import_to_results(data_dir: Path, reg_period: str) -> tuple[int, int]:
     conn.close()
 
     if n_ok:
-        print(f"[import] {n_ok} 条战绩 → results（period={reg_period}）" +
+        print(f"[import] {n_ok} 条战绩 → results（period={cwl_period}）" +
               (f"，跳过 {n_skip} 条（不在 accounts）" if n_skip else ""))
     return n_ok, n_skip
 
@@ -232,16 +232,16 @@ def main() -> int:
     import argparse
 
     parser = argparse.ArgumentParser(description="拉取 CWL 数据 + 导入 results 表")
-    parser.add_argument("--period", required=True, help="报名时间（CWL 发生月），如 2026-07")
+    parser.add_argument("--period", required=True, help="CWL 月份（实际发生月），如 2026-07")
     parser.add_argument("--fetch-only", action="store_true",
                         help="仅拉取 JSON，不导入 results 表")
     args = parser.parse_args()
 
-    # fetch_cwl_data 直接使用传入的 period（报名时间 = CWL 发生月）
-    reg_period = args.period
+    # period = CWL 实际发生月，直接用于 API 拉取、数据目录命名、results 表入库
+    cwl_period = args.period
 
-    data_dir = DATA_ROOT / f"cwl_{reg_period.replace('-', '')}"
-    print(f"CWL 发生月: {reg_period}（数据目录: {data_dir}）")
+    data_dir = DATA_ROOT / f"cwl_{cwl_period.replace('-', '')}"
+    print(f"CWL 发生月: {cwl_period}（数据目录: {data_dir}）")
 
     # ── 拉取 ──
     ok_teams = _fetch_from_api(data_dir)
@@ -258,7 +258,7 @@ def main() -> int:
         return 1
 
     # 导入全部可用 JSON 到 results 表
-    n_ok, n_skip = _import_to_results(data_dir, reg_period)
+    n_ok, n_skip = _import_to_results(data_dir, cwl_period)
 
     if n_ok == 0:
         print(ALERT_LINE + f"⚠️ 0 条战绩导入（{n_skip} 条不在 accounts）" + ALERT_LINE)
@@ -266,7 +266,7 @@ def main() -> int:
 
     # ── 升降级参与总结 ──
     team_order = [t for t, _ in TEAMS_TO_FETCH]
-    print(f"\n── 升降级参与情况（{reg_period} CWL）──")
+    print(f"\n── 升降级参与情况（{cwl_period} CWL）──")
     for i in range(len(team_order) - 1):
         hi, lo = team_order[i], team_order[i + 1]
         hi_ok = hi in ok_teams
@@ -277,7 +277,7 @@ def main() -> int:
             missing = [t for t, ok in [(hi, hi_ok), (lo, lo_ok)] if not ok]
             print(f"  ⛔ {hi} ↔ {lo}  跳过（缺: {', '.join(missing)}）")
 
-    print(f"\n✅ 数据就绪：{n_ok} 条星数已写入 results 表（period={reg_period}）")
+    print(f"\n✅ 数据就绪：{n_ok} 条星数已写入 results 表（period={cwl_period}）")
     return 0
 
 

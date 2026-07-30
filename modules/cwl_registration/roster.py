@@ -143,16 +143,15 @@ class LeagueArranger:
             )
         return merged
 
-    def _load_combat_star_data(self, period: str) -> dict[str, int]:
-        """从 results 表加载本月实战星数，返回 {account_name: total_stars}。
+    def _load_combat_star_data(self, cwl_period: str) -> dict[str, int]:
+        """从 results 表加载指定月份 CWL 实战星数，返回 {account_name: total_stars}。
 
-        CWL 时间线：每月第 1 周 CWL 战争，随后几周为下月报名。
-        因此报名和历史星数属于同一个 period（同为报名所在月）：
-          - 7 月报名 → period="2026-07"
-          - 7 月 CWL 星数 → period="2026-07"（同期，非上月）
+        cwl_period 语义：**CWL 实际发生月**（即 results.period）。
+        编排 N 月联赛时，需要的 CWL 星数来自 N-1 月，调用方应传入
+        `_prev_period(league_period)`。
 
         数据路径：
-        1. results 表按 period + league_type='combat' 查询
+        1. results 表按 cwl_period + league_type='combat' 查询
         2. raw_metrics 中提取 total_stars
         3. player_tag → account_name（通过 accounts 表反查）
         4. 返回 {account_name: total_stars}
@@ -162,7 +161,7 @@ class LeagueArranger:
         if self.result_repo is None:
             return {}
 
-        rows = self.result_repo.get_results_by_period(period, league_type=LEAGUE_COMBAT)
+        rows = self.result_repo.get_results_by_period(cwl_period, league_type=LEAGUE_COMBAT)
         star_data: dict[str, int] = {}
         for r in rows:
             tag = r.get("player_tag")
@@ -175,9 +174,13 @@ class LeagueArranger:
         return star_data
 
     def _load_combat_team_map(
-        self, period: str
+        self, cwl_period: str
     ) -> tuple[dict[str, str], dict[str, str]]:
         """从 results 表加载 CWL 队伍归属。
+
+        cwl_period 语义：**CWL 实际发生月**（即 results.period），与
+        _load_combat_star_data 同源。编排 N 月联赛时传入
+        `_prev_period(league_period)` 获取上月 CWL 队伍信息。
 
         返回 (prev_teams, team_clan_tags):
           - prev_teams: {account_name: team_name}，用于"未报名/离开"人员原队查找。
@@ -185,14 +188,12 @@ class LeagueArranger:
             （覆盖 TEAMS 配置中未单独列出的队伍名，如"大一 A/B/C"）。
 
         team_name / clan_tag 存储在 raw_metrics 中（由 fetch_cwl_data 导入时写入）。
-        与 _load_combat_star_data 同源（同为 results 表同 period），保证队伍
-        信息和星数一致。替代反查 registrations（后者依赖 arrange 回写 team_name，
-        冷启动场景容易缺失）。
+        替代反查 registrations（后者依赖 arrange 回写 team_name，冷启动场景容易缺失）。
         """
         if self.result_repo is None:
             return {}, {}
 
-        rows = self.result_repo.get_results_by_period(period, league_type=LEAGUE_COMBAT)
+        rows = self.result_repo.get_results_by_period(cwl_period, league_type=LEAGUE_COMBAT)
         team_map: dict[str, str] = {}
         team_clan_tags: dict[str, str] = {}
         for r in rows:
@@ -215,29 +216,26 @@ class LeagueArranger:
         teams: list[dict] | None = None,
         combat_min_match_value: float | None = None,
         star_data: dict[str, int] | None = None,
-    ) -> tuple[list[dict], list[dict], list[dict]]:
+    ) -> tuple[list[dict], list[dict], list[dict], dict[str, int]]:
         """生成排序名单 + 队伍分配（含升降级），并回写数据库。
 
         period 语义：**联赛时间**（实际打 CWL 的月份）。
-        报名在联赛前一个月进行，故内部自动推算报名时间 = period - 1 月：
-          - arrange("2026-08") → 读 "2026-07" 的报名 + "2026-07" 的 CWL 星数
-          - arrange("2026-09") → 读 "2026-08" 的报名 + "2026-08" 的 CWL 星数
+        报名数据存于 registrations 表，period = 联赛时间（统一语义）。
+        CWL 星数存于 results 表，period = CWL 实际发生月 = 联赛时间 - 1 月：
+          - arrange("2026-08") → 读 registrations(2026-08) + results(2026-07)
+          - arrange("2026-09") → 读 registrations(2026-09) + results(2026-08)
 
         参数:
             star_data: 实战星数 {account_name: total_stars}。
                 显式传入时直接使用（冷启动场景）；为 None 时从 results 表
-                按报名时间自动加载。
+                按上月 CWL period 自动加载。
 
         返回:
             (含 team_name 的排序名单, 队伍分配结果列表, 升降级日志列表)
             升降级日志可能为空列表（无星数数据或无候选）。
         """
-        # 联赛时间 → 报名时间（前一个月）
-        reg_period = _prev_period(period)
-        if not reg_period:
-            raise ValueError(f"无法从联赛时间 '{period}' 推算报名时间")
-
-        accounts = self._load_accounts(reg_period)
+        # registrations.period = 联赛时间，直接查询
+        accounts = self._load_accounts(period)
         ordered = sort_accounts(accounts, weights or SORT_WEIGHTS)
 
         # 回写 league_type / rank_order
@@ -258,10 +256,14 @@ class LeagueArranger:
             ordered, teams_cfg, threshold
         )
 
-        # 升降级：根据同期（报名时间所在月）CWL 星数交换人员
+        # 升降级：根据上月 CWL 星数交换人员
+        # CWL 实际发生月 = 联赛时间 - 1（results.period 语义）
+        cwl_period = _prev_period(period)
         movements: list[dict] = []
-        if star_data is None:
-            star_data = self._load_combat_star_data(reg_period)
+        if star_data is None and cwl_period:
+            star_data = self._load_combat_star_data(cwl_period)
+        elif star_data is None:
+            star_data = {}
 
         if star_data:
             team_results, movements = apply_promotion_relegation(
@@ -465,9 +467,9 @@ class LeagueArranger:
             if to_shell or not_registered or left_camp:
                 # "未报名/离开"人员的原队直接从 results 表查（CWL 星数同源），
                 # 替代反查 registrations（后者依赖 arrange 回写 team_name，冷启动易缺失）
-                reg_period = _prev_period(period)
-                if reg_period:
-                    prev_teams, team_clan_tags = self._load_combat_team_map(reg_period)
+                cwl_period = _prev_period(period)
+                if cwl_period:
+                    prev_teams, team_clan_tags = self._load_combat_team_map(cwl_period)
                 else:
                     prev_teams, team_clan_tags = {}, {}
                 team_order = [t["name"] for t in (teams or TEAMS)]

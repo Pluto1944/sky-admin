@@ -8,7 +8,7 @@ from tests.fakes import FakeExcelIO, seed_registrations
 
 
 def _seed(player_service, reg_repo):
-    seed_registrations(player_service, reg_repo, "2026-07", [
+    seed_registrations(player_service, reg_repo, "2026-08", [
         # 普通实战，高分
         {"player_tag": "#A", "account_name": "甲", "account_type": "normal",
          "match_value": 90, "join_combat": True, "history_score": 90},
@@ -25,7 +25,7 @@ def test_arrange_orders_combat_camp_first_then_normal_then_shell(player_service,
     _seed(player_service, reg_repo)
     arranger = LeagueArranger(player_service, reg_repo, FakeExcelIO())
 
-    # 报名在 2026-07，联赛在 2026-08
+    # registrations.period = 联赛月份 = 2026-08，直接用 arrange("2026-08") 读取
     ordered, _team_results, _movements, _star_data = arranger.arrange("2026-08", combat_min_match_value=0)
 
     # 战营 #B 排最前，其次普通实战 #A，最后壳子 #C
@@ -59,7 +59,7 @@ def test_arrange_writes_back_to_repo(player_service, reg_repo):
     arranger = LeagueArranger(player_service, reg_repo, FakeExcelIO())
     arranger.arrange("2026-08", combat_min_match_value=0)
 
-    regs = {r["player_tag"]: r for r in reg_repo.get_registrations("2026-07")}
+    regs = {r["player_tag"]: r for r in reg_repo.get_registrations("2026-08")}
     assert regs["#B"]["rank_order"] == 1
     assert regs["#B"]["league_type"] == LEAGUE_COMBAT
     assert regs["#B"]["team_name"] is not None

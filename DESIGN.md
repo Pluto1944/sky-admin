@@ -11,7 +11,9 @@
 >
 > **v2.3 队伍分配**：在排序名单基础上新增**自动队伍填充**（`team_filler.py`，纯函数）——按 `TEAMS` 配置将排序后人员逐队分配，支持实战最低匹配值门槛、预留位置、最后一个实战队边界处理（刚好/溢出协调壳子/缺口<5 协调壳子），结果同时回写 `registrations.team_name` 列和在同一 sheet 下半部分输出队伍明细，详见 §5.x.4 步骤 3.5 与 §5.x.8。
 >
-> **v2.4 升降级**：新增**实战队伍升降级系统**（`promotion.py`，纯函数）——在 `fill_teams()` 后根据 CWL 星数在相邻实战队伍间交换人员（≤18 星逐级下沉，满星 21 逐级上升）。引入**联赛时间 vs 报名时间**双层月份语义（详见下表），`fetch_cwl_data.py` 合并 COC API 拉取 + results 表导入 + 冷启动回退，按队伍级缓存和容错。详见 `docs/promotion_relegation_design.md`。
+> **v2.4 升降级**：新增**实战队伍升降级系统**（`promotion.py`，纯函数）——在 `fill_teams()` 后根据 CWL 星数在相邻实战队伍间交换人员（≤18 星逐级下沉，满星 21 逐级上升）。`fetch_cwl_data.py` 合并 COC API 拉取 + results 表导入 + 冷启动回退，按队伍级缓存和容错。详见 `docs/promotion_relegation_design.md`。
+>
+> **v2.5 period 语义统一**：所有 CLI 接口的 `--period` 统一为**联赛月份**（实际打 CWL 的月份）。`registrations.period` 从报名时间改为联赛时间，与 `arrange --period` 对齐。`fetch_cwl_data.py` 保持传入 CWL 实际发生月（编排 N 月联赛时传 N-1 月）。`arrange()` 不再需要为读 registrations 做 `_prev_period()` 转换，仅在读上月 CWL 星数时使用。
 
 ---
 
@@ -118,7 +120,7 @@ IO 层用抽象基类 `ExcelIO`，定义 `read_sheet()` / `write_sheet()`。当�
 | id | INTEGER PK | 自增主键 |
 | account_name | TEXT NOT NULL | **报名昵称：报名事实主标识**（报名表必有），展示/派生不再依赖 accounts join |
 | player_name | TEXT | 主号归属（本表自持，不再从 accounts join） |
-| period | TEXT | 报名月份 `2026-07` |
+| period | TEXT | 联赛月份 `2026-08`（v2.5 起统一为联赛时间，原为报名时间） |
 | match_value | REAL | 本月填写匹配值 |
 | join_combat | INTEGER | 是否参加实战 (0/1) |
 | account_type | TEXT | 本月账号分类 `combat` 战营 / `normal` 普通（v2.1 由 accounts 下沉） |
@@ -135,7 +137,7 @@ IO 层用抽象基类 `ExcelIO`，定义 `read_sheet()` / `write_sheet()`。当�
 |------|------|------|
 | id | INTEGER PK | 自增主键 |
 | player_tag | TEXT FK | 关联账号 |
-| period | TEXT | 战绩所属月份 |
+| period | TEXT | CWL 实际发生月（`fetch_cwl_data` 写入）或战绩所属月（`import-result` 写入） |
 | league_type | TEXT | 实战 / 壳子 |
 | raw_metrics | TEXT(JSON) | 原始多指标（星星/胜场/贡献…灵活扩展） |
 
@@ -662,10 +664,14 @@ sky-admin/
 
 | 接口 | period 含义 | 示例 |
 |------|------------|------|
-| `import-reg` | 报名时间（报名表提交月） | `--period 2026-07` |
-| `fetch_cwl_data.py` | 报名时间（CWL 实际发生月） | `--period 2026-07` |
-| `arrange` | 联赛时间（安排哪月联赛） | `--period 2026-08` |
-| `register_and_arrange.sh` | 联赛时间（一站式入口） | `2026-08` |
+| `import-reg` | 联赛月份（报名表为该月联赛报名） | `--period 2026-08` |
+| `import-result` | 联赛月份（战绩所属月） | `--period 2026-08` |
+| `fetch_cwl_data.py` | CWL 实际发生月（拉哪月传哪月） | `--period 2026-07` |
+| `arrange` | 联赛月份（安排哪月联赛） | `--period 2026-08` |
+| `register_and_arrange.sh` | 联赛月份（一站式入口） | `2026-08` |
+
+> `registrations.period` = 联赛月份，`results.period` = CWL/战绩实际发生月。
+> 编排 N 月联赛时：读 `registrations(N)` + `results(N-1)`（上月 CWL 星数）。
 
 ### 每月流程（以 8 月联赛为例）
 
@@ -674,13 +680,13 @@ sky-admin/
 scripts/register_and_arrange.sh 2026-08
 
 # 或分步执行：
-# 1) 拉上月 CWL 战绩 → results 表（报名时间）
+# 1) 拉上月 CWL 战绩 → results 表（CWL 月 = 联赛-1）
 python scripts/fetch_cwl_data.py --period 2026-07
 
-# 2) 导入报名表（报名时间）
-python cli.py import-reg 报名表.xlsx --period 2026-07
+# 2) 导入报名表（联赛月份）
+python cli.py import-reg 报名表.xlsx --period 2026-08
 
-# 3) 编排名单（联赛时间）
+# 3) 编排名单（联赛月份）
 python cli.py arrange --period 2026-08 -o 2026-08名单.xlsx
 ```
 

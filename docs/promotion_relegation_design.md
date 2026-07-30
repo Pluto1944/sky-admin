@@ -55,24 +55,29 @@ CWL 时间线（以 8 月联赛为例）：
   7/8-31   为 8 月 CWL 报名 → 产生报名数据
   8/1-7    8 月 CWL 战争（本次编排的目标）
 
-系统对外接口统一使用「联赛时间」（+1 月），内部自动推算报名时间：
+系统接口的 period 语义（v2.5 统一）：
+- `import-reg` / `arrange` / `import-result`：**联赛月份**（如 2026-08）
+- `fetch_cwl_data.py`：**CWL 实际发生月**（拉哪月传哪月，如 2026-07）
+- `registrations.period` = 联赛月份，`results.period` = CWL/战绩实际发生月
 
-  arrange("2026-08")            ← 联赛时间（8 月 CWL）
+```
+  arrange("2026-08")                ← 联赛月份（8 月 CWL）
        │
-       ├── reg_period = "2026-07"  ← 自动推算报名时间（前 1 月）
-       │     ├── _load_accounts("2026-07")   读报名数据
+       ├── registrations WHERE period="2026-08"   读报名数据（直接，无需 -1）
+       │
+       ├── cwl_period = _prev_period("2026-08") = "2026-07"  ← 上月 CWL
        │     └── _load_combat_star_data("2026-07")  读星数数据
        │
-       └── prev_rank 从 "2026-06"     ← 报名时间再 -1（上月编排结果）
+       └── prev_rank 从 "2026-07"     ← 联赛月 -1（上月编排结果）
 ```
 
 **两个时间维度互不混淆：**
 
 | 操作 | period 含义 | 示例 |
 |------|------------|------|
-| `import-registrations` | 报名时间 | `--period 2026-07` |
-| `arrange` | 联赛时间 | `--period 2026-08` |
-| `cold_start_arrange` | 联赛时间 | `--period 2026-08` |
+| `import-reg` | 联赛月份 | `--period 2026-08` |
+| `arrange` | 联赛月份 | `--period 2026-08` |
+| `fetch_cwl_data.py` | CWL 实际发生月 | `--period 2026-07` |
 
 ### 流程
 
@@ -245,17 +250,15 @@ class LeagueArranger:
 
     def arrange(self, period, weights=None, teams=None,
                 combat_min_match_value=None, star_data=None):
-        """period = 联赛时间（如 "2026-08"）。"""
-        # 联赛时间 → 报名时间（前 1 月）
-        reg_period = _prev_period(period)
-        
-        # 读报名 + 排序 + 填队（用报名时间）
-        accounts = self._load_accounts(reg_period)
+        """period = 联赛月份（如 "2026-08"）。"""
+        # registrations.period = 联赛月份，直接查询
+        accounts = self._load_accounts(period)
         ordered = sort_accounts(accounts, ...)
         ordered_with_team, team_results = fill_teams(ordered, ...)
         
-        # 升降级（星数从报名时间同月加载）
-        star_data = star_data or self._load_combat_star_data(reg_period)
+        # 升降级（星数从上月 CWL 加载：联赛月 -1）
+        cwl_period = _prev_period(period)
+        star_data = star_data or self._load_combat_star_data(cwl_period)
         team_results, movements = apply_promotion_relegation(team_results, star_data, ...)
         rebuild_assignment_map(ordered_with_team, team_results)
         
@@ -308,20 +311,20 @@ arranger.arrange("2026-08")  # 内部读 results WHERE period="2026-07"
 ### 冷启动执行
 
 ```bash
-# 1. 导入 7 月报名表（报名时间）
-python cli.py import-registrations 7月报名表.xlsx --period 2026-07
+# 1. 导入 8 月报名表（联赛月份）
+python cli.py import-reg 8月报名表.xlsx --period 2026-08
 
 # 2. 预览星数据映射
 python scripts/cold_start_arrange.py --period 2026-08 --dry-run
 
-# 3. 执行编排（联赛时间，自动推算报名月 + 数据目录）
+# 3. 执行编排（联赛月份，自动推算 CWL 月 + 数据目录）
 python scripts/cold_start_arrange.py --period 2026-08 -o 2026-08名单.xlsx
 ```
 
 `--period 2026-08` → 自动：
-- 报名时间 = 2026-07
+- CWL 月 = 2026-07（联赛-1）
 - 数据目录 = `data/cwl_202607/`
-- 读 `registrations WHERE period="2026-07"`
+- 读 `registrations WHERE period="2026-08"`
 - 星数 JSON 映射到 `{account_name: total_stars}`
 - 执行升
 
@@ -457,10 +460,10 @@ def get_league_group(self, clan_tag) -> dict | None
 ### 每月完整流程（以 8 月联赛为例）
 
 ```bash
-# 步骤 1：导入报名表（报名时间 = 7 月）
-python cli.py import-registrations 7月报名表.xlsx --period 2026-07
+# 步骤 1：导入报名表（联赛月份 = 8 月）
+python cli.py import-reg 8月报名表.xlsx --period 2026-08
 
-# 步骤 2：编排 + 导出（联赛时间 = 8 月，升降级自动生效）
+# 步骤 2：编排 + 导出（联赛月份 = 8 月，升降级自动生效）
 python cli.py arrange --period 2026-08 -o 2026-08名单.xlsx
 ```
 
@@ -525,8 +528,8 @@ python scripts/cold_start_arrange.py --period 2026-08 -o 2026-08名单.xlsx
 |------|------|
 | combat team | 实战队伍（泰坦二/冠一/冠三/大一），参加 CWL 联赛 |
 | shell team | 壳子队伍，不参加 CWL，仅用于奖杯排序 |
-| 联赛时间 | `arrange()` 的参数，CWL 实际所在月（如 2026-08） |
-| 报名时间 | `import-registrations` 的参数，报名提交所在月（= 联赛时间 - 1 月） |
+| 联赛月份 | `arrange` / `import-reg` / `import-result` 的参数，CWL 实际所在月（如 2026-08） |
+| CWL 实际发生月 | `fetch_cwl_data.py` 的参数，拉哪月 CWL 就传哪月；编排 N 月联赛时传 N-1 月 |
 | total_stars | 一个玩家在一个月 CWL 中发起进攻获得的总星数（最大 21） |
 | three_star_rate | 三星率 = total_stars / (3 × n_wars) |
 | promotion | 升级：从低强度队升到高强度队 |

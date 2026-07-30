@@ -14,29 +14,32 @@
 
 | 接口 | period 含义 | 示例 |
 |------|------------|------|
-| `import-reg` | 报名时间（报名表提交月） | `--period 2026-07` |
-| `fetch_cwl_data.py` | 报名时间（CWL 实际发生月） | `--period 2026-07` |
-| `arrange` | 联赛时间（安排哪月联赛） | `--period 2026-08` |
-| `register_and_arrange.sh` | 联赛时间（一站式入口） | `2026-08` |
+| `import-reg` | 联赛月份（报名表为该月联赛报名） | `--period 2026-08` |
+| `import-result` | 联赛月份（战绩所属月） | `--period 2026-08` |
+| `fetch_cwl_data.py` | CWL 实际发生月（拉哪月传哪月） | `--period 2026-07` |
+| `arrange` | 联赛月份（安排哪月联赛） | `--period 2026-08` |
+| `register_and_arrange.sh` | 联赛月份（一站式入口） | `2026-08` |
 
-规则：**读数据的接口用实际发生月，安排联赛的接口用联赛所在月。**
+规则：**registrations.period = 联赛月份，results.period = CWL/战绩实际发生月。**
+编排 N 月联赛时读 registrations(N) + results(N-1)。
 
 ## 全链路逻辑
 
 ```
-register_and_arrange.sh 2026-08          ← 用户参数：联赛时间
+register_and_arrange.sh 2026-08          ← 用户参数：联赛月份
   │
-  ├─ REG_PERIOD = 2026-07                ← 自动推算：联赛-1
+  ├─ REG_PERIOD = 2026-07                ← 自动推算：联赛-1（CWL 月，用于 fetch + sheet 名）
   │
-  ├─ [1] import-reg --period 2026-07     ← 报名时间
-  │       registrations.period = 2026-07
+  ├─ [1] import-reg --period 2026-08     ← 联赛月份
+  │       registrations.period = 2026-08
+  │       sheet 名按 REG_PERIOD(2026-07) 推算
   │
-  ├─ [2] fetch_cwl_data.py --period 2026-07 ← 报名时间
+  ├─ [2] fetch_cwl_data.py --period 2026-07 ← CWL 实际发生月
   │       → COC API 拉 7月 CWL → JSON
   │       → results.period = 2026-07
   │
-  └─ [3] arrange --period 2026-08        ← 联赛时间
-          → 读 registrations(2026-07) + results(2026-07)
+  └─ [3] arrange --period 2026-08        ← 联赛月份
+          → 读 registrations(2026-08) + results(2026-07)
           → 升降级 → 导出 "名单_2026-08"
 ```
 
@@ -47,8 +50,8 @@ register_and_arrange.sh 2026-08          ← 用户参数：联赛时间
 scripts/register_and_arrange.sh 2026-08
 
 # 分步执行
-python scripts/fetch_cwl_data.py --period 2026-07        # 拉星数
-python cli.py import-registrations 报名表.xlsx --period 2026-07  # 导入报名
+python scripts/fetch_cwl_data.py --period 2026-07        # 拉上月 CWL 星数
+python cli.py import-reg 报名表.xlsx --period 2026-08    # 导入报名（联赛月份）
 python cli.py arrange --period 2026-08 -o 2026-08名单.xlsx       # 编排
 ```
 
@@ -56,9 +59,9 @@ python cli.py arrange --period 2026-08 -o 2026-08名单.xlsx       # 编排
 
 | 脚本 | 用途 | period |
 |------|------|--------|
-| `register_and_arrange.sh` | 一键全流程 | 联赛时间 |
-| `fetch_cwl_data.py` | 拉取+导入DB+回退 | 报名时间 |
-| `fetch_cwl_data.sh` | 仅拉JSON | 报名时间 |
+| `register_and_arrange.sh` | 一键全流程 | 联赛月份 |
+| `fetch_cwl_data.py` | 拉取+导入DB+回退 | CWL 实际发生月 |
+| `fetch_cwl_data.sh` | 仅拉JSON | CWL 实际发生月 |
 
 ## 升降级参数
 

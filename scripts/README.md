@@ -4,16 +4,18 @@
 
 | 接口 | period 含义 | 示例 |
 |------|------------|------|
-| `import-reg` | 报名时间（报名表提交月） | `--period 2026-07` |
-| `fetch_cwl_data.py` | 报名时间（CWL 实际发生月） | `--period 2026-07` |
-| `arrange` | 联赛时间（安排哪月联赛） | `--period 2026-08` |
-| `register_and_arrange.sh` | 联赛时间（一站式入口） | `2026-08` |
+| `import-reg` | 联赛月份（报名表为该月联赛报名） | `--period 2026-08` |
+| `import-result` | 联赛月份（战绩所属月） | `--period 2026-08` |
+| `fetch_cwl_data.py` | CWL 实际发生月（拉哪月传哪月） | `--period 2026-07` |
+| `arrange` | 联赛月份（安排哪月联赛） | `--period 2026-08` |
+| `register_and_arrange.sh` | 联赛月份（一站式入口） | `2026-08` |
 
-规则：**读数据的接口用实际发生月，安排联赛的接口用联赛所在月。**
+规则：**registrations.period = 联赛月份，results.period = CWL/战绩实际发生月。**
 
-示例：8 月联赛需要 7 月报名数据 + 7 月 CWL 星数
-- 拉数据：`--period 2026-07`
-- 安排：`--period 2026-08` / `2026-08`
+示例：8 月联赛需要 8 月报名数据 + 7 月 CWL 星数
+- 导入报名：`--period 2026-08`
+- 拉 CWL 星数：`--period 2026-07`（上月 CWL）
+- 安排联赛：`--period 2026-08`
 
 ---
 
@@ -29,9 +31,9 @@ scripts/register_and_arrange.sh 2026-08
 ```
 
 内部三步：
-1. 导入报名表 → `registrations`（报名时间，自动推算 = 2026-07）
-2. 拉取 CWL 星数 → `results` 表（报名时间，自动推算 = 2026-07）
-3. 编排名单 + 升降级 → 腾讯在线文档（联赛时间 = 2026-08）
+1. 导入报名表 → `registrations`（联赛月份 = 2026-08；sheet 名按报名月 2026-07 推算）
+2. 拉取 CWL 星数 → `results` 表（CWL 月 = 2026-07，自动推算 = 联赛-1）
+3. 编排名单 + 升降级 → 腾讯在线文档（联赛月份 = 2026-08）
 
 前置：`.env` 中配置 `COC_API_TOKEN` + `TENCENT_DOC_*` + `REG_DOC_FILE_ID` + `ROSTER_DOC_FILE_ID`
 
@@ -82,19 +84,20 @@ python scripts/probe_cwl_data.py '#2GGGGGGG' --warlog-limit 10
 ### `register_and_arrange.sh` — 全流程细节
 
 ```
-register_and_arrange.sh 2026-08          ← 用户参数：联赛时间
+register_and_arrange.sh 2026-08          ← 用户参数：联赛月份
   │
-  ├─ REG_PERIOD = 2026-07                ← 自动推算：联赛-1
+  ├─ REG_PERIOD = 2026-07                ← 自动推算：联赛-1（CWL 月，用于 fetch + sheet 名）
   │
-  ├─ [1] import-reg --period 2026-07     ← 报名时间
-  │       registrations.period = 2026-07
+  ├─ [1] import-reg --period 2026-08     ← 联赛月份
+  │       registrations.period = 2026-08
+  │       sheet 名按 REG_PERIOD(2026-07) 推算
   │
-  ├─ [2] fetch_cwl_data.py --period 2026-07 ← 报名时间
+  ├─ [2] fetch_cwl_data.py --period 2026-07 ← CWL 实际发生月
   │       → COC API 拉 7月 CWL → JSON
   │       → results.period = 2026-07
   │
-  └─ [3] arrange --period 2026-08        ← 联赛时间
-          → 读 registrations(2026-07) + results(2026-07)
+  └─ [3] arrange --period 2026-08        ← 联赛月份
+          → 读 registrations(2026-08) + results(2026-07)
           → 升降级 → 导出 "名单_2026-08"
 ```
 

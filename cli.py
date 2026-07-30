@@ -2,13 +2,17 @@
 
 用法：
   python cli.py coc-sync      [--clan '#2QQ' --clan '#XX']   先同步 COC 建档
-  python cli.py import-reg    报名表.xlsx --period 2026-07
-  python cli.py import-reg    <fileId> --period 2026-07 --sheet 报名表 --to tencent
-  python cli.py arrange       --period 2026-07 -o 名单.xlsx
-  python cli.py import-result 战绩表.xlsx --period 2026-07
+  python cli.py import-reg    报名表.xlsx --period 2026-08
+  python cli.py import-reg    <fileId> --period 2026-08 --sheet 报名表 --to tencent
+  python cli.py arrange       --period 2026-08 -o 名单.xlsx
+  python cli.py import-result 战绩表.xlsx --period 2026-08
   python cli.py accounts      [--status active]
   python cli.py player-export -o players.xlsx [--status active] [--membership member] [--sort history_score]
   python cli.py reset-db      [-y]                            清空重建（历史数据清零）
+
+period 语义统一为「联赛月份」（实际打 CWL 的月份，如 2026-08）。
+- import-reg / arrange / import-result 的 --period 均为联赛月份。
+- fetch_cwl_data.py 的 --period 为 CWL 实际发生月（编排 N 月联赛时传 N-1 月）。
 
 架构：按业务领域分模块（player 中枢 / cwl_registration 报名 / war_result 战绩 /
 coc_sync 预留），共享 shared 基础设施（io_adapter / db / config）。
@@ -16,6 +20,7 @@ coc_sync 预留），共享 shared 基础设施（io_adapter / db / config）。
 from __future__ import annotations
 
 import argparse
+import calendar
 import os
 import sys
 
@@ -56,6 +61,24 @@ def make_db() -> Database:
     return db
 
 
+def _default_reg_sheet(league_period: str) -> str | None:
+    """根据联赛月份推算报名表 sheet 名（报名月 = 联赛月 - 1）。
+
+    报名表 sheet 命名约定：YYYYMM01-YYYYMMLAST（收集结果）
+    例如联赛 2026-08 → 报名月 2026-07 → sheet "20260701-20260731（收集结果）"
+    格式非法时返回 None（交由调用方处理）。
+    """
+    try:
+        y, m = int(league_period[:4]), int(league_period[5:7])
+    except (ValueError, IndexError):
+        return None
+    m -= 1
+    if m == 0:
+        y, m = y - 1, 12
+    last_day = calendar.monthrange(y, m)[1]
+    return f"{y:04d}{m:02d}01-{y:04d}{m:02d}{last_day:02d}（收集结果）"
+
+
 def cmd_import_reg(args) -> None:
     """导入报名表（本地 xlsx 或腾讯在线文档）。
 
@@ -82,7 +105,9 @@ def cmd_import_reg(args) -> None:
     player_service = PlayerService(PlayerRepository(db.conn))
     reg_repo = RegistrationRepository(db.conn)
     importer = RegistrationImporter(player_service, reg_repo, make_excel_io(to))
-    n = importer.import_from(source, args.period, args.sheet)
+    # 未显式指定 sheet 时，按联赛月份推算报名表 sheet 名（报名月 = 联赛月 - 1）
+    sheet = args.sheet or _default_reg_sheet(args.period)
+    n = importer.import_from(source, args.period, sheet)
     where = f"腾讯文档 {source}" if to == "tencent" else source
     print(f"已导入 {n} 条报名（{args.period}，来源：{where}）")
 
@@ -315,8 +340,8 @@ def build_parser() -> argparse.ArgumentParser:
         "file", nargs="?", default=None,
         help="本地模式：报名表 xlsx 路径；腾讯模式：文档 fileId（缺省读 TENCENT_DOC_FILE_ID）",
     )
-    p1.add_argument("--period", required=True, help="月份，如 2026-07")
-    p1.add_argument("--sheet", default=None, help="工作表名（可选，腾讯文档建议指定）")
+    p1.add_argument("--period", required=True, help="联赛月份，如 2026-08")
+    p1.add_argument("--sheet", default=None, help="工作表名（可选，缺省按联赛月-1自动推算报名表sheet名）")
     p1.add_argument(
         "--to", choices=("local", "tencent"), default=None,
         help="数据源：local=本地 xlsx，tencent=腾讯在线文档（缺省用 config.IO_ADAPTER）",
@@ -324,7 +349,7 @@ def build_parser() -> argparse.ArgumentParser:
     p1.set_defaults(func=cmd_import_reg)
 
     p2 = sub.add_parser("arrange", help="生成联赛名单（本地/腾讯文档）")
-    p2.add_argument("--period", required=True, help="月份，如 2026-07")
+    p2.add_argument("--period", required=True, help="联赛月份，如 2026-08")
     p2.add_argument(
         "-o", "--output", default=None,
         help="本地模式：输出名单 xlsx 路径；腾讯模式：文档 fileId（缺省读 TENCENT_DOC_FILE_ID）",
@@ -345,7 +370,7 @@ def build_parser() -> argparse.ArgumentParser:
         "file", nargs="?", default=None,
         help="本地模式：战绩表 xlsx 路径；腾讯模式：文档 fileId（缺省读 TENCENT_DOC_FILE_ID）",
     )
-    p3.add_argument("--period", required=True, help="月份，如 2026-07")
+    p3.add_argument("--period", required=True, help="联赛月份（战绩所属月），如 2026-08")
     p3.add_argument("--sheet", default=None, help="工作表名（可选，腾讯文档建议指定）")
     p3.add_argument(
         "--to", choices=("local", "tencent"), default=None,

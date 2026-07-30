@@ -5,9 +5,9 @@
 # 参数 PERIOD = 联赛时间（实际打 CWL 的月）。
 #
 # 步骤：
-#   [1] 导入报名表（报名时间 = PERIOD - 1）
-#   [2] fetch_cwl_data.py --period REG_PERIOD（拉取星数 → results 表，报名时间）
-#   [3] cli.py arrange（编排 + 升降级，星数从 results 表自动读取）
+#   [1] 导入报名表（--period = 联赛时间；sheet 名按报名月 = 联赛-1 推算）
+#   [2] fetch_cwl_data.py --period CWL月（= 联赛-1，拉取星数 → results 表）
+#   [3] cli.py arrange（编排 + 升降级，星数从 results 表自动读取上月 CWL）
 #
 # 用法：
 #   scripts/register_and_arrange.sh 2026-08
@@ -29,7 +29,7 @@ fi
 
 PY="${PYTHON:-python3}"
 
-# 报名时间 = 联赛时间 - 1
+# CWL 月 = 联赛时间 - 1（用于 fetch_cwl_data 和报名表 sheet 名推算）
 REG_PERIOD="$("$PY" - "$LEAGUE_PERIOD" <<'PYEOF'
 import sys; y,m = map(int, sys.argv[1].split("-"))
 m -= 1
@@ -53,14 +53,14 @@ PYEOF
 )"
 fi
 
-echo "=== 联赛时间: ${LEAGUE_PERIOD}  →  报名时间: ${REG_PERIOD} ==="
+echo "=== 联赛时间: ${LEAGUE_PERIOD}  →  CWL 月: ${REG_PERIOD} ==="
 
-# [1] 导入报名表
+# [1] 导入报名表（--period = 联赛时间；sheet 名按报名月 = 联赛-1 推算）
 echo ""
-echo "[1] 导入报名表（报名时间=${REG_PERIOD}）..."
-"$PY" cli.py import-reg "$REG_DOC_FILE_ID" --period "$REG_PERIOD" --to tencent --sheet "$REG_SHEET"
+echo "[1] 导入报名表（联赛时间=${LEAGUE_PERIOD}）..."
+"$PY" cli.py import-reg "$REG_DOC_FILE_ID" --period "$LEAGUE_PERIOD" --to tencent --sheet "$REG_SHEET"
 
-# [2] 拉取星数 → results 表（含回退逻辑）
+# [2] 拉取星数 → results 表（CWL 月 = 联赛-1）
 echo ""
 echo "[2] 拉取 CWL 星数 → results 表..."
 if "$PY" scripts/fetch_cwl_data.py --period "$REG_PERIOD"; then

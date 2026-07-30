@@ -2,7 +2,7 @@
 #
 # 从 COC API 拉取 CWL 战绩 JSON（不导入 DB，仅拉数据）
 #
-# --period = 报名时间（CWL 发生月），如需要拉 7 月 CWL 数据 → --period 2026-07
+# --period = CWL 实际发生月，如需要拉 7 月 CWL 数据 → --period 2026-07
 #
 # 用法：
 #   scripts/fetch_cwl_data.sh --period 2026-07
