@@ -10,7 +10,7 @@
 >
 > **v2.4 升降级（本次更新）**：新增**实战队伍升降级系统**（`promotion.py`，纯函数，12 个单测）——在 `fill_teams()` 后根据 CWL 星数在相邻实战队伍间交换人员（≤18 星逐级下沉，21 满星逐级上升）。`fetch_cwl_data.py` 合并 COC API 拉取 + results 表导入 + 冷启动回退，按队伍级缓存和容错。`war_result/repository.py` 新增 `get_results_by_period()`，`player/service.py` 新增 `resolve_name_by_tag()`。详见 `docs/promotion_relegation_design.md`。
 >
-> **v2.5 period 语义统一**：所有 CLI 接口 `--period` 统一为**联赛月份**。`registrations.period` 从报名时间改为联赛时间；`arrange()` 读 registrations 不再需要 `_prev_period()` 转换，仅读上月 CWL 星数时使用。`fetch_cwl_data.py` 保持传入 CWL 实际发生月（编排 N 月联赛时传 N-1 月）。`import-reg` 未传 `--sheet` 时按联赛月-1 自动推算报名表 sheet 名。
+> **v2.6 发布简化（本次更新）**：新增 `publish-results` 命令 + `publish_to_results.sh`，将 Part4 网格发布到公示文档。前 20 行固定文字直接硬编码为 `PUBLISH_FIXED_ROWS` 类常量，Part4 数据复用 `arrange()` 结果保证与编排名单完全一致。删除了 ~170 行复杂的模板匹配逻辑（`_get_template_fixed_rows`、`_assemble_publish_content`、`_rebuild_team_results`），无需 `--template-sheet` 参数。
 >
 > **部落成员身份体系**：`accounts.membership_status`（`member`/`left`）与 **coc-sync 退部对账**——与报名维度 `status` 完全解耦。详见 `DESIGN.md` §八、§十三、§十四（§14.6 退部对账 / §14.7 大本等级预留）。
 
@@ -154,13 +154,16 @@ flowchart TD
    - **Step 7** `_save()` × N：`resolve_tag_by_name()` 按昵称只读反查 `accounts` 真实 Tag（命中缓存到 `player_tag`，未命中留空）→ `RegistrationRepository.add_registration()` upsert 落库（`ON CONFLICT(account_name, period) DO UPDATE`）→ **不建 accounts 行**。
    - 最后 `PlayerService.refresh_status()` 按本月报名集合刷新全体账号状态。
 
-9. **`cwl_registration/roster.py`（`LeagueArranger`）** — 功能②「名单编排、队伍分配与导出 + 升降级」。
+9. **`cwl_registration/roster.py`（`LeagueArranger`）** — 功能②「名单编排、队伍分配与导出 + 升降级 + 发布」。
 
    - `_load_accounts(period)`：读 `registrations` 本月报名 → 过滤 `EXCLUDED_CAMP_NAMES` → 优先用缓存 `player_tag`，空则 live 反查 `resolve_tag_by_name()` → `PlayerService.get(tag)` 取 `trophies` + `history_score` → 上月排名反查上月 `registrations.rank_order` → 输出排序列表。
-   - `arrange(period, weights, teams, combat_min_match_value, star_data)`（v2.4 返回三元组 `(有序名单, 队伍结果, 升降级日志)`）：参数 `period` 为**联赛月份**，直接用于读 `registrations(period)`（v2.5 统一）；读上月 CWL 星数时用 `_prev_period(period)` 查 `results` 表 → 调 `sort_accounts()` → 调 `fill_teams()` → 调 `apply_promotion_relegation()` 升降级 → `rebuild_assignment_map()` 修复 team_name → `update_arrangement()` + `update_team_name()` 回写。
+   - `arrange(period, weights, teams, combat_min_match_value, star_data)`（v2.4 返回四元组 `(有序名单, 队伍结果, 升降级日志, 星数数据)`）：参数 `period` 为**联赛月份**，直接用于读 `registrations(period)`（v2.5 统一）；读上月 CWL 星数时用 `_prev_period(period)` 查 `results` 表 → 调 `sort_accounts()` → 调 `fill_teams()` → 调 `apply_promotion_relegation()` 升降级 → `rebuild_assignment_map()` 修复 team_name → `update_arrangement()` + `update_team_name()` 回写。
    - `_load_combat_star_data(cwl_period)`（v2.4 新增）：从 `results` 表按 `cwl_period + league_type='combat'` 读取星数，经 `resolve_name_by_tag()` 反查 `{account_name: total_stars}`。cwl_period = 联赛月-1。
    - `_load_combat_team_map(cwl_period)`：从 `results` 表读取 CWL 队伍归属（team_name/clan_tag 存于 raw_metrics），用于缺席老兵原队查找。
-   - `arrange_and_export(...)`（v2.4 返回四元组）：`arrange()` + `write_sheet()` 导出到新 sheet（缺省名 `名单_<period>`），同一 sheet 上半部分排序名单、下半部分队伍明细。
+   - `_build_part4_grid(team_results)`（v2.6）：构建 Part4 5 列网格排布（队伍抬头 + 成员按每行 5 人排列，壳子带匹配值）。
+   - `arrange_and_export(...)`（v2.4 返回四元组）：`arrange()` + `write_sheet()` 导出到新 sheet（缺省名 `名单_<period>`），同一 sheet 含排序名单 + 队伍明细 + Part4 网格。
+   - `publish_part4_to_doc(period, publish_doc_id)`（v2.6）：调用 `arrange()` 获取 team_results → `_build_part4_grid()` 生成网格 → 拼接 `PUBLISH_FIXED_ROWS`（前 20 行固定文字）+ 网格 → 写入公示文档。
+   - `PUBLISH_FIXED_ROWS`（v2.6）：类常量，公示文档前 20 行固定文字（规则说明、报名链接等），不再从模板 sheet 读取。
 
 10. **`cwl_registration/sorter.py`** — 纯函数 `sort_accounts(accounts, weights)`。
     - `_extents()` 计算全体 match_value / history_score 极值。
@@ -225,23 +228,25 @@ flowchart TD
 
 ### 入口
 
-24. **`cli.py`** — 命令行入口，六个子命令 + 一个导出命令，按模块装配依赖（`Database` → 各 Repository → `PlayerService` → 各编排器）。
+24. **`cli.py`** — 命令行入口，七个子命令，按模块装配依赖（`Database` → 各 Repository → `PlayerService` → 各编排器）。
 
    **报名相关命令**：
    - `import-reg`（`cmd_import_reg`）：装配 `RegistrationImporter(player_service, reg_repo, excel_io)` → `import_from(source, period, sheet)`。支持 `--to tencent`（腾讯文档 fileId）和 `--to local`（本地 xlsx 路径）。未传 `--sheet` 时按联赛月-1 自动推算报名表 sheet 名（v2.5）。
    - `arrange`（`cmd_arrange`）：装配 `LeagueArranger(player_service, reg_repo, excel_io, result_repo)` → `arrange_and_export(period, target, sheet)`。period 为联赛月份（如 2026-08），直接读 registrations(period)，上月 CWL 星数自动从 results(period-1) 加载。输出实战/壳子人数统计 + 各队伍分配统计 + 升降级日志（v2.4）。
+   - `publish-results`（`cmd_publish_results`，v2.6）：装配 `LeagueArranger` → `publish_part4_to_doc(period, target)`。走完整 `arrange()` 保证数据一致性，拼接前 20 行固定文字 + Part4 网格写入公示文档。
 
-   **其他命令**：`coc-sync` / `import-result` / `accounts` / `player-export` / `reset-db`。
+   **其他命令**：`coc-sync` / `import-result` / `accounts` / `player-export` / `reset-db`.
 
 ### 运维脚本
 
 25. **`scripts/load_env.sh`** — 公共环境变量加载器：从项目根 `.env` 逐行安全解析 `KEY=VALUE`（防注入、兼容 CRLF、Key 合法性校验、环境变量优先），被其它脚本 `source` 引用。
 26. **`scripts/register_and_arrange.sh`** — 报名一体化入口：三步串联「COC 同步（已注释）→ `import-reg --to tencent` → `arrange --to tencent`」，每月开赛前跑一次。`period` 支持命令行参数或环境变量 `LEAGUE_PERIOD`，含格式校验；报名子表名支持自动推算（Python 精确计算当月末日）。所有凭证从 `.env` 读取。
-27. **`scripts/sync_and_export.sh`** — 长期维护入口：两步串联「`coc-sync` → `player-export --to tencent`」，适合 cron 定时执行，保持 player 数据库与 COC 官方同步。
-28. **`scripts/probe_coc_clan.py/.sh`** / **`scripts/dump_clans_to_xlsx.py/.sh`** — 调试工具：探测部落成员 / 导出数据到本地 xlsx。
-29. **`scripts/fetch_cwl_data.py`**（v2.4 新增）— 合并拉取+导入+回退：对 6 支实战队伍调用 leaguegroup API 获取 warTag → 逐场拉明细 → 存 JSON → 导入 results 表。API 失败自动回退到本地 JSON，按队伍级缓存（<2h 跳过），缺数据的相邻对自动跳过升降级。`--period` 为联赛时间，`--fetch-only` 仅拉 JSON。
-30. **`scripts/fetch_cwl_data.sh`**（v2.4 新增）— `fetch_cwl_data.py --fetch-only` 的便捷包装。
-31. **`scripts/probe_cwl_data.py`**（v2.4 新增）— COC API 端点探测：测试 warlog/leaguegroup/warDetail 端点，验证数据可用性。
+27. **`scripts/publish_to_results.sh`**（v2.6 新增）— 发布 Part4 网格到公示文档：调用 `publish-results --period`，拼接前 20 行固定文字 + Part4 网格写入 `PUBLISH_DOC_FILE_ID`。需 `registrations` 表已有编排数据。
+28. **`scripts/sync_and_export.sh`** — 长期维护入口：两步串联「`coc-sync` → `player-export --to tencent`」，适合 cron 定时执行，保持 player 数据库与 COC 官方同步。
+29. **`scripts/probe_coc_clan.py/.sh`** / **`scripts/dump_clans_to_xlsx.py/.sh`** — 调试工具：探测部落成员 / 导出数据到本地 xlsx。
+30. **`scripts/fetch_cwl_data.py`**（v2.4 新增）— 合并拉取+导入+回退：对 6 支实战队伍调用 leaguegroup API 获取 warTag → 逐场拉明细 → 存 JSON → 导入 results 表。API 失败自动回退到本地 JSON，按队伍级缓存（<2h 跳过），缺数据的相邻对自动跳过升降级。`--period` 为联赛时间，`--fetch-only` 仅拉 JSON。
+31. **`scripts/fetch_cwl_data.sh`**（v2.4 新增）— `fetch_cwl_data.py --fetch-only` 的便捷包装。
+32. **`scripts/probe_cwl_data.py`**（v2.4 新增）— COC API 端点探测：测试 warlog/leaguegroup/warDetail 端点，验证数据可用性。
 
 ---
 
@@ -260,7 +265,7 @@ flowchart TD
 | `team_filler.py` | `cwl_registration/test_team_filler.py` | 良好（v2.3 新增，36 个用例） | 基本填队 / 阈值转壳 / 预留位置正负零 / ③a 刚好 / ③b 溢出 / ③c 缺口<5 协调 / ③d 缺口≥5 不协调 / 空名单 / 空队伍 / 容量不足 / 仅实战/仅壳子 / rank_order 保持 |
 | `promotion.py` | `cwl_registration/test_promotion.py` | 良好（v2.4 新增，12 个用例） | 基本升降级 / 候选不足 / 无候选 / 安全区不动 / 新人跳过 / moved 保护 / 级联 / 空队 / 仅壳子 / 自定义配置 / 映射回写 |
 | `importer.py`（报名） | `cwl_registration/test_importer.py` | 良好 | 关键词映射 / 战营合并 / 去重 / 重导 / 状态 / **反查真实账号回填 tag 缓存 / 未匹配新人只落报名不建账号** |
-| `roster.py` | `cwl_registration/test_roster.py` | 良好 | 分组顺序 / 回写 league_type + team_name / 导出含队伍分配区域（v2.3 更新；v2.4 适配联赛时间 + 三元组返回值） |
+| `roster.py` | `cwl_registration/test_roster.py` | 良好 | 分组顺序 / 回写 league_type + team_name / 导出含 Part4 网格（v2.4 适配联赛时间 + 四元组返回值；v2.6 发布公示） |
 | `history_score.py` | `war_result/test_history_score.py` | 占位 | 当前返回 0，补公式后再扩展 |
 | `importer.py`（战绩） | `war_result/test_importer.py` | 良好 | **#9 补齐**：同时验证 #1（重导覆盖）/#2（未知账号跳过告警）/#3（关键词映射取 tag） |
 | `mapper.py` | `coc_sync/test_mapper.py` | 良好 | 字段映射 / tag 规范化 / coc_raw |
