@@ -1,6 +1,6 @@
 # 联赛报名与名单编排管理系统 — 设计方案
 
-> 版本：v2.6
+> 版本：v2.7
 > 说明：本文档为编码前的完整设计，并已随真实报名表结构落地更新（见 §5.x）。IO 层采用可替换适配器，第一版走本地 xlsx，预留腾讯文档 API 接口；战绩计算做成可插拔的空函数，后续补充公式。
 >
 > **v2.0 架构升级**：由"技术分层"（core/io_adapter/db）重构为"业务领域分模块"（player 中枢 + cwl_registration + war_result + coc_sync），详见 §十三。原设计中的分层思想（纯函数 / IO 抽象 / 存储抽象 / 依赖注入）在新架构中完整保留，只是按领域重新组织归属。
@@ -16,6 +16,8 @@
 > **v2.5 period 语义统一**：所有 CLI 接口的 `--period` 统一为**联赛月份**（实际打 CWL 的月份）。`registrations.period` 从报名时间改为联赛时间，与 `arrange --period` 对齐。`fetch_cwl_data.py` 保持传入 CWL 实际发生月（编排 N 月联赛时传 N-1 月）。`arrange()` 不再需要为读 registrations 做 `_prev_period()` 转换，仅在读上月 CWL 星数时使用。
 >
 > **v2.6 发布简化**：新增 `publish-results` 命令，将 Part4 网格发布到公示文档。前 20 行固定文字直接硬编码（`PUBLISH_FIXED_ROWS`），Part4 数据复用 `arrange()` 结果保证一致性。删除了 ~170 行复杂的模板匹配逻辑（`_get_template_fixed_rows`、`_assemble_publish_content`、`_rebuild_team_results`）。
+>
+> **v2.7 列结构优化**：`ARRANGEMENT_OUTPUT_HEADERS` 删除 `team_name`（由 `cur_team`/`prev_team` 替代）。Part4 改为独立 5 列写入（不经过 header dict 映射），避免 `cur_team`/`prev_team` 在 Part4 区域产生中间空列。`insert_normal_new` 从二分插入改为追加到实战区末尾（壳子区之前）。`NEW_NORMAL_INSERT_START` 已废弃。Part4 抬头行管理信息放第 5 列。
 
 ---
 
@@ -241,12 +243,13 @@ flowchart TD
   │   │   ├─ 最后实战队边界处理           → ③a/③b/③c/③d
   │   │   └─ 填充壳子队伍
   │   ├─ apply_promotion_relegation()     → 升降级交换（v2.4 新增）：≤18↓ / 满星21↑
-  │   ├─ rebuild_assignment_map()         → 升降级后修复 team_name 映射
+  │   ├─ rebuild_assignment_map()         → 升降级后修复 team_name / cur_team 映射
   │   ├─ update_arrangement() × N         → 回写 league_type / rank_order
   │   └─ update_team_name() × N           → 回写 team_name（升降级后可能变化）
   │
   └─ [阶段3 导出] arrange_and_export()
-      └─ write_sheet(target, rows, sheet)  → 写入新 sheet（名单_<period>，含排序名单+队伍明细）
+      ├─ write_sheet(target, rows, sheet)  → 写入 Part1-3（名单_<period>，13 列 header）
+      └─ _append_part4_to_sheet()          → 追加 Part4 网格（5 列独立写入，不经过 header 映射）
 ```
 
 #### 5.x.2 配置体系
@@ -262,7 +265,7 @@ flowchart TD
 | `REGISTRATION_TAG_SOURCE` | `str` | 账号标识来源，当前 `"account_name"`（昵称反查） |
 | `REGISTRATION_DEDUP` | `str` | 去重策略：`"latest_submit"` |
 | `JOIN_COMBAT_TRUE_TEXTS` | `set[str]` | "想实战"真值文本集合 |
-| `ARRANGEMENT_OUTPUT_HEADERS` | `list[str]` | 名单输出列顺序（含 `team_name` 列） |
+| `ARRANGEMENT_OUTPUT_HEADERS` | `list[str]` | 名单输出列顺序（`team_name` 已删除，由 `cur_team`/`prev_team` 替代） |
 | `TEAM_OUTPUT_HEADERS` | `list[str]` | 队伍明细输出列顺序 |
 | `TEAMS` | `list[dict]` | 队伍配置列表（详见 §5.x.8）：每队含 name/member_count/league_level/clan_tag/manager/category/reserved_slots |
 | `COMBAT_MIN_MATCH_VALUE` | `float` | 实战最低匹配值门槛（低于此值的 combat 账号强制转壳子） |
@@ -347,8 +350,9 @@ flowchart TD
 - `update_team_name(reg_id, team_name)` — 队伍分配结果（填充阶段）
 
 **6. 导出** → `arrange_and_export(period, target, sheet)`
-- 调用 `arrange()` → `write_sheet()` 写入目标工作簿新 sheet（缺省名 `名单_<period>`）。
-- 同一 sheet 包含两部分：上半部分排序名单（含 `team_name` 列），下半部分按队伍分组展示分配明细。
+- 调用 `arrange()` → `write_sheet()` 写入 Part1-3（缺省名 `名单_<period>`）。
+- 同一 sheet 包含四部分：上半部分排序名单（含 `cur_team`/`prev_team` 列），队伍分组展示分配明细，缺席老兵列表，以及 Part4 网格排布（5 列独立写入）。
+- Part4 通过 `_append_part4_to_sheet()` 追加，不经过 header dict 映射，避免中间空列。
 
 #### 5.x.5 数据库表结构（报名视角）
 

@@ -6,11 +6,13 @@
 >
 > **v2.2 报名解耦（B 方案）**：`registrations` 从"accounts 的子表"升级为**自包含的报名事实源**——自持 `account_name`（报名昵称，主标识）/ `player_name`，`player_tag` 降为**可空的关联缓存、去外键**，唯一键 `(player_tag, period)` → `(account_name, period)`。报名导入**不再写 accounts、不再临时建档、不再合并**：`accounts` 全由 COC 权威建档 + 战绩历史分填充，报名侧只读反查真实 Tag 做缓存。"报名有 / COC 无"的新人照常入 `registrations`、排序得 0 分。由此**退休**了 `is_provisional` 临时建档、`merge_provisional` 合并、`unmatched.py` 未匹配钩子、coc-sync 残留告警一整套逻辑（原隐患 #14/#16 随之消解）。架构细节另见 `DESIGN.md` §13.6、§十四。新增**战营排除名单 `EXCLUDED_CAMP_NAMES`**：在导入阶段（`importer._read_camp`）和排序阶段（`roster._load_accounts`）双阶段过滤，排除名单上的账号正常入库但不出现在联赛名单中。
 >
-> **v2.3 队伍分配（本次更新）**：在排序名单基础上新增**自动队伍填充**（`team_filler.py`，纯函数，36 个单测）——按 `TEAMS` 配置将排序后人员逐队分配到具体部落队伍中。支持实战最低匹配值门槛（低于阈值的 combat → shell）、预留位置（`reserved_slots`：>0 留空位 / <0 多招备选）、最后一个实战队边界处理（③a 刚好 / ③b 溢出入壳子 / ③c 缺口<5 从壳子协调 / ③d 缺口≥5 不协调）。`registrations` 新增 `team_name` 列，同一 sheet 导出时上半部分排序名单 + 下半部分队伍明细。`arrange()` / `arrange_and_export()` 签名改为返回三元组。详见 `DESIGN.md` §5.x.8。
+> **v2.3 队伍分配（本次更新）**：在排序名单基础上新增**自动队伍填充**（`team_filler.py`，纯函数，36 个单测）——按 `TEAMS` 配置将排序后人员逐队分配到具体部落队伍中。支持实战最低匹配值门槛（低于阈值的 combat → shell）、预留位置（`reserved_slots`：>0 留空位 / <0 多招备选）、最后一个实战队边界处理（③a 刚好 / ③b 溢出入壳子 / ③c 缺口<5 从壳子协调 / ③d 缺口≥5 不协调）。`registrations` 新增 `team_name` 列，`ARRANGEMENT_OUTPUT_HEADERS` 新增 `cur_team`/`prev_team` 列。详见 `DESIGN.md` §5.x.8。
 >
 > **v2.4 升降级（本次更新）**：新增**实战队伍升降级系统**（`promotion.py`，纯函数，12 个单测）——在 `fill_teams()` 后根据 CWL 星数在相邻实战队伍间交换人员（≤18 星逐级下沉，21 满星逐级上升）。`fetch_cwl_data.py` 合并 COC API 拉取 + results 表导入 + 冷启动回退，按队伍级缓存和容错。`war_result/repository.py` 新增 `get_results_by_period()`，`player/service.py` 新增 `resolve_name_by_tag()`。详见 `docs/promotion_relegation_design.md`。
 >
 > **v2.6 发布简化（本次更新）**：新增 `publish-results` 命令 + `publish_to_results.sh`，将 Part4 网格发布到公示文档。前 20 行固定文字直接硬编码为 `PUBLISH_FIXED_ROWS` 类常量，Part4 数据复用 `arrange()` 结果保证与编排名单完全一致。删除了 ~170 行复杂的模板匹配逻辑（`_get_template_fixed_rows`、`_assemble_publish_content`、`_rebuild_team_results`），无需 `--template-sheet` 参数。
+>
+> **v2.7 列结构优化（本次更新）**：`ARRANGEMENT_OUTPUT_HEADERS` 删除 `team_name`（由 `cur_team`/`prev_team` 替代）。Part4 改为独立 5 列写入（`_append_part4_to_sheet`），不经过 header dict 映射，避免 `cur_team`/`prev_team` 在 Part4 区域产生中间空列。`insert_normal_new` 从二分插入改为追加到实战区末尾（壳子区之前）。`NEW_NORMAL_INSERT_START` 已废弃。Part4 抬头行管理信息放第 5 列。
 >
 > **部落成员身份体系**：`accounts.membership_status`（`member`/`left`）与 **coc-sync 退部对账**——与报名维度 `status` 完全解耦。详见 `DESIGN.md` §八、§十三、§十四（§14.6 退部对账 / §14.7 大本等级预留）。
 
@@ -160,8 +162,9 @@ flowchart TD
    - `arrange(period, weights, teams, combat_min_match_value, star_data)`（v2.4 返回四元组 `(有序名单, 队伍结果, 升降级日志, 星数数据)`）：参数 `period` 为**联赛月份**，直接用于读 `registrations(period)`（v2.5 统一）；读上月 CWL 星数时用 `_prev_period(period)` 查 `results` 表 → 调 `sort_accounts()` → 调 `fill_teams()` → 调 `apply_promotion_relegation()` 升降级 → `rebuild_assignment_map()` 修复 team_name → `update_arrangement()` + `update_team_name()` 回写。
    - `_load_combat_star_data(cwl_period)`（v2.4 新增）：从 `results` 表按 `cwl_period + league_type='combat'` 读取星数，经 `resolve_name_by_tag()` 反查 `{account_name: total_stars}`。cwl_period = 联赛月-1。
    - `_load_combat_team_map(cwl_period)`：从 `results` 表读取 CWL 队伍归属（team_name/clan_tag 存于 raw_metrics），用于缺席老兵原队查找。
-   - `_build_part4_grid(team_results)`（v2.6）：构建 Part4 5 列网格排布（队伍抬头 + 成员按每行 5 人排列，壳子带匹配值）。
-   - `arrange_and_export(...)`（v2.4 返回四元组）：`arrange()` + `write_sheet()` 导出到新 sheet（缺省名 `名单_<period>`），同一 sheet 含排序名单 + 队伍明细 + Part4 网格。
+   - `_build_part4_grid(team_results)`（v2.6）：构建 Part4 5 列网格排布（队伍抬头：管理信息放第 5 列；成员按每行 5 人排列，壳子带匹配值）。
+   - `arrange_and_export(...)`（v2.7 返回四元组）：`arrange()` + `write_sheet()` 写 Part1-3 → `_append_part4_to_sheet()` 追加 Part4 网格（5 列独立写入，不经过 header dict 映射）。
+   - `_append_part4_to_sheet(target, sheet_name, grid)`（v2.7）：用 `updateRangeRequest` 覆盖写入 Part4 数据，不删表重建，保持 Part1-3 原有格式。
    - `publish_part4_to_doc(period, publish_doc_id)`（v2.6）：调用 `arrange()` 获取 team_results → `_build_part4_grid()` 生成网格 → 拼接 `PUBLISH_FIXED_ROWS`（前 20 行固定文字）+ 网格 → 写入公示文档。
    - `PUBLISH_FIXED_ROWS`（v2.6）：类常量，公示文档前 20 行固定文字（规则说明、报名链接等），不再从模板 sheet 读取。
 
@@ -206,7 +209,7 @@ flowchart TD
     - `REGISTRATION_TAG_SOURCE`：`"account_name"`（昵称反查模式）。
     - `REGISTRATION_DEDUP`：`"latest_submit"` 去重策略。
     - `JOIN_COMBAT_TRUE_TEXTS`：`{"是","yes","y","true","1","参加"}`。
-    - `ARRANGEMENT_OUTPUT_HEADERS`：名单输出列顺序（含 `team_name` 列，v2.3）。
+    - `ARRANGEMENT_OUTPUT_HEADERS`：名单输出列顺序（v2.7 删除 `team_name`，由 `cur_team`/`prev_team` 替代）。
     - `TEAMS`：队伍配置列表（v2.3 新增），每队含 `name/member_count/league_level/clan_tag/manager/category/reserved_slots`。
     - `COMBAT_MIN_MATCH_VALUE`：实战最低匹配值门槛（v2.3 新增）。
     - `PROMOTION_RELEGATION_CONFIG`：升降级参数 `{count, promotion_min_stars, relegation_max_stars}`（v2.4 新增）。

@@ -28,19 +28,18 @@ from typing import Any
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from modules.coc_sync.api_client import CocApiClient, CocApiError  # noqa: E402
+from modules.cwl_registration.config import TEAMS  # noqa: E402
 from shared.config.common import DB_PATH, LEAGUE_COMBAT  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_ROOT = ROOT / "data"
 
-# 实战队伍（从 config.py TEAMS 中提取）
-TEAMS_TO_FETCH = [
-    ("冠一 一队", "#2GGGGGGG"),
-    ("冠一 二队", "#2JP8PLQLJ"),
-    ("冠三",     "#2QQQQ2G"),
-    ("大一 A",   "#2R8RCPY0J"),
-    ("大一 B",   "#2C9QCL892"),
-    ("大一 C",   "#2CU9JPYU8"),
+# 实战队伍（从 config.TEAMS 动态提取，带队伍编号 team_index）
+# team_index = combat 队伍在 TEAMS 配置中的顺序索引，是队伍的唯一身份标识
+# （team_name / clan_tag 仅用于展示，可能重名或变更）
+TEAMS_TO_FETCH: list[tuple[int, str, str]] = [
+    (i, t["name"], t["clan_tag"])
+    for i, t in enumerate(t for t in TEAMS if t["category"] == LEAGUE_COMBAT)
 ]
 
 ALERT_LINE = "\n" + "=" * 65 + "\n"
@@ -151,13 +150,12 @@ def _fetch_from_api(data_dir: Path) -> list[str]:
         return []
 
     data_dir.mkdir(parents=True, exist_ok=True)
-    existing_files = {f.stem.replace("_", " ") for f in data_dir.glob("*.json")}
     client = CocApiClient()
 
     ok_teams = []
-    for team_name, clan_tag in TEAMS_TO_FETCH:
-        # 已有文件且 <2h，跳过重新拉取
-        filepath = data_dir / f"{team_name.replace(' ', '_')}.json"
+    for team_index, team_name, clan_tag in TEAMS_TO_FETCH:
+        # 已有文件且 <2h，跳过重新拉取（文件名用 team_index 避免重名冲突）
+        filepath = data_dir / f"{team_index}_{team_name.replace(' ', '_')}.json"
         if filepath.exists():
             age_h = (datetime.now().timestamp() - filepath.stat().st_mtime) / 3600
             if age_h < 2:
@@ -169,16 +167,17 @@ def _fetch_from_api(data_dir: Path) -> list[str]:
         if data is None:
             print(f"  {team_name}: ❌ 拉取失败")
             # 如果有旧文件，仍可使用
-            if team_name in existing_files:
+            if filepath.exists():
                 print(f"    ↳ 旧数据仍可用")
                 ok_teams.append(team_name)
             continue
 
+        data["team_index"] = team_index
         filepath.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"  {team_name}: ✅ ({data['n_wars']}场 {data['n_players']}人)")
         ok_teams.append(team_name)
 
-    failed = [t for t, _ in TEAMS_TO_FETCH if t not in ok_teams]
+    failed = [t for _, t, _ in TEAMS_TO_FETCH if t not in ok_teams]
     print(f"\n[fetch] 成功: {len(ok_teams)}/{len(TEAMS_TO_FETCH)} 队" +
           (f"，失败: {failed}" if failed else ""))
     return ok_teams
@@ -215,6 +214,7 @@ def _import_to_results(data_dir: Path, cwl_period: str) -> tuple[int, int]:
                     "total_stars": p["total_stars"],
                     "team_name": team.get("team_name"),
                     "clan_tag": team.get("clan_tag"),
+                    "team_index": team.get("team_index"),
                 })),
             )
             n_ok += 1
@@ -268,7 +268,7 @@ def main() -> int:
         return 1
 
     # ── 升降级参与总结 ──
-    team_order = [t for t, _ in TEAMS_TO_FETCH]
+    team_order = [t for _, t, _ in TEAMS_TO_FETCH]
     print(f"\n── 升降级参与情况（{cwl_period} CWL）──")
     for i in range(len(team_order) - 1):
         hi, lo = team_order[i], team_order[i + 1]

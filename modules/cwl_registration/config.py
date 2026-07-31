@@ -72,7 +72,8 @@ CAMP_COLUMN_KEYWORDS = {
 ARRANGEMENT_OUTPUT_HEADERS = [
     "rank_order",
     "league_type",
-    "team_name",        # 队伍分配结果
+    "cur_team",         # 当月队伍（"index name" 拼接，区分同名队伍）
+    "prev_team",        # 上月队伍（"index name" 拼接，区分同名队伍）
     "movement",         # 升降级标识（v2.4）↑升级/↓降级/空
     "player_tag",
     "account_name",
@@ -140,3 +141,22 @@ PROMOTION_RELEGATION_CONFIG = {
     "promotion_min_stars": 21,   # 升级门槛：≥ 此值才可升级（满星）
     "relegation_max_stars": 18,  # 降级门槛：≤ 此值触发降级
 }
+
+
+# ---------------------------------------------------------------------------
+# 黑名单与白名单（基准升降级方案 v3.0）
+#
+# 黑名单：其中的账号不出现在任何队伍中。在阶段0（前置过滤）从所有数据源排除。
+# 白名单：每一项 (account_name, clan_tag) 强制安排到指定队伍开头。在阶段8
+#         （队伍填充后）处理，即使该账号没报名也强制插入。
+# ---------------------------------------------------------------------------
+BLACK_LIST: set[str] = set()
+
+WHITE_LIST: list[tuple[str, str]] = []
+
+# 战营新增人员起始插入编号（第3队开头，前两支高等级队不放新人）
+NEW_COMBAT_INSERT_START = 30
+
+# 普通营新增人员起始插入编号（已废弃：现改为追加到实战区末尾，不再按编号插入）
+# 保留此常量仅为兼容旧引用，当前逻辑中不再生效。
+NEW_NORMAL_INSERT_START = 45

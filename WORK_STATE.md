@@ -10,6 +10,7 @@
 - [x] 135 测试全绿
 - [x] register_and_arrange.sh 一键全流程
 - [x] Part4 网格发布：publish-results 命令 + publish_to_results.sh（前 20 行固定文字硬编码，复用 arrange() 保证一致性）
+- [x] v2.7 列结构优化：ARRANGEMENT_OUTPUT_HEADERS 删除 team_name（由 cur_team/prev_team 替代），Part4 独立 5 列写入，insert_normal_new 改为追加到实战区末尾
 - [x] 文档全面更新 + scripts/README.md 使用文档
 
 ## 时间语义（最终版）

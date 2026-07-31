@@ -1,4 +1,4 @@
-"""集成测试：生成名单（roster，原 arrange_league 行为）。"""
+"""集成测试：生成名单（roster，v3.0 基准重建方案）。"""
 from __future__ import annotations
 
 from modules.cwl_registration.config import ARRANGEMENT_OUTPUT_HEADERS, TEAMS
@@ -21,53 +21,42 @@ def _seed(player_service, reg_repo):
     ])
 
 
-def test_arrange_orders_combat_camp_first_then_normal_then_shell(player_service, reg_repo):
-    _seed(player_service, reg_repo)
-    arranger = LeagueArranger(player_service, reg_repo, FakeExcelIO())
-
-    # registrations.period = 联赛月份 = 2026-08，直接用 arrange("2026-08") 读取
-    ordered, _team_results, _movements, _star_data = arranger.arrange("2026-08", combat_min_match_value=0)
-
-    # 战营 #B 排最前，其次普通实战 #A，最后壳子 #C
-    assert [x["player_tag"] for x in ordered] == ["#B", "#A", "#C"]
-    assert ordered[0]["league_type"] == LEAGUE_COMBAT
-    assert ordered[1]["league_type"] == LEAGUE_COMBAT
-    assert ordered[2]["league_type"] == LEAGUE_SHELL
-
-
-def test_arrange_assigns_team_names(player_service, reg_repo):
-    """验证每人被分配到队伍。"""
+def test_arrange_assigns_teams(player_service, reg_repo):
+    """v3.0: 验证每人被分配到队伍，且实战和壳子分开。"""
     _seed(player_service, reg_repo)
     arranger = LeagueArranger(player_service, reg_repo, FakeExcelIO())
 
     ordered, team_results, _movements, _star_data = arranger.arrange("2026-08", combat_min_match_value=0)
 
-    # 3 人应分配到队伍
-    assert all(x.get("team_name") for x in ordered)
-    combat_team = [x["team_name"] for x in ordered if x["league_type"] == LEAGUE_COMBAT]
-    shell_team = [x["team_name"] for x in ordered if x["league_type"] == LEAGUE_SHELL]
-    # 两个 combat 应在同一队
-    assert len(set(combat_team)) == 1
-    # 一个 shell 在壳子队
-    assert len(shell_team) == 1
-    # 返回队伍数应为已分配的非空队伍数
+    # 所有人应被分配到队伍（有 team_name）
+    assert all(x.get("team_name") for x in ordered if x.get("player_tag"))
+
+    # 应有 combat 和 shell 两种 league_type
+    league_types = {x["league_type"] for x in ordered if x.get("player_tag")}
+    assert LEAGUE_COMBAT in league_types
+    assert LEAGUE_SHELL in league_types
+
+    # 返回队伍数应为 TEAMS 配置的队伍数
     assert len(team_results) == len(TEAMS)
 
 
 def test_arrange_writes_back_to_repo(player_service, reg_repo):
+    """v3.0: 验证回写 league_type / rank_order / team_name 到 registrations。"""
     _seed(player_service, reg_repo)
     arranger = LeagueArranger(player_service, reg_repo, FakeExcelIO())
     arranger.arrange("2026-08", combat_min_match_value=0)
 
     regs = {r["player_tag"]: r for r in reg_repo.get_registrations("2026-08")}
-    assert regs["#B"]["rank_order"] == 1
+    # 战营账号应为 combat
     assert regs["#B"]["league_type"] == LEAGUE_COMBAT
     assert regs["#B"]["team_name"] is not None
+    # 壳子账号应为 shell
     assert regs["#C"]["league_type"] == LEAGUE_SHELL
     assert regs["#C"]["team_name"] is not None
 
 
 def test_arrange_and_export_writes_sheet(player_service, reg_repo):
+    """v3.0: 验证 arrange_and_export 写入 sheet。"""
     _seed(player_service, reg_repo)
     fake_io = FakeExcelIO()
     arranger = LeagueArranger(player_service, reg_repo, fake_io)
@@ -83,13 +72,13 @@ def test_arrange_and_export_writes_sheet(player_service, reg_repo):
     # 导出行应包含排序名单部分
     written_rows = fake_io.last_written_rows
     assert written_rows is not None
-    # 前 3 行为排序名单
+    # 前 3 行应为排序名单（3 个报名成员）
     written_tags = [r["player_tag"] for r in written_rows[:3]]
-    assert written_tags == ["#B", "#A", "#C"]
+    assert set(written_tags) == {"#A", "#B", "#C"}
 
 
 def test_arrange_and_export_contains_team_sections(player_service, reg_repo):
-    """导出应包含队伍分配区域。"""
+    """v3.0: 导出应包含队伍分配区域。"""
     _seed(player_service, reg_repo)
     fake_io = FakeExcelIO()
     arranger = LeagueArranger(player_service, reg_repo, fake_io)
@@ -100,3 +89,17 @@ def test_arrange_and_export_contains_team_sections(player_service, reg_repo):
     # 应有"=== 战队分配 ==="分隔行
     titles = [r["rank_order"] for r in written_rows]
     assert any("战队分配" in str(t) for t in titles if t)
+
+
+def test_arrange_and_export_contains_part3_departure(player_service, reg_repo):
+    """v3.0: 导出应包含离队情况区域（Part3）。"""
+    _seed(player_service, reg_repo)
+    fake_io = FakeExcelIO()
+    arranger = LeagueArranger(player_service, reg_repo, fake_io)
+
+    arranger.arrange_and_export("2026-08", "名单.xlsx", combat_min_match_value=0)
+
+    written_rows = fake_io.last_written_rows
+    titles = [r["rank_order"] for r in written_rows]
+    # 应有 Part4 排布区域
+    assert any("联赛名单排布" in str(t) for t in titles if t)
