@@ -753,7 +753,7 @@ class LeagueArranger:
         _ordered, team_results, _movements, _star_data = self.arrange(period)
 
         # 3. 生成 Part4 网格（5 列）
-        grid, _title_indices = self._build_part4_grid(team_results)
+        grid, title_indices = self._build_part4_grid(team_results)
 
         # 4. 拼接：前 20 行固定文字 + Part4 网格
         combined_rows = self.PUBLISH_FIXED_ROWS + grid
@@ -762,9 +762,12 @@ class LeagueArranger:
         need_cols = max((len(row) for row in combined_rows), default=1) or 1
         need_rows = len(combined_rows)
 
-        # 6. 写入目标文档
+        # 6. 写入目标文档（队伍抬头行红色字体）
+        fixed_count = len(self.PUBLISH_FIXED_ROWS)
+        highlight_rows = {fixed_count + idx for idx in title_indices}
         self._write_publish_sheet(
-            publish_doc_id, sheet_name, combined_rows, need_rows, need_cols
+            publish_doc_id, sheet_name, combined_rows, need_rows, need_cols,
+            highlight_rows=highlight_rows,
         )
 
         return sheet_name
@@ -776,10 +779,11 @@ class LeagueArranger:
         combined_rows: list[list[str]],
         row_count: int,
         col_count: int,
+        highlight_rows: set[int] | None = None,
     ) -> None:
         """直接将 2D 数据写入腾讯文档（跳过 write_sheet 的 dict 转换）。
 
-        直接使用 TencentDocAdapter 的底层 API，避免 dict 格式转换的开销。
+        highlight_rows: 需要红色字体的行索引集合（0-based）。
         """
         from shared.io_adapter.tencent_doc import TencentDocAdapter
         adapter = self.excel_io
@@ -797,8 +801,10 @@ class LeagueArranger:
             )
 
         # 转换为腾讯文档 cell 格式并写入
+        _highlight = highlight_rows or set()
+        red_fmt = {"fontColor": {"red": 255, "green": 0, "blue": 0, "alpha": 255}}
         matrix = [
-            [adapter._cell(v) for v in row]
-            for row in combined_rows
+            [adapter._cell(v, red_fmt if i in _highlight else None) for v in row]
+            for i, row in enumerate(combined_rows)
         ]
         adapter._write_range(doc_id, sheet_id, matrix)
