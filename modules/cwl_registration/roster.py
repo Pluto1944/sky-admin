@@ -636,6 +636,7 @@ class LeagueArranger:
         """将 Part4（联赛名单排布网格）发布到最终报名结果公示文档。
 
         文档结构：前 20 行固定文字 + 第 21 行起为 Part4 队伍编排网格。
+        数据来源：与 arrange_and_export 一致，走 arrange() → 排序/填充/升降级。
 
         Args:
             period: 联赛月份，如 "2026-08"
@@ -650,12 +651,12 @@ class LeagueArranger:
 
         # 1. 计算目标 sheet 名
         y, m = period.split("-")
-        short_year = y[2:]  # "26"
-        month_num = str(int(m))  # "8"
+        short_year = y[2:]
+        month_num = str(int(m))
         sheet_name = f"{short_year}.{month_num}月联赛 报名结果"
 
-        # 2. 从 registrations 表重建 team_results
-        team_results = self._rebuild_team_results(period)
+        # 2. 走完整编排流程（排序/填充/升降级），与 arrange_and_export 数据一致
+        _ordered, team_results, _movements, _star_data = self.arrange(period)
 
         # 3. 生成 Part4 网格
         grid, _title_indices = self._build_part4_grid(team_results)
@@ -673,49 +674,6 @@ class LeagueArranger:
         )
 
         return sheet_name
-
-    def _rebuild_team_results(self, period: str) -> list[dict]:
-        """从 registrations 表重建 team_results（与 fill_teams 输出格式一致）。
-
-        同一个 team_name 可能有多个队伍配置（如"大一"有多个 clan_tag），
-        按 TEAMS 配置逐条重建，每条的 key 为 (name, clan_tag)。
-        """
-        regs = self.reg_repo.get_registrations(period)
-        # 按 (team_name, clan_tag) 分组
-        by_key: dict[tuple[str, str], list[dict]] = {}
-        for r in regs:
-            tn = r.get("team_name")
-            if not tn:
-                continue
-            # 找到对应的 clan_tag
-            ct = ""
-            for t in TEAMS:
-                if t["name"] == tn:
-                    ct = t.get("clan_tag", "")
-                    break
-            key = (tn, ct)
-            by_key.setdefault(key, []).append(r)
-
-        # 按 TEAMS 配置顺序输出
-        results = []
-        for t_cfg in TEAMS:
-            name = t_cfg["name"]
-            ct = t_cfg.get("clan_tag", "")
-            members = by_key.get((name, ct), [])
-            if not members:
-                continue
-            results.append({
-                "team_name": name,
-                "category": t_cfg.get("category", ""),
-                "clan_tag": ct,
-                "manager": t_cfg.get("manager", ""),
-                "member_count": t_cfg.get("member_count", len(members)),
-                "filled_count": len(members),
-                "members": members,
-            })
-        return results
-
-
 
     def _write_publish_sheet(
         self,
