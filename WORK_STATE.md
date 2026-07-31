@@ -1,4 +1,4 @@
-# 工作状态（2026-07-30）
+# 工作状态（2026-07-31）
 
 ## 当前进度
 
@@ -9,6 +9,7 @@
 - [x] api_client.py 正式添加 get_clan_warlog / get_cwl_war / get_league_group（消除猴子补丁）
 - [x] 135 测试全绿
 - [x] register_and_arrange.sh 一键全流程
+- [x] Part4 网格发布：publish-results 命令 + publish_to_results.sh（前 20 行固定文字硬编码，复用 arrange() 保证一致性）
 - [x] 文档全面更新 + scripts/README.md 使用文档
 
 ## 时间语义（最终版）
@@ -61,6 +62,7 @@ python cli.py arrange --period 2026-08 -o 2026-08名单.xlsx       # 编排
 | 脚本 | 用途 | period |
 |------|------|--------|
 | `register_and_arrange.sh` | 一键全流程 | 联赛月份 |
+| `publish_to_results.sh` | 发布 Part4 到公示文档 | 联赛月份 |
 | `fetch_cwl_data.py` | 拉取+导入DB+回退 | CWL 实际发生月 |
 | `fetch_cwl_data.sh` | 仅拉JSON | CWL 实际发生月 |
 
@@ -88,6 +90,6 @@ PROMOTION_RELEGATION_CONFIG = {
 - modules/player/service.py
 - modules/coc_sync/api_client.py
 - cli.py, tests/cwl_registration/test_roster.py
-- scripts/register_and_arrange.sh
+- scripts/register_and_arrange.sh, scripts/publish_to_results.sh
 - scripts/fetch_cwl_data.py, scripts/probe_cwl_data.py
-- DESIGN.md, CODE_REVIEW.md, docs/promotion_relegation_design.md
+- DESIGN.md, README.md, WORK_STATE.md, CODE_REVIEW.md, docs/promotion_relegation_design.md

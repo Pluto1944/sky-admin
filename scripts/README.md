@@ -10,6 +10,8 @@
 | `arrange` | 联赛月份（安排哪月联赛） | `--period 2026-08` |
 | `register_and_arrange.sh` | 联赛月份（一站式入口） | `2026-08` |
 
+| `publish-results` | 联赛月份 | `--period 2026-08` |
+
 规则：**registrations.period = 联赛月份，results.period = CWL/战绩实际发生月。**
 
 示例：8 月联赛需要 8 月报名数据 + 7 月 CWL 星数
@@ -36,6 +38,21 @@ scripts/register_and_arrange.sh 2026-08
 3. 编排名单 + 升降级 → 腾讯在线文档（联赛月份 = 2026-08）
 
 前置：`.env` 中配置 `COC_API_TOKEN` + `TENCENT_DOC_*` + `REG_DOC_FILE_ID` + `ROSTER_DOC_FILE_ID`
+
+---
+
+### `publish_to_results.sh` — 发布 Part4 网格到公示文档
+
+```bash
+scripts/publish_to_results.sh 2026-08
+```
+
+内部：
+1. 调用 `publish-results --period 2026-08` 
+2. 走完整 `arrange()` 流程，生成 Part4 网格
+3. 拼接前 20 行固定文字 + Part4 网格 → 写入 `PUBLISH_DOC_FILE_ID`
+
+前置：`registrations` 表已有编排数据（即 `arrange` 已执行过）。
 
 ---
 

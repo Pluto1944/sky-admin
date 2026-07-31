@@ -1,6 +1,6 @@
 # 联赛报名与名单编排管理系统 — 设计方案
 
-> 版本：v2.4
+> 版本：v2.6
 > 说明：本文档为编码前的完整设计，并已随真实报名表结构落地更新（见 §5.x）。IO 层采用可替换适配器，第一版走本地 xlsx，预留腾讯文档 API 接口；战绩计算做成可插拔的空函数，后续补充公式。
 >
 > **v2.0 架构升级**：由"技术分层"（core/io_adapter/db）重构为"业务领域分模块"（player 中枢 + cwl_registration + war_result + coc_sync），详见 §十三。原设计中的分层思想（纯函数 / IO 抽象 / 存储抽象 / 依赖注入）在新架构中完整保留，只是按领域重新组织归属。
@@ -14,6 +14,8 @@
 > **v2.4 升降级**：新增**实战队伍升降级系统**（`promotion.py`，纯函数）——在 `fill_teams()` 后根据 CWL 星数在相邻实战队伍间交换人员（≤18 星逐级下沉，满星 21 逐级上升）。`fetch_cwl_data.py` 合并 COC API 拉取 + results 表导入 + 冷启动回退，按队伍级缓存和容错。详见 `docs/promotion_relegation_design.md`。
 >
 > **v2.5 period 语义统一**：所有 CLI 接口的 `--period` 统一为**联赛月份**（实际打 CWL 的月份）。`registrations.period` 从报名时间改为联赛时间，与 `arrange --period` 对齐。`fetch_cwl_data.py` 保持传入 CWL 实际发生月（编排 N 月联赛时传 N-1 月）。`arrange()` 不再需要为读 registrations 做 `_prev_period()` 转换，仅在读上月 CWL 星数时使用。
+>
+> **v2.6 发布简化**：新增 `publish-results` 命令，将 Part4 网格发布到公示文档。前 20 行固定文字直接硬编码（`PUBLISH_FIXED_ROWS`），Part4 数据复用 `arrange()` 结果保证一致性。删除了 ~170 行复杂的模板匹配逻辑（`_get_template_fixed_rows`、`_assemble_publish_content`、`_rebuild_team_results`）。
 
 ---
 

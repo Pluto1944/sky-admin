@@ -1,6 +1,6 @@
 # sky-admin · 联赛报名与名单编排管理系统
 
-按账号管理部落联赛的**报名导入 → 名单编排 → 战绩回写**，长期跟踪账号状态。设计细节见 [`DESIGN.md`](./DESIGN.md)。
+按账号管理部落联赛的**报名导入 → 名单编排 → 战绩回写 → 结果发布**，长期跟踪账号状态。设计细节见 [`DESIGN.md`](./DESIGN.md)。
 
 ## 环境
 
@@ -22,10 +22,13 @@ python cli.py coc-sync --clan '#2QQ' --clan '#XX'   # 临时只同步指定部�
 # 1. 导入报名表（写入 registrations 报名事实；按昵称反查真实 Tag 缓存，并刷新账号报名状态）
 python cli.py import-reg 报名表.xlsx --period 2026-07
 
-# 2. 生成实战/壳子名单、队伍分配并导出（同一 sheet：排序名单 + 队伍明细）
+# 2. 生成实战/壳子名单、队伍分配并导出（同一 sheet：排序名单 + 队伍明细 + Part4 网格）
 python cli.py arrange --period 2026-07 -o 名单.xlsx
 
-# 3. 联赛结束后导入战绩，更新历史分
+# 3. 将 Part4 编排结果发布到公示文档
+python cli.py publish-results --period 2026-07 --file-id <docId>
+
+# 4. 联赛结束后导入战绩，更新历史分
 python cli.py import-result 战绩表.xlsx --period 2026-07
 
 # 查看账号档案（可按状态过滤）
@@ -70,7 +73,7 @@ modules/
   cwl_registration/          # ② CWL 报名：importer(报名→registrations) + roster(报名快照→名单+队伍分配，含排除名单过滤) + sorter + rank_score + team_filler
   war_result/                # ③ 战绩：importer(→历史分) + history_score + repository
   coc_sync/                  # ④ COC 同步：api_client(底层HTTP) + mapper(纯函数映射) + config(部落清单) + service(唯一API编排出口)
-scripts/                     # 运维脚本：register_and_arrange.sh（报名一体化）/ sync_and_export.sh（长期维护）/ load_env.sh（凭证加载）
+scripts/                     # 运维脚本：register_and_arrange.sh（报名一体化）/ publish_to_results.sh（发布公示）/ sync_and_export.sh（长期维护）/ load_env.sh（凭证加载）
 tests/                       # 按模块归类：shared / player / cwl_registration / war_result / coc_sync
 ```
 
