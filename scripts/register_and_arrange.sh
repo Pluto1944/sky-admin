@@ -60,13 +60,19 @@ echo ""
 echo "[1] 导入报名表（联赛时间=${LEAGUE_PERIOD}）..."
 "$PY" cli.py import-reg "$REG_DOC_FILE_ID" --period "$LEAGUE_PERIOD" --to tencent --sheet "$REG_SHEET"
 
+
 # [2] 拉取星数 → results 表（CWL 月 = 联赛-1）
+# 如果是 2026-07，数据已通过迁移脚本写入 league_results，跳过 API 拉取
 echo ""
-echo "[2] 拉取 CWL 星数 → results 表..."
-if "$PY" scripts/fetch_cwl_data.py --period "$REG_PERIOD"; then
-  echo "[2] ✅ 星数就绪"
+if [[ "$REG_PERIOD" == "2026-07" ]]; then
+  echo "[2] CWL 月=${REG_PERIOD}，数据已迁移，跳过 API 拉取"
 else
-  echo "[2] ⚠️ 无星数数据，编排时自动跳过升降级（所有人员保持原队）"
+  echo "[2] 拉取 CWL 星数 → results 表..."
+  if "$PY" scripts/fetch_cwl_data.py --period "$REG_PERIOD"; then
+    echo "[2] ✅ 星数就绪"
+  else
+    echo "[2] ⚠️ 无星数数据，编排时自动跳过升降级（所有人员保持原队）"
+  fi
 fi
 echo ""
 

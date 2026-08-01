@@ -33,6 +33,7 @@ def _build_team_result(team: dict, members: list[dict], team_index: int) -> dict
     reserved = max(team.get("reserved_slots", 0), 0)
     return {
         "team_name": team["name"],
+        "coc_name": team.get("coc_name", ""),  # COC 真实部落名称
         "team_index": team_index,
         "category": team["category"],
         "clan_tag": team.get("clan_tag"),

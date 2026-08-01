@@ -211,25 +211,36 @@ class LeagueArranger:
         return merged
 
     def _load_combat_star_data(self, cwl_period: str) -> dict[str, int]:
-        """从 results 表加载指定月份 CWL 实战星数，返回 {account_name: total_stars}。
+        """加载指定月份 CWL 实战星数，返回 {account_name: total_stars}。
 
-        cwl_period 语义：**CWL 实际发生月**（即 results.period）。
+        cwl_period 语义：**CWL 实际发生月**。
         编排 N 月联赛时，需要的 CWL 星数来自 N-1 月，调用方应传入
         `_prev_period(league_period)`。
 
-        数据路径：
-        1. results 表按 cwl_period + league_type='combat' 查询
-        2. raw_metrics 中提取 total_stars
-        3. player_tag → account_name（通过 accounts 表反查）
-        4. 返回 {account_name: total_stars}
-
+        优先从 league_results 新表读取；若为空则回退到 results 旧表。
         若 result_repo 未注入或无数据，返回空 dict（升降级自动跳过）。
         """
+        # 优先读 league_results 新表
+        rows = self.reg_repo.conn.execute(
+            "SELECT player_tag, account_name, total_stars FROM league_results "
+            "WHERE period = ? AND category = ?",
+            (cwl_period, LEAGUE_COMBAT),
+        ).fetchall()
+        if rows:
+            star_data: dict[str, int] = {}
+            for r in rows:
+                name = r["account_name"]
+                stars = r["total_stars"]
+                if name and stars is not None:
+                    star_data[name] = stars
+            return star_data
+
+        # 回退到 results 旧表
         if self.result_repo is None:
             return {}
 
         rows = self.result_repo.get_results_by_period(cwl_period, league_type=LEAGUE_COMBAT)
-        star_data: dict[str, int] = {}
+        star_data = {}
         for r in rows:
             tag = r.get("player_tag")
             metrics = r.get("raw_metrics") or {}
@@ -276,26 +287,69 @@ class LeagueArranger:
                     team_clan_tags.setdefault(team_name, clan_tag)
         return team_map, team_clan_tags
 
+    def _load_prev_teams_config(self, cwl_period: str) -> list[dict] | None:
+        """从 league_teams 表读取上月队伍配置。
+
+        优先读 league_teams 表；若为空（冷启动/旧数据），回退到 config 中的 TEAMS。
+        返回的列表格式与 TEAMS 配置兼容。
+        """
+        rows = self.reg_repo.conn.execute(
+            "SELECT * FROM league_teams WHERE period = ? ORDER BY team_index",
+            (cwl_period,),
+        ).fetchall()
+        if rows:
+            return [
+                {
+                    "name": r["team_alias"],
+                    "clan_tag": r["clan_tag"],
+                    "leader": r["leader"],
+                    "member_count": r["member_count"],
+                    "league_level": r["league_level"],
+                    "category": r["category"],
+                    "reserved_slots": r["reserved_slots"] if r["reserved_slots"] is not None else 0,
+                    "coc_name": r["team_name"],  # COC 真实名称
+                }
+                for r in rows
+            ]
+        return None
+
     def _load_prev_combat_from_results(self, cwl_period: str) -> list[dict]:
-        """从 results 表构建上月实战名单（名单1 的数据源）。
+        """构建上月实战名单（名单1 的数据源）。
 
-        results 表的 raw_metrics 含 team_name / clan_tag / total_stars / team_index，
-        可同时提供成员、队伍归属和星数——比 registrations 表更可靠
-        （registrations 依赖 arrange 回写，冷启动场景可能缺失）。
-
-        team_index 是队伍编号（combat 队伍在 TEAMS 配置中的顺序索引），
-        作为队伍的唯一身份标识用于升降级分组——team_name 可能重名（如"大一"），
-        clan_tag 仅用于展示，都不能可靠地做分组 key。
+        优先从 league_results 新表读取；若为空则回退到 results 旧表。
+        team_index 是队伍编号，作为队伍的唯一身份标识用于升降级分组。
 
         返回列表，每项含:
           - account_name: 账号昵称
           - player_tag: COC Tag
-          - team_name: 上月所属队伍（展示用）
+          - team_name: 上月所属队伍（展示用，即 team_alias）
           - clan_tag: 上月所属部落 tag（展示用）
-          - team_index: 队伍编号（分组用，可能为 None 表示旧数据）
+          - team_index: 队伍编号（分组用）
           - stars: 上月总星数（无则为 None）
-          - rank_order: None（results 无此字段，分组排序靠 team_index + stars）
+          - rank_order: None
         """
+        # 优先读 league_results 新表
+        lr_rows = self.reg_repo.conn.execute(
+            "SELECT * FROM league_results WHERE period = ? AND category = ?",
+            (cwl_period, LEAGUE_COMBAT),
+        ).fetchall()
+        if lr_rows:
+            result: list[dict] = []
+            for r in lr_rows:
+                if not r["player_tag"] or not r["team_alias"]:
+                    continue
+                result.append({
+                    "account_name": r["account_name"],
+                    "player_tag": r["player_tag"],
+                    "team_name": r["team_alias"],
+                    "clan_tag": r["clan_tag"],
+                    "team_index": r["team_index"],
+                    "stars": r["total_stars"],
+                    "rank_order": None,
+                })
+            return result
+
+        # 回退到 results 旧表
         if self.result_repo is None:
             return []
 
@@ -318,9 +372,45 @@ class LeagueArranger:
                 "clan_tag": metrics.get("clan_tag"),
                 "team_index": metrics.get("team_index"),
                 "stars": stars,
-                "rank_order": None,  # results 表无此字段
+                "rank_order": None,
             })
         return result
+
+    def _write_league_teams(self, period: str, teams_cfg: list[dict]) -> None:
+        """将当月队伍配置幂等写入 league_teams 表。
+
+        teams_cfg 已通过 _fetch_clan_info 注入了 coc_name（COC 真实名称）。
+        若 coc_name 为空，保留 DB 中已有的 team_name 不被覆盖。
+        """
+        # 读取已有的 team_name（避免被空值覆盖）
+        existing = {
+            r["team_index"]: r["team_name"]
+            for r in self.reg_repo.conn.execute(
+                "SELECT team_index, team_name FROM league_teams WHERE period = ?",
+                (period,),
+            ).fetchall()
+        }
+        for team_index, team in enumerate(teams_cfg):
+            coc_name = team.get("coc_name") or existing.get(team_index)
+            self.reg_repo.conn.execute(
+                """INSERT OR REPLACE INTO league_teams
+                   (period, team_index, team_alias, team_name, clan_tag, category,
+                    member_count, leader, league_level, reserved_slots)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    period,
+                    team_index,
+                    team["name"],
+                    coc_name,
+                    team.get("clan_tag"),
+                    team["category"],
+                    team["member_count"],
+                    team.get("leader"),
+                    team.get("league_level"),
+                    team.get("reserved_slots", 0),
+                ),
+            )
+        self.reg_repo.conn.commit()
 
     def arrange(
         self,
@@ -357,6 +447,23 @@ class LeagueArranger:
             (含 team_name 的排序名单, 队伍分配结果列表, 升降级日志列表, star_data)
             升降级日志可能为空列表（无星数数据或无候选）。
         """
+        teams_cfg = teams if teams is not None else TEAMS
+
+        # 从 league_teams 表读取已有的 team_name（COC 真实名称），注入 teams_cfg
+        db_names = {
+            r["team_index"]: r["team_name"]
+            for r in self.reg_repo.conn.execute(
+                "SELECT team_index, team_name FROM league_teams WHERE period = ?",
+                (period,),
+            ).fetchall()
+        }
+        for i, t in enumerate(teams_cfg):
+            if db_names.get(i):
+                t["coc_name"] = db_names[i]
+
+        # 幂等写入当月队伍配置到 league_teams 表
+        self._write_league_teams(period, teams_cfg)
+
         # registrations.period = 联赛时间，直接查询
         accounts = self._load_accounts(period)
         ordered = sort_accounts(accounts, weights or SORT_WEIGHTS)
@@ -367,8 +474,6 @@ class LeagueArranger:
                 self.reg_repo.update_arrangement(
                     item["reg_id"], item["league_type"], item["rank_order"]
                 )
-
-        teams_cfg = teams if teams is not None else TEAMS
 
         # CWL 实际发生月 = 联赛时间 - 1（results.period 语义）
         cwl_period = _prev_period(period)
@@ -382,6 +487,9 @@ class LeagueArranger:
         if cwl_period:
             prev_combat_regs = self._load_prev_combat_from_results(cwl_period)
 
+        # 从 league_teams 表读取上月队伍配置（用于升降级分组）
+        prev_teams_cfg = self._load_prev_teams_config(cwl_period) if cwl_period else None
+
         # === 阶段 0~6：基准重建，构建最终线性名单 ===
         final_list, removed_list, movements, black_hits = build_final_list(
             accounts=ordered,
@@ -389,7 +497,7 @@ class LeagueArranger:
             star_data=star_data,
             teams=teams_cfg,
             black_list=BLACK_LIST,
-            prev_teams_config=teams_cfg,  # 上月配置暂用当月配置
+            prev_teams_config=prev_teams_cfg if prev_teams_cfg is not None else teams_cfg,
             promotion_config=PROMOTION_RELEGATION_CONFIG,
             new_combat_insert_start=NEW_COMBAT_INSERT_START,
             new_normal_insert_start=NEW_NORMAL_INSERT_START,
@@ -444,16 +552,34 @@ class LeagueArranger:
         # 从 final_list 和 team_results 重建
         assignment_map: dict[str, tuple[str, str]] = {}
         cur_team_map: dict[str, str] = {}
+        coc_team_name_map: dict[str, str] = {}  # COC 真实名称，供 Excel team_name 列
+        team_reg_team_name_map: dict[str, str] = {}  # 用于回写 registrations.team_name
         for tr in team_results:
             tn = tr["team_name"]
             cat = tr["category"]
-            cur_team = f"{tr.get('team_index')} {tn}" if tr.get("team_index") is not None else tn
+            coc_name = tr.get("coc_name") or ""
+            clan_tag = tr.get("clan_tag") or ""
+            ti = tr.get("team_index")
+            # cur_team 展示格式: "{team_index} {team_alias} {coc_name}"
+            if ti is not None:
+                cur_team = f"{ti} {tn}"
+                if coc_name:
+                    cur_team += f" {coc_name}"
+            else:
+                cur_team = tn
+            # registrations.team_name 回写格式: "{team_index} {team_alias} {coc_name} {clan_tag}"
+            reg_team_name = f"{ti} {tn}"
+            if coc_name:
+                reg_team_name += f" {coc_name}"
+            reg_team_name += f" {clan_tag}"
             for m in tr["members"]:
                 key = m.get("account_name") or ""
                 if key:
                     assignment_map[key] = (tn, cat)
                     # 优先用成员自带的 cur_team（白名单/后移可能已更新）
                     cur_team_map[key] = m.get("cur_team") or cur_team
+                    coc_team_name_map[key] = coc_name
+                    team_reg_team_name_map[key] = reg_team_name
 
         ordered_with_team: list[dict] = []
         # final_list 的顺序就是输出顺序
@@ -461,10 +587,13 @@ class LeagueArranger:
             item = dict(item)
             name = item.get("account_name") or ""
             if name in assignment_map:
-                item["team_name"], item["league_type"] = assignment_map[name]
+                # team_name 在 Excel 表头中存 COC 真实名称（空就留空）
+                item["team_name"] = coc_team_name_map.get(name, "") or ""
+                item["team_alias"], item["league_type"] = assignment_map[name]
                 item["cur_team"] = cur_team_map.get(name, "")
             else:
                 item["team_name"] = None
+                item["team_alias"] = None
                 item["cur_team"] = None
             # prev_team 来自 baseline_rebuilder（上月老兵有值，新报名为空）
             if not item.get("prev_team"):
@@ -474,11 +603,61 @@ class LeagueArranger:
                 item["movement"] = movement_map[name]
             ordered_with_team.append(item)
 
-        # 回写 team_name
+        # 将白名单插入的人员（不在 final_list 中）插入到对应队伍在 ordered_with_team 的开头位置
+        final_names = {item.get("account_name") for item in ordered_with_team}
+        # 按队伍收集白名单新增人员，记录插入偏移
+        whitelist_inserts: dict[int, list[dict]] = {}  # team_index → [items]
+        for tr in team_results:
+            ti = tr.get("team_index")
+            tn = tr["team_name"]
+            coc_name = tr.get("coc_name") or ""
+            for m in tr["members"]:
+                m_name = m.get("account_name") or ""
+                if m_name and m_name not in final_names:
+                    item = {
+                        "account_name": m_name,
+                        "player_tag": m.get("player_tag"),
+                        "player_name": m.get("player_name"),
+                        "league_type": m.get("league_type") or tr["category"],
+                        "movement": m.get("movement") or "白名单",
+                        "cur_team": m.get("cur_team", f"{ti} {tn}"),
+                        "team_name": coc_name or None,
+                        "team_alias": tn,
+                        "prev_team": None,
+                        "rank_order": None,
+                        "account_type": None,
+                        "prev_rank": None,
+                        "trophies": None,
+                        "match_value": None,
+                        "history_score": None,
+                        "reg_id": None,
+                    }
+                    whitelist_inserts.setdefault(ti, []).append(item)
+                    final_names.add(m_name)
+
+        if whitelist_inserts:
+            # 从后往前插入，避免索引偏移
+            for ti in sorted(whitelist_inserts.keys(), reverse=True):
+                items = whitelist_inserts[ti]
+                # 找到该队伍在 ordered_with_team 中的第一个位置
+                insert_pos = len(ordered_with_team)
+                for idx, item in enumerate(ordered_with_team):
+                    if item.get("team_alias") and assignment_map.get(item.get("account_name", "")):
+                        alias, _cat = assignment_map[item["account_name"]]
+                        # 找到同一队伍别名的第一个成员
+                        if alias == team_results[ti]["team_name"] and idx < insert_pos:
+                            insert_pos = idx
+                            break
+                for item in reversed(items):
+                    ordered_with_team.insert(insert_pos, item)
+
+        # 回写 team_name（格式: "{team_index} {team_alias} {coc_name} {clan_tag}"）
         for item in ordered_with_team:
-            if item.get("reg_id") is not None and item.get("team_name"):
+            name = item.get("account_name") or ""
+            reg_team_name = team_reg_team_name_map.get(name)
+            if item.get("reg_id") is not None and reg_team_name:
                 self.reg_repo.update_team_name(
-                    item["reg_id"], item["team_name"]
+                    item["reg_id"], reg_team_name
                 )
 
         # 打印升降级日志
@@ -635,10 +814,12 @@ class LeagueArranger:
                 }
             )
             # 队伍成员行
+            coc_name = tr.get("coc_name", "") or ""
             for m in tr["members"]:
-                combined_rows.append(
-                    {h: m.get(h) for h in ARRANGEMENT_OUTPUT_HEADERS}
-                )
+                # team_name 列统一用 COC 真实名称（空就留空）
+                member_row = {h: m.get(h) for h in ARRANGEMENT_OUTPUT_HEADERS}
+                member_row["team_name"] = coc_name or None
+                combined_rows.append(member_row)
             # 队伍之间空一行
             combined_rows.append({h: None for h in ARRANGEMENT_OUTPUT_HEADERS})
 

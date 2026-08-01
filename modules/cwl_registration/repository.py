@@ -104,29 +104,4 @@ class RegistrationRepository:
         )
         self.conn.commit()
 
-    def prev_team_assignments(self, period: str) -> dict[str, str]:
-        """返回某月 {account_name: team_name} 分配结果（仅取已分配队伍的行）。
 
-        供升降级时确认每个账号上月所在队伍，也可用于核对本月分配与上月的差异。
-        """
-        rows = self.conn.execute(
-            "SELECT account_name, team_name FROM registrations "
-            "WHERE period = ? AND team_name IS NOT NULL",
-            (period,),
-        ).fetchall()
-        return {r["account_name"]: r["team_name"] for r in rows if r["account_name"]}
-
-    def get_prev_combat_registrations(self, period: str) -> list[dict]:
-        """读取上月联赛中 combat 队伍的编排名单。
-
-        返回按 rank_order 排序的列表，每项含 account_name / team_name /
-        league_type / rank_order 等字段。供基准重建获取上月队伍分组信息。
-        """
-        rows = self.conn.execute(
-            "SELECT * FROM registrations "
-            "WHERE period = ? AND league_type = 'combat' "
-            "AND rank_order IS NOT NULL "
-            "ORDER BY rank_order",
-            (period,),
-        ).fetchall()
-        return [dict(r) for r in rows]

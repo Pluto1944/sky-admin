@@ -73,12 +73,13 @@ CAMP_COLUMN_KEYWORDS = {
 ARRANGEMENT_OUTPUT_HEADERS = [
     "rank_order",
     "league_type",
-    "cur_team",         # 当月队伍（"index name" 拼接，区分同名队伍）
-    "prev_team",        # 上月队伍（"index name" 拼接，区分同名队伍）
+    "cur_team",         # 当月队伍（"index alias coc_name" 拼接）
+    "prev_team",        # 上月队伍（"index alias" 拼接）
     "movement",         # 升降级标识（v2.4）↑升级/↓降级/空
     "player_tag",
     "account_name",
     "player_name",
+    "team_name",        # COC 真实部落名称（新增）
     "account_type",
     "prev_rank",
     "trophies",
@@ -114,25 +115,7 @@ TEAMS = [
     {"name": "水二",      "clan_tag": "#2GR0LPGVQ",      "leader": "leader8", "member_count": 30, "league_level": "", "manager": "", "category": "shell",  "reserved_slots": 0},
 ]
 
-# TEAMS_LAST：上月联赛队伍配置，供 fetch_cwl_data.py 拉取上月 CWL 战绩时使用。
-# 格式与 TEAMS 相同（列表顺序即队伍优先级），仅拉取 combat 类型队伍。
-# 当 fetch_cwl_data 发现 config 中有 TEAMS_LAST 时，优先使用它；否则回退到 TEAMS。
-TEAMS_LAST = [
-    # ===== 实战队伍 =====
-    {"name": "泰坦二",    "clan_tag": "#2QQ",       "leader": "leader2QQ", "member_count": 15, "league_level": "", "manager": "xxx", "category": "combat", "reserved_slots": 0},
-    {"name": "冠一 一队",  "clan_tag": "#2GGGGGGG",  "leader": "leader5", "member_count": 15, "league_level": "", "manager": "yyy", "category": "combat", "reserved_slots": 0},
-    {"name": "冠一 二队",  "clan_tag": "#2JP8PLQLJ", "leader": "Pluto leader6", "member_count": 15, "league_level": "", "manager": "zzz", "category": "combat", "reserved_slots": 0},
-    {"name": "冠三",      "clan_tag": "#2QQQQ2G",   "leader": "leader4", "member_count": 15, "league_level": "", "manager": "www", "category": "combat", "reserved_slots": 0},
-    {"name": "大一",      "clan_tag": "#2R8RCPY0J",  "leader": "官", "member_count": 15, "league_level": "", "manager": "www", "category": "combat", "reserved_slots": 0},
-    {"name": "大一",      "clan_tag": "#2C9QCL892",  "leader": "汪", "member_count": 30, "league_level": "", "manager": "www", "category": "combat", "reserved_slots": 0},
-    {"name": "大一",      "clan_tag": "#2CU9JPYU8",  "leader": "南门 ", "member_count": 30, "league_level": "", "manager": "www", "category": "combat", "reserved_slots": 0},
 
-    # ===== 壳子队伍 =====
-    {"name": "大一",      "clan_tag": "#2R9Y209LY",      "leader": "leader10", "member_count": 30, "league_level": "", "manager": "aaa", "category": "shell",  "reserved_slots": 0},
-    {"name": "大三",      "clan_tag": "#2JQR89P9G",      "leader": "leader6", "member_count": 30, "league_level": "", "manager": "bbb", "category": "shell",  "reserved_slots": 0},
-    {"name": "水一",      "clan_tag": "#2JUJRYVQP",      "leader": "登悟", "member_count": 30, "league_level": "", "manager": "ccc", "category": "shell",  "reserved_slots": 0},
-    {"name": "水二",      "clan_tag": "#2GR0LPGVQ",      "leader": "leader8", "member_count": 30, "league_level": "", "manager": "ddd", "category": "shell",  "reserved_slots": 0},
-]
 
 # 队伍分配输出表头（队伍详情的列）
 TEAM_OUTPUT_HEADERS = [

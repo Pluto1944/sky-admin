@@ -230,7 +230,7 @@ modules/cwl_registration/
 ├── promotion.py          ← 新增：升降级纯函数
 ├── config.py             ← 修改：PROMOTION_RELEGATION_CONFIG
 ├── roster.py             ← 修改：LeagueArranger 集成升降级
-├── repository.py         ← 修改：prev_team_assignments()
+├── repository.py         ← 不变
 ├── sorter.py             ← 不变
 ├── team_filler.py        ← 不变
 
@@ -368,7 +368,6 @@ data/cwl_202607/*.json ──→ load_star_data() ──→ {account_name: total
 |------|------|
 | `modules/cwl_registration/config.py` | 新增 `PROMOTION_RELEGATION_CONFIG` |
 | `modules/cwl_registration/roster.py` | LeagueArranger 新增 `result_repo`、`_load_combat_star_data()`；`arrange()` 集成升降级；参数改为联赛时间 |
-| `modules/cwl_registration/repository.py` | 新增 `prev_team_assignments()` |
 | `modules/war_result/repository.py` | 新增 `get_results_by_period()` |
 | `modules/player/service.py` | 新增 `resolve_name_by_tag()` |
 | `cli.py` | LeagueArranger 传入 `result_repo`；适配新返回值 |

@@ -8,6 +8,7 @@
 
 ## 目录
 
+0. [前置概念：排序基础](#0-前置概念排序基础)
 1. [设计原文](#1-设计原文)
 2. [12 个关键问题与回答](#2-12-个关键问题与回答)
 3. [最终方案](#3-最终方案)
@@ -18,6 +19,84 @@
 8. [关键设计决策总结](#8-关键设计决策总结)
 9. [边界场景](#9-边界场景)
 10. [测试要点](#10-测试要点)
+
+---
+
+## 0. 前置概念：排序基础
+
+在进入阶段流程之前，先理解系统中三个核心排序概念。
+
+### 0.1 综合分（rank_score）计算
+
+**代码位置**：`rank_score.py` → `compute_rank_score()`
+
+```python
+rank_score = 0.6 × 归一化(match_value) + 0.4 × 归一化(history_score)
+```
+
+| 因子 | 权重 | 说明 |
+|------|------|------|
+| `match_value` | 0.6 | 匹配值，归一化到 [0,1] |
+| `history_score` | 0.4 | 历史战绩分，归一化到 [0,1] |
+
+归一化基于当月全体报名账号的极值（`match_min/max`, `hist_min/max`），含除零保护。
+
+配置项 `SORT_WEIGHTS`（`config.py`）：
+```python
+SORT_WEIGHTS = {"match_value": 0.6, "history_score": 0.4}
+```
+
+### 0.2 初次排序分组（sort_accounts）
+
+**代码位置**：`sorter.py` → `sort_accounts()`
+
+当月报名账号被分为三组，按不同键排序后合并：
+
+| 分组 | 成员来源 | 排序键 | 合并位置 |
+|------|----------|--------|----------|
+| `combat_camp` | 战营部落成员（`account_type=combat`） | **奖杯降序**（`camp_sort_key`） | 最前面 |
+| `combat_normal` | 普通账号 + 选了"想实战" | **综合分降序** | 紧随战营之后 |
+| `shell` | 普通账号 + 未选实战 | **综合分降序** | 排在最后 |
+
+> **为什么战营用奖杯排序？** 战营账号实力更强，奖杯更能体现真实水平；普通账号用综合分（匹配值+历史战绩）排序更公平。
+
+排序后全局从 1 递增分配 `rank_order`。此阶段还会回填 `league_type`（combat/shell）到每个账号。
+
+### 0.3 关键字段说明
+
+| 字段 | 含义 | 写入时机 | 读取时机 |
+|------|------|----------|----------|
+| `rank_order` | 本月全局位次 | `sort_accounts()` 排序后分配 | 展示、下月反查为 `prev_rank` |
+| `prev_rank` | 上月全局位次 | 报名导入时从下月 registrations 反查 | `adjust_camp_by_prev_rank()` 预留接口 |
+| `team_name` | 队伍中文名（展示用） | 编排完成 `arrange()` 回写 | 展示用（不再作为冷启动回退数据源） |
+| `team_index` | 队伍在 TEAMS 配置中的顺序索引（唯一身份标识） | 队伍填充阶段写入 | 升降级分组 key（避免重名混组） |
+
+> `team_name` 可能重名（如 3 支"大一"），`team_index` 才是唯一身份标识。升降级分组和队伍匹配都使用 `team_index`。
+
+### 0.4 TEAMS 配置与队伍编号
+
+**代码位置**：`config.py` → `TEAMS`
+
+队伍按配置列表顺序从上到下编号（`team_index = 0, 1, 2, ...`），编号越大实力越弱。填充时按此顺序贪心分配。
+
+当前配置（11 支队伍）：
+
+```
+实战队伍（7支）:
+  [0] 泰坦二    15人
+  [1] 冠一 一队  15人
+  [2] 冠二      15人    ← 战营新增插入点（编号30，第3队开头）
+  [3] 冠三      15人    ← 普通营新增插入点（编号45，第4队开头）
+  [4] 大一      15人
+  [5] 大一      30人
+  [6] 大一      30人
+
+壳子队伍（4支）:
+  [7] 大一      30人
+  [8] 大三      30人
+  [9] 水一      30人
+  [10] 水二     30人
+```
 
 ---
 
@@ -311,166 +390,276 @@ NEW_NORMAL_INSERT_START = 45
 
 ---
 
-## 5. 完整流程
+## 5. 完整流程（含代码映射）
+
+整体入口：`roster.py` → `LeagueArranger.arrange()`，它串联以下所有阶段。
+
+### 整体架构图
+
+```mermaid
+flowchart TD
+    subgraph P1["前置数据准备"]
+        A["sort_accounts()<br/>sorter.py"] --> B["_load_combat_star_data()<br/>加载上月星数"]
+        A --> C["_load_prev_combat_from_results()<br/>加载上月实战名单"]
+    end
+
+    subgraph P2["基准重建 阶段0-6<br/>baseline_rebuilder.py"]
+        D["阶段0: apply_blacklist()"] --> E["阶段1: build_temp_lists()"]
+        E --> F["阶段2: rebuild_baseline()"]
+        F --> G["阶段3: remove_missing()"]
+        G --> H["阶段4: insert_combat_new()"]
+        H --> I["阶段5: insert_normal_new()"]
+        I --> J["阶段6: append_shell()"]
+    end
+
+    subgraph P3["队伍分配 阶段7-9<br/>team_builder.py"]
+        K["阶段7: fill_teams_from_final_list()"] --> L["阶段8: apply_whitelist()"]
+        L --> M["阶段9: _assign_managers()"]
+    end
+
+    subgraph P4["回写与输出<br/>roster.py"]
+        N["注入 movement 标识"] --> O["回写 team_name 到 registrations"]
+        O --> P["ExcelIO 输出 4 个 Part"]
+    end
+
+    P1 --> P2 --> P3 --> P4
+```
+
+### 阶段 0：前置过滤
+
+**函数**：`baseline_rebuilder.py` → `apply_blacklist()`
+
+黑名单从所有数据源中排除（名单1/2/3 均不含黑名单成员）。黑名单命中记录到 `black_hits`，供 Part3 展示。
+
+### 阶段 1：构建 7 个临时名单
+
+**函数**：`baseline_rebuilder.py` → `build_temp_lists()`
+
+| 名单 | 来源 | 排序规则 |
+|------|------|----------|
+| **list1** | `results` 表上月 combat 记录 | 按 `team_index`（队伍编号）分组，组内按星数降序 |
+| **list2** | 当月实战人员 | 保持 `sort_accounts()` 的输出顺序 |
+| **list3** | 当月壳子人员 | 综合分降序 |
+| **list4** | list1 - list2 | 实战缺失（上月打了但本月没报） |
+| **list5** | list2 - list1 | 实战新增（本月报了但上月没打） |
+| **list6** | list5 ∩ 战营账号 | 战营实战新增 |
+| **list7** | list5 - list6 | 普通营实战新增，综合分降序 |
+
+> **名单1 的分组逻辑**：使用 `team_index` 作为主分组 key，`team_index` 为 None 的旧数据回退到 `team_name` 分组。`prev_team` 字段拼接为 `"{team_index} {team_name}"` 格式以区分同名队伍。
+
+名单关系：
+```
+名单5 = 名单6 + 名单7
+名单4 = 名单1 - 名单2
+名单5 = 名单2 - 名单1
+```
+
+### 阶段 2：基准重建 + 升降级
+
+**函数**：`baseline_rebuilder.py` → `rebuild_baseline()`
+
+#### 2a. 切分队伍（`_split_list1_into_slots()`）
+
+将名单1 按上月队伍编号切分为 `prev_slots`，每个 slot 是一支队伍。
+
+#### 2b. 加载上月星数（`star_data`）
+
+从 `results.raw_metrics.total_stars` 加载，格式 `{player_tag: stars}`。
+
+#### 2c. 配对交换升降级（`_apply_promotion_relegation_on_slots()`）
+
+对每对相邻实战队伍（slot_k, slot_{k+1}）执行配对交换：
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│ 阶段 0：前置过滤                                          │
-│   黑名单从所有数据源中排除（名单1/2/3均不含黑名单成员）    │
-└──────────────────────────────────────────────────────────┘
-          │
-          ▼
-┌──────────────────────────────────────────────────────────┐
-│ 阶段 1：构建 7 个临时名单                                 │
-│                                                          │
-│  名单1 = results 表上月 combat（按 team_name 在上月配置    │
-│         中的顺序分组，组内按星数降序）                     │
-│         内部编号 0~N1，编号越小战力越强                     │
-│                                                          │
-│  名单2 = 当月战营账号 + 普通报名实战账号                    │
-│  名单3 = 当月报名壳子账号（按综合分降序）                   │
-│  名单4 = 名单1 - 名单2  （实战缺失：未报名/离队/转壳子）     │
-│  名单5 = 名单2 - 名单1  （实战新增）                        │
-│  名单6 = 名单5 ∩ 当月战营账号（战营实战新增）               │
-│  名单7 = 名单5 - 名单6  （普通营实战新增，综合分降序）       │
-└──────────────────────────────────────────────────────────┘
-          │
-          ▼
-┌──────────────────────────────────────────────────────────┐
-│ 阶段 2：基准重建 + 升降级（仅操作名单1）                   │
-│                                                          │
-│  2a. 名单1 按上月队伍容量切分为 prev_slots                │
-│      prev_slots[0] = [泰坦二的上月15人]                    │
-│      prev_slots[1] = [冠一一队的上月15人]                  │
-│      ...                                                  │
-│                                                          │
-│  2b. 加载上月星数 star_data                               │
-│                                                          │
-│  2c. 配对交换升降级：                                     │
-│      对每对相邻 (i, i+1)：                                │
-│        上队 ≤18星的人 → 降级到 i+1 队                     │
-│        下队 21满星的人 → 升级到 i 队                      │
-│        配对交换，每对最多换 config["count"] 人             │
-│        19-20星/无星数 → 不动                              │
-│                                                          │
-│  2d. 升降级后的 prev_slots 展开为线性列表 final_list       │
-│      编号 0~N1，跟随位置变化                               │
-└──────────────────────────────────────────────────────────┘
-          │
-          ▼
-┌──────────────────────────────────────────────────────────┐
-│ 阶段 3：删除实战缺失人员                                  │
-│                                                          │
-│  从 final_list 中删除名单4 的成员                         │
-│  （未报名/离队/转壳子）                                    │
-│  不使用占位符，人员前移，名单紧凑                          │
-│  删除的人员记录到 removed_list（供 Part3 展示）            │
-└──────────────────────────────────────────────────────────┘
-          │
-          ▼
-┌──────────────────────────────────────────────────────────┐
-│ 阶段 4：插入战营实战新增（名单6）                          │
-│                                                          │
-│  在 final_list 编号 NEW_COMBAT_INSERT_START(默认30) 处     │
-│  连续插入名单6 的所有成员                                  │
-│  插入后编号重新排列（0~N1+|名单6|）                        │
-│                                                          │
-│  原因：前两支高等级队伍不放新人，新人从第3队起插入          │
-└──────────────────────────────────────────────────────────┘
-          │
-          ▼
-┌──────────────────────────────────────────────────────────┐
-│ 阶段 5：插入普通营实战新增（名单7）                        │
-│                                                          │
-│  名单7 每人按综合分(rank_score)二分插入到编号              │
-│  NEW_NORMAL_INSERT_START(默认45) 之后                     │
-│  不动已有人员的相对顺序                                    │
-│                                                          │
-│  原因：第4队起基本是普通部落成员，按实力排序更合理          │
-└──────────────────────────────────────────────────────────┘
-          │
-          ▼
-┌──────────────────────────────────────────────────────────┐
-│ 阶段 6：追加壳子名单（名单3）                              │
-│                                                          │
-│  名单3 按综合分降序追加到 final_list 末尾                  │
-│  最终 final_list = [实战区域] + [壳子区域]                 │
-└──────────────────────────────────────────────────────────┘
-          │
-          ▼
-┌──────────────────────────────────────────────────────────┐
-│ 阶段 7：贪心填充队伍                                      │
-│                                                          │
-│  final_list 从上到下贪心填充：                             │
-│    先填实战队伍 N1 支（按 TEAMS 配置顺序）                 │
-│    后填壳子队伍 N2 支（按 TEAMS 配置顺序）                 │
-│    每支队伍填到 effective_capacity 为止                    │
-│                                                          │
-│  队伍数变化由贪心填充自然消化：                            │
-│    - final_list 不够填满 → 最后几支队不满员                │
-│    - final_list 超出实战容量 → 溢出进入壳子队伍            │
-└──────────────────────────────────────────────────────────┘
-          │
-          ▼
-┌──────────────────────────────────────────────────────────┐
-│ 阶段 8：白名单处理                                        │
-│                                                          │
-│  对白名单中每一项 (name, clan_tag)：                       │
-│    找到 clan_tag 对应的队伍                                │
-│    如果 name 已在队伍中 → 移到该队伍开头                   │
-│    如果 name 不在最终名单中 → 强制插入到该队伍开头          │
-│    该队伍其他成员后移                                      │
-│                                                          │
-│  队伍超员处理：                                            │
-│    被挤到末尾的人溢出到下一支队伍开头，连锁后移             │
-│    （因为 final_list 按实力从上到下排列，末尾即最弱）       │
-└──────────────────────────────────────────────────────────┘
-          │
-          ▼
-┌──────────────────────────────────────────────────────────┐
-│ 阶段 9：输出                                              │
-│                                                          │
-│  Part1: final_list 排序名单                               │
-│         (rank_order/league_type/team_name/movement/...)    │
-│  Part2: 队伍分配明细（含 movement 标识）                   │
-│         movement 只展示：战绩升降级相关 + 新人标签          │
-│  Part3: 离队情况（名单4 + 黑名单命中）                     │
-│  Part4: 五人一行排布                                      │
-└──────────────────────────────────────────────────────────┘
+降级方向: 上队 → 下队（星数 ≤ 18，星数最低者优先）
+升级方向: 下队 → 上队（星数 = 21满星，星数最高者优先）
+不动区域: 19-20 星（安全区），无星数数据
+每对上限: 最多交换 2 人
 ```
+
+算法伪代码：
+```python
+for k in range(len(slots) - 1):
+    # 降级候选：上队中 star ≤ 18 的人，按星数升序（最低的优先降）
+    relegation = [m for m in slots[k] if star[m] ≤ 18]
+    relegation.sort(by star asc)[:2]
+
+    # 升级候选：下队中 star == 21 的人，按星数降序（最高的优先升）
+    promotion = [m for m in slots[k+1] if star[m] == 21]
+    promotion.sort(by star desc)[:2]
+
+    # 配对交换（取两侧较少者）
+    n = min(len(relegation), len(promotion))
+    for i in range(n):
+        swap(relegation[i], promotion[i])
+        # 降级者插入下队队首（在新队伍中排名靠前）
+        # 升级者追加到上队末尾（在新队伍中排名靠后）
+```
+
+配置项（`config.py` → `PROMOTION_RELEGATION_CONFIG`）：
+```python
+{
+    "count": 2,                  # 每对最多交换人数
+    "promotion_min_stars": 21,   # 升级门槛（满星）
+    "relegation_max_stars": 18,  # 降级门槛
+}
+```
+
+#### 2d. 展开为线性列表
+
+升降级后的 slots 按队伍顺序展开为一个线性列表 `final_list`。编号跟随位置变化。
+
+### 阶段 3：删除实战缺失人员
+
+**函数**：`baseline_rebuilder.py` → `remove_missing()`
+
+从 `final_list` 中删除名单4（实战缺失）的成员。不使用占位符，人员前移，名单紧凑。删除的人员记录到 `removed_list`（供 Part3 展示）。
+
+### 阶段 4：插入战营实战新增
+
+**函数**：`baseline_rebuilder.py` → `insert_combat_new()`
+
+在 `final_list` 编号 `NEW_COMBAT_INSERT_START`（默认30，即第3队开头）处连续插入名单6 的所有成员，标记 `movement = "新"`。
+
+> 原因：前两支高等级队伍不放新人，新人从第3队起插入。
+
+### 阶段 5：插入普通营实战新增
+
+**函数**：`baseline_rebuilder.py` → `insert_normal_new()`
+
+名单7 全部追加到实战区末尾（壳子区之前）。当前实现为统一追加，不再按综合分二分插入。新人放后面，老人放前面。
+
+> 原因：第4队起基本是普通部落成员，按实力排序更合理。
+
+### 阶段 6：追加壳子名单
+
+**函数**：`baseline_rebuilder.py` → `append_shell()`
+
+名单3 按综合分降序追加到 `final_list` 末尾。最终 `final_list = [实战区] + [壳子区]`。
+
+### 阶段 7：贪心填充队伍
+
+**函数**：`team_builder.py` → `fill_teams_from_final_list()`
+
+`final_list` 已经是按实力从上到下排好的完整线性名单，直接按 TEAMS 配置顺序（先实战后壳子）依次填充：
+
+```python
+pool = list(final_list)
+for team_index, team in enumerate(teams):
+    capacity = effective_capacity(team)
+    members = pool[:capacity]    # 取最强的 capacity 人
+    pool = pool[capacity:]
+    # 给每个成员写入 cur_team = "{team_index} {team_name}"
+
+if pool:
+    # 剩余人员追加到最后一支队伍
+    last_team.members.extend(pool)
+```
+
+> `effective_capacity = member_count - reserved_slots`（reserved_slots > 0 时留空位，< 0 时多招备选）
+
+队伍数变化由贪心填充自然消化：
+- `final_list` 不够填满 → 最后几支队伍不满员
+- `final_list` 超出容量 → 剩余追加到最后一支队伍
+
+### 阶段 8：白名单处理
+
+**函数**：`team_builder.py` → `apply_whitelist()`
+
+对白名单每一项 `(account_name, clan_tag)`：
+1. 找到 `clan_tag` 对应的队伍
+2. 如果 `account_name` 已在队伍中 → 移到该队伍开头
+3. 如果不在名单中 → 创建新成员（`movement = "白名单"`）强制插入开头
+4. 超员连锁：末尾溢出到下一支队伍开头（`_cascade_overflow()`）
+
+### 阶段 9：管理员分配
+
+**函数**：`team_builder.py` → `_assign_managers()`
+
+三级优先级：
+1. 按 `MANAGER_CANDIDATES` 列表顺序逐个匹配队伍成员
+2. 未命中时在队伍中找 `willing_to_manage=True` 的第一个
+3. 都没有就留空
+
+### 回写与输出
+
+**代码位置**：`roster.py` → `arrange()` 末尾
+
+1. **注入 movement 标识**：优先按 `player_tag` 匹配，回退到 `account_name`
+   - `↑升级(N★)` / `↓降级(N★)`
+   - `新`：新人
+   - `↓转壳(N★)`：老兵转壳子
+2. **回写 team_name 到 registrations 表**：供下月反查上月队伍归属
+3. **ExcelIO 输出 4 个 Part**
 
 ---
 
 ## 6. 数据流对照
 
-### 当前数据流
+### 当前数据流（v3.0 已实施）
 
 ```
-【旧】
-_load_accounts → sort_accounts → fill_teams → apply_promotion_relegation
-                                    ↑                    ↑
-                              完全重排填队          在重排结果上微调
+【新流程 — roster.py → LeagueArranger.arrange()】
+                                        ↓
+_sort_and_load_historical() ──→ sort_accounts() 初次排序
+    ├── _load_combat_star_data()       加载上月星数（results 表）
+    ├── _load_combat_team_map()        加载上月队伍归属（results.raw_metrics）
+    └── _load_prev_combat_from_results() 加载上月实战名单（results 表）
+                                        ↓
+build_final_list() 基准重建 ──→ baseline_rebuilder.py
+    ├── apply_blacklist()              阶段0: 黑名单过滤
+    ├── build_temp_lists()             阶段1: 构建7个临时名单
+    ├── rebuild_baseline()             阶段2: 基准重建+升降级
+    ├── remove_missing()               阶段3: 删除缺失人员
+    ├── insert_combat_new()            阶段4: 插入战营新增
+    ├── insert_normal_new()            阶段5: 插入普通营新增
+    └── append_shell()                 阶段6: 追加壳子名单
+                                        ↓
+build_teams() 队伍分配 ──→ team_builder.py
+    ├── fill_teams_from_final_list()   阶段7: 贪心填充
+    ├── apply_whitelist()              阶段8: 白名单处理
+    └── _assign_managers()             阶段9: 管理员分配
+                                        ↓
+回写 + 输出 ──→ roster.py
+    ├── 注入 movement 标识
+    ├── 回写 team_name 到 registrations
+    └── ExcelIO 输出 Part1~4
 ```
 
-### 目标数据流
+### 模块职责
 
-```
-【新】
-_load_accounts → 构建7个名单 → 基准重建(名单1+升降级)
-  → 删除缺失 → 插入战营新增 → 插入普通营新增 → 追加壳子
-  → 贪心填充队伍 → 白名单处理 → 输出
-```
+| 文件 | 职责 | 类型 |
+|------|------|------|
+| `sorter.py` | 综合分计算 + 初次排序分组（战营按奖杯、普通按综合分） | 纯函数 |
+| `rank_score.py` | 综合分公式（match_value + history_score 归一化加权） | 纯函数 |
+| `baseline_rebuilder.py` | 阶段 0-6：基准重建、升降级、增删、壳子追加 | 纯函数 |
+| `promotion.py` | 升降级配对交换算法 | 纯函数 |
+| `team_builder.py` | 阶段 7-9：贪心填充、白名单、管理员 | 纯函数 |
+| `team_filler.py` | 旧版队伍填充（已弃用，保留兼容） | 纯函数 |
+| `roster.py` | 编排主控：串联所有阶段、加载数据、回写 DB、输出 Excel | 编排器 |
+| `repository.py` | DB 读写：registrations/accounts/results 表操作 | 数据层 |
+| `config.py` | 所有配置项：TEAMS、权重、升降级参数、黑白名单等 | 配置 |
 
 ### 阶段对照
 
-| 阶段 | 旧流程 | 新流程 |
-|------|--------|--------|
+| 阶段 | 旧流程 | 新流程（v3.0） |
+|------|--------|----------------|
 | 排序 | `sort_accounts` 完全重排 | 构建名单 + 基准重建 |
 | 填队 | `fill_teams` 完全重排 | 贪心填充线性名单 |
 | 升降级 | `apply_promotion_relegation` 局部微调 | 阶段2 在上月分组上配对交换 |
 | 黑名单 | 无 | 阶段0 前置过滤 |
 | 白名单 | 无 | 阶段8 填队后强制插入 |
-| 新人安排 | 按综合分填空位 | 战营从编号30插入，普通营从编号45二分插入 |
+| 新人安排 | 按综合分填空位 | 战营从编号30插入，普通营追加到实战末尾 |
+
+### 数据来源总结
+
+| 数据 | 来源表 | 读取时机 |
+|------|--------|----------|
+| 当月报名数据 | `registrations` + `accounts` | `_load_accounts()` 导入阶段 |
+| 上月星数 | `results.raw_metrics.total_stars` | `_load_combat_star_data()` |
+| 上月队伍归属 | `results.raw_metrics.team_name/team_index` | `_load_prev_combat_from_results()` |
+
+> 上月队伍归属从 `results.raw_metrics` 读取（CWL API 导入时直接写入），是唯一数据源。
 
 ---
 
@@ -511,12 +700,16 @@ rank_order  league_type  team_name  movement  player_tag  account_name  player_n
 |--------|------|------|
 | 名单1 来源 | `results` 表 | 代表实际打了联赛的人，含战绩 |
 | 名单1 组内排序 | 按星数降序 | 星数高=实力强，排前面 |
+| 名单1 分组键 | `team_index` 为主，`team_name` 回退 | 避免重名队伍（如3支"大一"）混组 |
+| 战营排序键 | 奖杯降序 | 奖杯比综合分更能体现战营真实水平 |
+| 普通营排序键 | 综合分降序 | 匹配值+历史战绩更公平 |
+| 综合分权重 | match_value 0.6, history_score 0.4 | 匹配值权重更高，更反映当前实力 |
 | 升降级方式 | 配对交换 | 和当前逻辑一致，稳定 |
 | 升降级阶段 | 仅在上月名单上做 | 不涉及本月信息 |
+| 升降级星数门槛 | 升级21/降级18 | 19-20星安全区，防一两次失误即降级 |
 | 删除缺失 | 不用占位符，前移 | 高等级队不放新人 |
 | 战营新增插入点 | 编号30（第3队） | 前两队不放新人 |
-| 普通营新增插入 | 编号45后二分插入 | 第4队起按实力排 |
-| 二分插入范围 | 只插入新人，不动老兵 | 保持老兵位置稳定 |
+| 普通营新增插入 | 追加到实战区末尾 | 不再二分插入，简化逻辑，新人放后面 |
 | 队伍数变化 | 不特殊处理 | 贪心填充自然消化 |
 | 黑名单 | 前置过滤 | 最早排除 |
 | 白名单 | 填队后处理 | 强制插入，溢出连锁 |

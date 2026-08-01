@@ -85,7 +85,48 @@ CREATE TABLE IF NOT EXISTS results (
 );
 """
 
-_CHILDREN_DDL = _REGISTRATIONS_DDL.format(table="registrations") + _RESULTS_DDL
+_LEAGUE_TEAMS_DDL = """
+CREATE TABLE IF NOT EXISTS league_teams (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    period          TEXT NOT NULL,
+    team_index      INTEGER NOT NULL,
+    team_alias      TEXT NOT NULL,
+    team_name       TEXT,
+    clan_tag        TEXT,
+    category        TEXT NOT NULL,
+    member_count    INTEGER NOT NULL,
+    leader          TEXT,
+    league_level    TEXT,
+    reserved_slots  INTEGER DEFAULT 0,
+    UNIQUE(period, team_index)
+);
+"""
+
+_LEAGUE_RESULTS_DDL = """
+CREATE TABLE IF NOT EXISTS league_results (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    period          TEXT NOT NULL,
+    team_index      INTEGER NOT NULL,
+    team_alias      TEXT NOT NULL,
+    team_name       TEXT,
+    clan_tag        TEXT,
+    category        TEXT NOT NULL,
+    player_tag      TEXT NOT NULL,
+    account_name    TEXT,
+    total_stars     INTEGER,
+    attacks         INTEGER,
+    raw_metrics     TEXT,
+    UNIQUE(period, team_index, player_tag),
+    FOREIGN KEY(player_tag) REFERENCES accounts(player_tag)
+);
+"""
+
+_CHILDREN_DDL = (
+    _REGISTRATIONS_DDL.format(table="registrations")
+    + _RESULTS_DDL
+    + _LEAGUE_TEAMS_DDL
+    + _LEAGUE_RESULTS_DDL
+)
 
 _SCHEMA = _ACCOUNTS_DDL.format(table="accounts") + _CHILDREN_DDL
 
@@ -242,9 +283,9 @@ class Database:
         self.conn.execute("ALTER TABLE registrations_new RENAME TO registrations")
 
     def reset(self) -> None:
-        """清空并重建 accounts / registrations / results 三表（历史数据清零）。"""
+        """清空并重建所有业务表（历史数据清零）。"""
         self.conn.execute("PRAGMA foreign_keys = OFF")
-        for table in ("results", "registrations", "accounts"):
+        for table in ("league_results", "league_teams", "results", "registrations", "accounts"):
             self.conn.execute(f"DROP TABLE IF EXISTS {table}")
         self.conn.commit()
         self.conn.execute("PRAGMA foreign_keys = ON")

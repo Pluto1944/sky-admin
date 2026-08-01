@@ -32,20 +32,41 @@ from shared.config.env_loader import load_env  # noqa: E402
 load_env()
 
 from modules.coc_sync.api_client import CocApiClient, CocApiError  # noqa: E402
-from modules.cwl_registration.config import TEAMS, TEAMS_LAST  # noqa: E402
+from modules.cwl_registration.config import TEAMS  # noqa: E402
 from shared.config.common import DB_PATH, LEAGUE_COMBAT  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_ROOT = ROOT / "data"
 
-# 实战队伍（优先使用 TEAMS_LAST 上月配置，不存在时回退到 TEAMS 当前配置）
-# team_index = combat 队伍在配置列表中的顺序索引，是队伍的唯一身份标识
-# （team_name / clan_tag 仅用于展示，可能重名或变更）
-_source = TEAMS_LAST if TEAMS_LAST else TEAMS
-TEAMS_TO_FETCH: list[tuple[int, str, str]] = [
-    (i, t["name"], t["clan_tag"])
-    for i, t in enumerate(t for t in _source if t["category"] == LEAGUE_COMBAT)
-]
+
+def _load_teams_to_fetch(cwl_period: str) -> list[tuple[int, str, str]]:
+    """加载需要拉取 CWL 数据的实战队伍列表。
+
+    优先级：league_teams 表（上月配置快照） > TEAMS（当前配置回退）。
+    team_index = combat 队伍在配置列表中的顺序索引，是队伍的唯一身份标识。
+    返回 [(team_index, team_alias, clan_tag), ...]
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT * FROM league_teams WHERE period = ? AND category = ? ORDER BY team_index",
+            (cwl_period, LEAGUE_COMBAT),
+        ).fetchall()
+        conn.close()
+        if rows:
+            return [(r["team_index"], r["team_alias"], r["clan_tag"]) for r in rows]
+    except Exception:
+        pass
+
+    # 回退到当前 TEAMS 配置
+    return [
+        (i, t["name"], t["clan_tag"])
+        for i, t in enumerate(t for t in TEAMS if t["category"] == LEAGUE_COMBAT)
+    ]
+
+
+TEAMS_TO_FETCH: list[tuple[int, str, str]] = []  # 延迟加载，在 main() 中按 period 加载
 
 ALERT_LINE = "\n" + "=" * 65 + "\n"
 
@@ -192,42 +213,98 @@ def _fetch_from_api(data_dir: Path) -> list[str]:
 # 导入 results 表
 # ═══════════════════════════════════════════════════════════════════════
 
-def _import_to_results(data_dir: Path, cwl_period: str) -> tuple[int, int]:
-    """将 JSON 导入 results 表。返回 (ok, skip)。"""
+def _import_to_results(data_dir: Path, cwl_period: str, teams_to_fetch: list[tuple[int, str, str]]) -> tuple[int, int]:
+    """将 JSON 导入 league_results 表（同时双写到旧 results 表）。
+
+    返回 (ok, skip)。
+    """
     if not data_dir.exists():
         return 0, 0
 
     conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA foreign_keys = ON")
-    cur = conn.execute("SELECT player_tag FROM accounts")
-    known_tags = {r[0] for r in cur.fetchall()}
+    cur = conn.execute("SELECT player_tag, account_name FROM accounts")
+    known_tags = {r[0]: r[1] for r in cur.fetchall()}
+
+    # 构建 team_index → team 信息映射
+    team_info_map: dict[int, dict] = {
+        ti: {"team_alias": alias, "clan_tag": clan_tag}
+        for ti, alias, clan_tag in teams_to_fetch
+    }
 
     n_ok = n_skip = 0
     for f in sorted(data_dir.glob("*.json")):
-        team = json.loads(f.read_text(encoding="utf-8"))
-        for p in team.get("players", []):
+        team_data = json.loads(f.read_text(encoding="utf-8"))
+        team_index = team_data.get("team_index")
+        team_alias = team_data.get("team_name", "")
+        clan_tag = team_data.get("clan_tag", "")
+        # COC 真实部落名称（从 API 返回数据中取 league_clans 信息）
+        coc_team_name = ""
+        league_clans = team_data.get("league_clans", [])
+        if league_clans:
+            for lc in league_clans:
+                if lc.get("tag", "").replace("#", "").upper() == clan_tag.replace("#", "").upper():
+                    coc_team_name = lc.get("name", "")
+                    break
+
+        for p in team_data.get("players", []):
             tag = p["tag"]
             if tag not in known_tags:
                 n_skip += 1
                 continue
+
+            account_name = known_tags[tag]
+            raw_metrics = {
+                "total_stars": p["total_stars"],
+                "team_name": team_alias,
+                "clan_tag": clan_tag,
+                "team_index": team_index,
+            }
+
+            # 写入 league_results 新表
+            conn.execute(
+                """INSERT INTO league_results
+                   (period, team_index, team_alias, team_name, clan_tag, category,
+                    player_tag, account_name, total_stars, attacks, raw_metrics)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(period, team_index, player_tag) DO UPDATE SET
+                   team_alias = excluded.team_alias,
+                   team_name = excluded.team_name,
+                   clan_tag = excluded.clan_tag,
+                   account_name = excluded.account_name,
+                   total_stars = excluded.total_stars,
+                   attacks = excluded.attacks,
+                   raw_metrics = excluded.raw_metrics""",
+                (
+                    cwl_period, team_index, team_alias, coc_team_name, clan_tag,
+                    LEAGUE_COMBAT, tag, account_name,
+                    p["total_stars"], p["total_attacks"],
+                    json.dumps(raw_metrics, ensure_ascii=False),
+                ),
+            )
+
+            # 双写旧 results 表（过渡期兼容）
             conn.execute(
                 """INSERT INTO results (player_tag, period, league_type, raw_metrics)
                    VALUES (?, ?, ?, ?)
                    ON CONFLICT(player_tag, period, league_type) DO UPDATE SET
                    raw_metrics = excluded.raw_metrics""",
-                (tag, cwl_period, LEAGUE_COMBAT, json.dumps({
-                    "total_stars": p["total_stars"],
-                    "team_name": team.get("team_name"),
-                    "clan_tag": team.get("clan_tag"),
-                    "team_index": team.get("team_index"),
-                })),
+                (tag, cwl_period, LEAGUE_COMBAT, json.dumps(raw_metrics)),
             )
+
+            # 回填 league_teams 表的 team_name（COC 真实名称）
+            if coc_team_name and team_index is not None:
+                conn.execute(
+                    "UPDATE league_teams SET team_name = ? WHERE period = ? AND team_index = ?",
+                    (coc_team_name, cwl_period, team_index),
+                )
+
             n_ok += 1
     conn.commit()
     conn.close()
 
     if n_ok:
-        print(f"[import] {n_ok} 条战绩 → results（period={cwl_period}）" +
+        print(f"[import] {n_ok} 条战绩 → league_results + results（period={cwl_period}）" +
               (f"，跳过 {n_skip} 条（不在 accounts）" if n_skip else ""))
     return n_ok, n_skip
 
@@ -239,17 +316,22 @@ def _import_to_results(data_dir: Path, cwl_period: str) -> tuple[int, int]:
 def main() -> int:
     import argparse
 
-    parser = argparse.ArgumentParser(description="拉取 CWL 数据 + 导入 results 表")
+    parser = argparse.ArgumentParser(description="拉取 CWL 数据 + 导入 league_results/results 表")
     parser.add_argument("--period", required=True, help="CWL 月份（实际发生月），如 2026-07")
     parser.add_argument("--fetch-only", action="store_true",
-                        help="仅拉取 JSON，不导入 results 表")
+                        help="仅拉取 JSON，不导入数据库")
     args = parser.parse_args()
 
-    # period = CWL 实际发生月，直接用于 API 拉取、数据目录命名、results 表入库
+    # period = CWL 实际发生月，直接用于 API 拉取、数据目录命名、league_results/results 入库
     cwl_period = args.period
+
+    # 延迟加载队伍列表（按 period 从 league_teams 或 config 读取）
+    global TEAMS_TO_FETCH
+    TEAMS_TO_FETCH = _load_teams_to_fetch(cwl_period)
 
     data_dir = DATA_ROOT / f"cwl_{cwl_period.replace('-', '')}"
     print(f"CWL 发生月: {cwl_period}（数据目录: {data_dir}）")
+    print(f"拉取队伍: {[alias for _, alias, _ in TEAMS_TO_FETCH]}")
 
     # ── 拉取 ──
     ok_teams = _fetch_from_api(data_dir)
@@ -265,15 +347,15 @@ def main() -> int:
         print(ALERT_LINE)
         return 1
 
-    # 导入全部可用 JSON 到 results 表
-    n_ok, n_skip = _import_to_results(data_dir, cwl_period)
+    # 导入全部可用 JSON 到 league_results + results 表
+    n_ok, n_skip = _import_to_results(data_dir, cwl_period, TEAMS_TO_FETCH)
 
     if n_ok == 0:
         print(ALERT_LINE + f"⚠️ 0 条战绩导入（{n_skip} 条不在 accounts）" + ALERT_LINE)
         return 1
 
     # ── 升降级参与总结 ──
-    team_order = [t for _, t, _ in TEAMS_TO_FETCH]
+    team_order = [alias for _, alias, _ in TEAMS_TO_FETCH]
     print(f"\n── 升降级参与情况（{cwl_period} CWL）──")
     for i in range(len(team_order) - 1):
         hi, lo = team_order[i], team_order[i + 1]
@@ -285,7 +367,7 @@ def main() -> int:
             missing = [t for t, ok in [(hi, hi_ok), (lo, lo_ok)] if not ok]
             print(f"  ⛔ {hi} ↔ {lo}  跳过（缺: {', '.join(missing)}）")
 
-    print(f"\n✅ 数据就绪：{n_ok} 条星数已写入 results 表（period={cwl_period}）")
+    print(f"\n✅ 数据就绪：{n_ok} 条星数已写入 league_results + results 表（period={cwl_period}）")
     return 0
 
 
