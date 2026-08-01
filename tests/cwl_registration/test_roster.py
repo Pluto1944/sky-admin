@@ -41,7 +41,7 @@ def test_arrange_assigns_teams(player_service, reg_repo):
 
 
 def test_arrange_writes_back_to_repo(player_service, reg_repo):
-    """v3.0: 验证回写 league_type / rank_order / team_name 到 registrations。"""
+    """v3.0: 验证回写 league_type / rank_order / team_info 到 registrations。"""
     _seed(player_service, reg_repo)
     arranger = LeagueArranger(player_service, reg_repo, FakeExcelIO())
     arranger.arrange("2026-08", combat_min_match_value=0)
@@ -49,10 +49,10 @@ def test_arrange_writes_back_to_repo(player_service, reg_repo):
     regs = {r["player_tag"]: r for r in reg_repo.get_registrations("2026-08")}
     # 战营账号应为 combat
     assert regs["#B"]["league_type"] == LEAGUE_COMBAT
-    assert regs["#B"]["team_name"] is not None
+    assert regs["#B"]["team_info"] is not None
     # 壳子账号应为 shell
     assert regs["#C"]["league_type"] == LEAGUE_SHELL
-    assert regs["#C"]["team_name"] is not None
+    assert regs["#C"]["team_info"] is not None
 
 
 def test_arrange_and_export_writes_sheet(player_service, reg_repo):

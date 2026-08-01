@@ -15,7 +15,7 @@ v3.0 数据流（基准升降级）：
    - 阶段5：插入普通营新增（编号45后二分插入）
    - 阶段6：追加壳子名单
 5. 【队伍填充】build_teams：贪心填充队伍 + 白名单处理
-6. 回写每条报名的 league_type / rank_order / team_name 到 registrations 表。
+6. 回写每条报名的 league_type / rank_order / team_info 到 registrations 表。
 7. 通过 ExcelIO 输出名单表（Part1 排序名单 + Part2 队伍明细 + Part3 离队 + Part4 排布）。
 """
 from __future__ import annotations
@@ -266,7 +266,7 @@ class LeagueArranger:
             （覆盖 TEAMS 配置中未单独列出的队伍名，如"大一 A/B/C"）。
 
         team_name / clan_tag 存储在 raw_metrics 中（由 fetch_cwl_data 导入时写入）。
-        替代反查 registrations（后者依赖 arrange 回写 team_name，冷启动场景容易缺失）。
+        替代反查 registrations（后者依赖 arrange 回写 team_info，冷启动场景容易缺失）。
         """
         if self.result_repo is None:
             return {}, {}
@@ -379,19 +379,11 @@ class LeagueArranger:
     def _write_league_teams(self, period: str, teams_cfg: list[dict]) -> None:
         """将当月队伍配置幂等写入 league_teams 表。
 
-        teams_cfg 已通过 _fetch_clan_info 注入了 coc_name（COC 真实名称）。
-        若 coc_name 为空，保留 DB 中已有的 team_name 不被覆盖。
+        teams_cfg 已通过 _fetch_clan_info 注入了 coc_name（COC 真实名称），
+        直接写入即可。
         """
-        # 读取已有的 team_name（避免被空值覆盖）
-        existing = {
-            r["team_index"]: r["team_name"]
-            for r in self.reg_repo.conn.execute(
-                "SELECT team_index, team_name FROM league_teams WHERE period = ?",
-                (period,),
-            ).fetchall()
-        }
         for team_index, team in enumerate(teams_cfg):
-            coc_name = team.get("coc_name") or existing.get(team_index)
+            coc_name = team.get("coc_name", "")
             self.reg_repo.conn.execute(
                 """INSERT OR REPLACE INTO league_teams
                    (period, team_index, team_alias, team_name, clan_tag, category,
@@ -449,17 +441,15 @@ class LeagueArranger:
         """
         teams_cfg = teams if teams is not None else TEAMS
 
-        # 从 league_teams 表读取已有的 team_name（COC 真实名称），注入 teams_cfg
-        db_names = {
-            r["team_index"]: r["team_name"]
-            for r in self.reg_repo.conn.execute(
-                "SELECT team_index, team_name FROM league_teams WHERE period = ?",
-                (period,),
-            ).fetchall()
-        }
-        for i, t in enumerate(teams_cfg):
-            if db_names.get(i):
-                t["coc_name"] = db_names[i]
+        # 通过 COC API 获取所有队伍的部落真实名称，注入 teams_cfg 的 coc_name
+        all_tags = {t.get("clan_tag", "") for t in teams_cfg}
+        all_tags.discard("")
+        if all_tags:
+            clan_info = self._fetch_clan_info(all_tags)
+            for t in teams_cfg:
+                tag = t.get("clan_tag", "")
+                if tag and tag in clan_info:
+                    t["coc_name"] = clan_info[tag][0]
 
         # 幂等写入当月队伍配置到 league_teams 表
         self._write_league_teams(period, teams_cfg)
@@ -553,7 +543,7 @@ class LeagueArranger:
         assignment_map: dict[str, tuple[str, str]] = {}
         cur_team_map: dict[str, str] = {}
         coc_team_name_map: dict[str, str] = {}  # COC 真实名称，供 Excel team_name 列
-        team_reg_team_name_map: dict[str, str] = {}  # 用于回写 registrations.team_name
+        team_reg_info_map: dict[str, str] = {}  # 用于回写 registrations.team_info
         for tr in team_results:
             tn = tr["team_name"]
             cat = tr["category"]
@@ -567,11 +557,11 @@ class LeagueArranger:
                     cur_team += f" {coc_name}"
             else:
                 cur_team = tn
-            # registrations.team_name 回写格式: "{team_index} {team_alias} {coc_name} {clan_tag}"
-            reg_team_name = f"{ti} {tn}"
+            # registrations.team_info 回写格式: "{team_index} {team_alias} {coc_name} {clan_tag}"
+            reg_team_info = f"{ti} {tn}"
             if coc_name:
-                reg_team_name += f" {coc_name}"
-            reg_team_name += f" {clan_tag}"
+                reg_team_info += f" {coc_name}"
+            reg_team_info += f" {clan_tag}"
             for m in tr["members"]:
                 key = m.get("account_name") or ""
                 if key:
@@ -579,7 +569,7 @@ class LeagueArranger:
                     # 优先用成员自带的 cur_team（白名单/后移可能已更新）
                     cur_team_map[key] = m.get("cur_team") or cur_team
                     coc_team_name_map[key] = coc_name
-                    team_reg_team_name_map[key] = reg_team_name
+                    team_reg_info_map[key] = reg_team_info
 
         ordered_with_team: list[dict] = []
         # final_list 的顺序就是输出顺序
@@ -651,13 +641,13 @@ class LeagueArranger:
                 for item in reversed(items):
                     ordered_with_team.insert(insert_pos, item)
 
-        # 回写 team_name（格式: "{team_index} {team_alias} {coc_name} {clan_tag}"）
+        # 回写 team_info（格式: "{team_index} {team_alias} {coc_name} {clan_tag}"）
         for item in ordered_with_team:
             name = item.get("account_name") or ""
-            reg_team_name = team_reg_team_name_map.get(name)
-            if item.get("reg_id") is not None and reg_team_name:
-                self.reg_repo.update_team_name(
-                    item["reg_id"], reg_team_name
+            reg_team_info = team_reg_info_map.get(name)
+            if item.get("reg_id") is not None and reg_team_info:
+                self.reg_repo.update_team_info(
+                    item["reg_id"], reg_team_info
                 )
 
         # 打印升降级日志

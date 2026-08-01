@@ -11,7 +11,7 @@
 
 输入：
   - accounts: sort_accounts() 的输出（含 rank_score / league_type / rank_order）
-  - prev_combat_regs: 上月 registrations 表中 combat 记录（含 team_name / rank_order）
+  - prev_combat_regs: 上月 registrations 表中 combat 记录（含 team_info / rank_order）
   - star_data: {account_name: total_stars}，上月实战星数
   - teams: TEAMS 配置
 
@@ -21,7 +21,7 @@
   - movements: 升降级日志
 
 名单1 的成员来自 results 表（谁实际打了实战 + 星数），队伍归属来自
-registrations 表的 team_name 字段（由上月 arrange() 回写）。按 team_index
+registrations 表的 team_info 字段（由上月 arrange() 回写）。按 team_index
 （队伍编号）分组，避免重名队伍（如 3 支"大一"）混组。
 """
 from __future__ import annotations

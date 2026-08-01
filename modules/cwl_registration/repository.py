@@ -96,11 +96,11 @@ class RegistrationRepository:
         )
         self.conn.commit()
 
-    def update_team_name(self, reg_id: int, team_name: str) -> None:
+    def update_team_info(self, reg_id: int, team_info: str) -> None:
         """回写该报名记录分配到哪个队伍。"""
         self.conn.execute(
-            "UPDATE registrations SET team_name = ? WHERE id = ?",
-            (team_name, reg_id),
+            "UPDATE registrations SET team_info = ? WHERE id = ?",
+            (team_info, reg_id),
         )
         self.conn.commit()
 
