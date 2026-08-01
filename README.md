@@ -1,6 +1,19 @@
 # sky-admin · 联赛报名与名单编排管理系统
 
-按账号管理部落联赛的**报名导入 → 名单编排 → 战绩回写 → 结果发布**，长期跟踪账号状态。设计细节见 [`DESIGN.md`](./DESIGN.md)。
+按账号管理部落联赛的**报名导入 → 名单编排 → 战绩回写 → 结果发布**，长期跟踪账号状态。
+
+## 文档导航
+
+| 文档 | 内容 |
+|------|------|
+| [`docs/01-architecture.md`](./docs/01-architecture.md) | 系统架构、模块划分、技术选型 |
+| [`docs/02-database.md`](./docs/02-database.md) | 5 张表定义、ER 图、数据流转 |
+| [`docs/03-sorting.md`](./docs/03-sorting.md) | 排序全流程、TEAMS 体系、队伍填充 |
+| [`docs/04-promotion-relegation.md`](./docs/04-promotion-relegation.md) | 升降级算法 |
+| [`docs/05-roster-part4.md`](./docs/05-roster-part4.md) | Part4 网格布局（备份留底 + 公示发布） |
+| [`docs/06-operations.md`](./docs/06-operations.md) | 月度循环、运维脚本、数据目录 |
+| [`docs/CHANGELOG.md`](./docs/CHANGELOG.md) | 版本更新记录 |
+| [`scripts/README.md`](./scripts/README.md) | 脚本使用说明 |
 
 ## 环境
 
@@ -78,7 +91,7 @@ scripts/                     # 运维脚本：register_and_arrange.sh（报名�
 tests/                       # 按模块归类：shared / player / cwl_registration / war_result / coc_sync
 ```
 
-> 架构：按业务领域分模块，`player` 为数据中枢，其他模块只通过 `PlayerService` 读写账号；**所有 COC API 调用统一经 `CocSyncService` 封装**，其它模块/脚本不直接使用 `CocApiClient`。详见 [`DESIGN.md`](./DESIGN.md) §十三。
+> 架构：按业务领域分模块，`player` 为数据中枢，其他模块只通过 `PlayerService` 读写账号；**所有 COC API 调用统一经 `CocSyncService` 封装**，其它模块/脚本不直接使用 `CocApiClient`。详见 [`docs/01-architecture.md`](./docs/01-architecture.md)。
 
 ## 两个可插拔开放函数（后续自行完善）
 

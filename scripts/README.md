@@ -1,5 +1,7 @@
 # scripts 目录使用文档
 
+> 运维详情见 [`../docs/06-operations.md`](../docs/06-operations.md)
+
 ## 时间语义（重要）
 
 | 接口 | period 含义 | 示例 |
