@@ -27,19 +27,24 @@ from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# 自动加载项目根 .env，确保读取最新配置（环境变量已有值时不覆盖）
+from shared.config.env_loader import load_env  # noqa: E402
+load_env()
+
 from modules.coc_sync.api_client import CocApiClient, CocApiError  # noqa: E402
-from modules.cwl_registration.config import TEAMS  # noqa: E402
+from modules.cwl_registration.config import TEAMS, TEAMS_LAST  # noqa: E402
 from shared.config.common import DB_PATH, LEAGUE_COMBAT  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_ROOT = ROOT / "data"
 
-# 实战队伍（从 config.TEAMS 动态提取，带队伍编号 team_index）
-# team_index = combat 队伍在 TEAMS 配置中的顺序索引，是队伍的唯一身份标识
+# 实战队伍（优先使用 TEAMS_LAST 上月配置，不存在时回退到 TEAMS 当前配置）
+# team_index = combat 队伍在配置列表中的顺序索引，是队伍的唯一身份标识
 # （team_name / clan_tag 仅用于展示，可能重名或变更）
+_source = TEAMS_LAST if TEAMS_LAST else TEAMS
 TEAMS_TO_FETCH: list[tuple[int, str, str]] = [
     (i, t["name"], t["clan_tag"])
-    for i, t in enumerate(t for t in TEAMS if t["category"] == LEAGUE_COMBAT)
+    for i, t in enumerate(t for t in _source if t["category"] == LEAGUE_COMBAT)
 ]
 
 ALERT_LINE = "\n" + "=" * 65 + "\n"
@@ -79,12 +84,12 @@ def _fetch_team_cwl(client: CocApiClient, team_name: str, clan_tag: str) -> dict
 
     try:
         lg = client.get_league_group(clan_tag)
-    except Exception as e:
+    except CocApiError as e:
         print(f"  {team_name}({clan_tag}): ❌ {e}")
         return None
 
     if lg is None:
-        print(f"  {team_name}({clan_tag}): ⚠️ 无联赛组数据（非CWL周或API拒绝访问）")
+        print(f"  {team_name}({clan_tag}): ⚠️ 无联赛组数据（非CWL周，API返回404）")
         return None
 
     my_war_tags: list[str] = []

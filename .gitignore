@@ -18,3 +18,5 @@ __pycache__/
 
 # 数据文件
 /data/coc_members.xlsx
+/data/cwl_*/
+/data/cwl_* copy/

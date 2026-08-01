@@ -85,8 +85,9 @@ class CocApiClient:
         try:
             return self._get(f"/clans/{self._encode_tag(clan_tag)}/currentwar/leaguegroup")
         except CocApiError as e:
-            if "404" in str(e) or "403" in str(e):
+            if "404" in str(e):
                 return None
+            # 403 等错误原样上抛，让调用方看到具体原因（如 IP 白名单问题）
             raise
 
     # ------------------------------------------------------------------

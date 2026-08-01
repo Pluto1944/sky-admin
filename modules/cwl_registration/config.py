@@ -54,7 +54,7 @@ JOIN_COMBAT_TRUE_TEXTS = {"是", "yes", "y", "true", "1", "参加"}
 #     不参与排序、不出现在最终联赛名单中。此层保证旧残留记录也一并过滤。
 # ---------------------------------------------------------------------------
 CAMP_CLAN_TAG = "#2QQ"                       # 战营部落标签（成员即战营账号）
-EXCLUDED_CAMP_NAMES: set[str] = {"Pluto2QQ", "落花归尘", "misael", "AltriaPendragon", "葉丶", "飞的煎饼"} # 排除名单（不参与排序），如 {"张三", "李四"}
+EXCLUDED_CAMP_NAMES: set[str] = {"Pluto2QQ", "落花归尘", "misael", "AltriaPendragon", "葉丶", "飞的煎饼", "幻想鄉", "Timo⚡️Z⚔️ephyr™"} # 排除名单（不参与排序），如 {"张三", "李四"}
 
 # 旧的 Excel 战营名单 sheet 配置（已弃用，保留仅为兼容历史报名表结构解析）。
 CAMP_SHEET_NAME = "战营名单"
@@ -98,19 +98,39 @@ COMBAT_MIN_MATCH_VALUE = 600
 # 列表顺序即分配优先级：实战团队从前到后依次填充，壳子团队同理。
 TEAMS = [
     # ===== 实战队伍 =====
-    {"name": "泰坦二",    "clan_tag": "#2QQ",       "leader": "", "member_count": 15, "league_level": "", "manager": "xxx", "category": "combat", "reserved_slots": 0},
-    {"name": "冠一 一队",  "clan_tag": "#2GGGGGGG",  "leader": "", "member_count": 15, "league_level": "", "manager": "yyy", "category": "combat", "reserved_slots": 0},
-    {"name": "冠一 二队",  "clan_tag": "#2JP8PLQLJ", "leader": "", "member_count": 15, "league_level": "", "manager": "zzz", "category": "combat", "reserved_slots": 0},
-    {"name": "冠三",      "clan_tag": "#2QQQQ2G",   "leader": "", "member_count": 15, "league_level": "", "manager": "www", "category": "combat", "reserved_slots": 0},
-    {"name": "大一",      "clan_tag": "#2R8RCPY0J",  "leader": "", "member_count": 15, "league_level": "", "manager": "www", "category": "combat", "reserved_slots": 0},
-    {"name": "大一",      "clan_tag": "#2C9QCL892",  "leader": "", "member_count": 30, "league_level": "", "manager": "www", "category": "combat", "reserved_slots": 0},
-    {"name": "大一",      "clan_tag": "#2CU9JPYU8",  "leader": "", "member_count": 30, "league_level": "", "manager": "www", "category": "combat", "reserved_slots": 0},
+    {"name": "泰坦二",    "clan_tag": "#2QQ",       "leader": "leader2QQ", "member_count": 15, "league_level": "", "manager": "xxx", "category": "combat", "reserved_slots": 0},
+    {"name": "冠一 一队",  "clan_tag": "#2GGGGGGG",  "leader": "leader5", "member_count": 15, "league_level": "", "manager": "yyy", "category": "combat", "reserved_slots": 0},
+    {"name": "冠二",      "clan_tag": "##2C822CJJC", "leader": "Pluto leader6", "member_count": 15, "league_level": "", "manager": "zzz", "category": "combat", "reserved_slots": 0},
+    {"name": "冠三",      "clan_tag": "#2QQQQ2G",   "leader": "leader4", "member_count": 15, "league_level": "", "manager": "www", "category": "combat", "reserved_slots": 0},
+    {"name": "大一",      "clan_tag": "#UUP2",  "leader": "leader", "member_count": 15, "league_level": "", "manager": "www", "category": "combat", "reserved_slots": 0},
+    {"name": "大一",      "clan_tag": "#CYYL",  "leader": "leader2", "member_count": 30, "league_level": "", "manager": "www", "category": "combat", "reserved_slots": 0},
+    {"name": "大一",      "clan_tag": "#2CU9JPYU8",  "leader": "南门 ", "member_count": 30, "league_level": "", "manager": "www", "category": "combat", "reserved_slots": 0},
 
     # ===== 壳子队伍 =====
-    {"name": "大一",      "clan_tag": "#AAAAA",      "leader": "", "member_count": 30, "league_level": "", "manager": "aaa", "category": "shell",  "reserved_slots": 0},
-    {"name": "大三",      "clan_tag": "#BBBBB",      "leader": "", "member_count": 30, "league_level": "", "manager": "bbb", "category": "shell",  "reserved_slots": 0},
-    {"name": "水一",      "clan_tag": "#CCCCC",      "leader": "", "member_count": 30, "league_level": "", "manager": "ccc", "category": "shell",  "reserved_slots": 0},
-    {"name": "水二",      "clan_tag": "#DDDDD",      "leader": "", "member_count": 30, "league_level": "", "manager": "ddd", "category": "shell",  "reserved_slots": 0},
+    {"name": "大一",      "clan_tag": "#2R9Y209LY",      "leader": "leader10", "member_count": 30, "league_level": "", "manager": "aaa", "category": "shell",  "reserved_slots": 0},
+    {"name": "大三",      "clan_tag": "#2JQR89P9G",      "leader": "leader6", "member_count": 30, "league_level": "", "manager": "bbb", "category": "shell",  "reserved_slots": 0},
+    {"name": "水一",      "clan_tag": "#2JUJRYVQP",      "leader": "登悟", "member_count": 30, "league_level": "", "manager": "ccc", "category": "shell",  "reserved_slots": 0},
+    {"name": "水二",      "clan_tag": "#2GR0LPGVQ",      "leader": "leader8", "member_count": 30, "league_level": "", "manager": "ddd", "category": "shell",  "reserved_slots": 0},
+]
+
+# TEAMS_LAST：上月联赛队伍配置，供 fetch_cwl_data.py 拉取上月 CWL 战绩时使用。
+# 格式与 TEAMS 相同（列表顺序即队伍优先级），仅拉取 combat 类型队伍。
+# 当 fetch_cwl_data 发现 config 中有 TEAMS_LAST 时，优先使用它；否则回退到 TEAMS。
+TEAMS_LAST = [
+    # ===== 实战队伍 =====
+    {"name": "泰坦二",    "clan_tag": "#2QQ",       "leader": "leader2QQ", "member_count": 15, "league_level": "", "manager": "xxx", "category": "combat", "reserved_slots": 0},
+    {"name": "冠一 一队",  "clan_tag": "#2GGGGGGG",  "leader": "leader5", "member_count": 15, "league_level": "", "manager": "yyy", "category": "combat", "reserved_slots": 0},
+    {"name": "冠一 二队",  "clan_tag": "#2JP8PLQLJ", "leader": "Pluto leader6", "member_count": 15, "league_level": "", "manager": "zzz", "category": "combat", "reserved_slots": 0},
+    {"name": "冠三",      "clan_tag": "#2QQQQ2G",   "leader": "leader4", "member_count": 15, "league_level": "", "manager": "www", "category": "combat", "reserved_slots": 0},
+    {"name": "大一",      "clan_tag": "#2R8RCPY0J",  "leader": "官", "member_count": 15, "league_level": "", "manager": "www", "category": "combat", "reserved_slots": 0},
+    {"name": "大一",      "clan_tag": "#2C9QCL892",  "leader": "汪", "member_count": 30, "league_level": "", "manager": "www", "category": "combat", "reserved_slots": 0},
+    {"name": "大一",      "clan_tag": "#2CU9JPYU8",  "leader": "南门 ", "member_count": 30, "league_level": "", "manager": "www", "category": "combat", "reserved_slots": 0},
+
+    # ===== 壳子队伍 =====
+    {"name": "大一",      "clan_tag": "#2R9Y209LY",      "leader": "leader10", "member_count": 30, "league_level": "", "manager": "aaa", "category": "shell",  "reserved_slots": 0},
+    {"name": "大三",      "clan_tag": "#2JQR89P9G",      "leader": "leader6", "member_count": 30, "league_level": "", "manager": "bbb", "category": "shell",  "reserved_slots": 0},
+    {"name": "水一",      "clan_tag": "#2JUJRYVQP",      "leader": "登悟", "member_count": 30, "league_level": "", "manager": "ccc", "category": "shell",  "reserved_slots": 0},
+    {"name": "水二",      "clan_tag": "#2GR0LPGVQ",      "leader": "leader8", "member_count": 30, "league_level": "", "manager": "ddd", "category": "shell",  "reserved_slots": 0},
 ]
 
 # 队伍分配输出表头（队伍详情的列）
@@ -152,7 +172,7 @@ PROMOTION_RELEGATION_CONFIG = {
 # ---------------------------------------------------------------------------
 BLACK_LIST: set[str] = set()
 
-WHITE_LIST: list[tuple[str, str]] = []
+WHITE_LIST: list[tuple[str, str]] = [("10°C✨Godwin 2", "#2QQ"),]
 
 # 战营新增人员起始插入编号（第3队开头，前两支高等级队不放新人）
 NEW_COMBAT_INSERT_START = 30
