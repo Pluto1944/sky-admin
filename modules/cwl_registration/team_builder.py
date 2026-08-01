@@ -228,12 +228,45 @@ def _cascade_overflow(
 # 完整流程：阶段 7~8
 # ---------------------------------------------------------------------------
 
+def _assign_managers(
+    team_results: list[dict],
+    manager_candidates: list[str],
+) -> None:
+    """按三级优先级为每个队伍匹配管理员。
+
+    1. 优先：按 manager_candidates 列表顺序逐个匹配队伍成员（现有逻辑）。
+    2. 其次：如果 config 没匹配到，在队伍成员中找 willing_to_manage=True 的第一个。
+    3. 兜底：都没有就留空。
+    """
+    remaining = list(manager_candidates)
+    for tr in team_results:
+        member_names = {m.get("account_name", "") for m in tr["members"]}
+        assigned = ""
+
+        # 第 1 级：config 备选管理员列表匹配
+        for candidate in remaining:
+            if candidate in member_names:
+                assigned = candidate
+                remaining.remove(candidate)
+                break
+
+        # 第 2 级：config 未命中，从队伍成员中找报名意愿者
+        if not assigned:
+            for m in tr["members"]:
+                if m.get("willing_to_manage"):
+                    assigned = m.get("account_name", "")
+                    break
+
+        tr["manager"] = assigned
+
+
 def build_teams(
     final_list: list[dict],
     teams: list[dict],
     white_list: list[tuple[str, str]] | None = None,
+    manager_candidates: list[str] | None = None,
 ) -> list[dict]:
-    """执行阶段 7~8：贪心填充队伍 + 白名单处理。
+    """执行阶段 7~9：贪心填充队伍 + 白名单处理 + 管理员分配。
 
     返回 team_results 列表。
     """
@@ -243,5 +276,9 @@ def build_teams(
     # 阶段 8：白名单处理
     if white_list:
         team_results = apply_whitelist(team_results, white_list, teams)
+
+    # 阶段 9：管理员分配
+    if manager_candidates:
+        _assign_managers(team_results, manager_candidates)
 
     return team_results

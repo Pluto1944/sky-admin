@@ -40,6 +40,13 @@ def _parse_join_combat(value) -> bool:
     return str(value).strip().lower() in JOIN_COMBAT_TRUE_TEXTS
 
 
+def _parse_willing_to_manage(value) -> bool:
+    """解析"是否愿意做联赛管理员"：是/yes/true/1 返回 True。"""
+    if value is None:
+        return False
+    return str(value).strip().lower() in JOIN_COMBAT_TRUE_TEXTS
+
+
 def parse_registration_row(raw: dict, colmap: dict | None = None) -> dict | None:
     """把一行原始报名数据解析为标准报名记录（纯函数，便于测试）。
 
@@ -63,6 +70,7 @@ def parse_registration_row(raw: dict, colmap: dict | None = None) -> dict | None
         "player_name": clean_str(cell("player_name")),
         "match_value": to_float(cell("match_value")),
         "join_combat": _parse_join_combat(cell("join_combat")),
+        "willing_to_manage": _parse_willing_to_manage(cell("willing_to_manage")),
         "submit_time": cell("submit_time"),
         "account_type": ACCOUNT_TYPE_NORMAL,
         "prev_rank": None,
@@ -201,6 +209,7 @@ class RegistrationImporter:
                 "player_name": None,
                 "match_value": None,
                 "join_combat": True,
+                "willing_to_manage": False,
                 "submit_time": None,
                 "account_type": ACCOUNT_TYPE_COMBAT,
                 "prev_rank": None,

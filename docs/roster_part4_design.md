@@ -1,7 +1,7 @@
 # Part 4：联赛名单排布（备份留底 + 公示发布）设计文档
 
-> 日期: 2026-07-31  
-> 版本: v2.1
+> 日期: 2026-08-01  
+> 版本: v2.2
 > 关联: `roster.py`
 
 ---
@@ -73,15 +73,15 @@ publish_part4_to_doc(period, publish_doc_id)
 │  [转壳] / [未报名] / [离开]                       │
 ├─ Part 4: 网格排布（5 列独立写入）────────────────┤
 │  === 联赛名单排布（备份留底） ===                  │
-│  实战: 泰坦二 15/15   #2QQ             管理:xxx  │
+│  实战: 泰坦二 15/15  #2QQ  泰坦二  首领:xxx  管理:yyy 开战/捐兵给一份额外 │
 │  player1   │ player2   │ player3   │ player4   │ player5   │
 │  player6   │ player7   │ player8   │ player9   │ player10  │
 │  player11  │ player12  │ player13  │ player14  │ player15  │
 │  (空行)     │           │           │           │           │
-│  实战: 冠一 一队 15/15  #2GGGGGGG       管理:yyy│
+│  实战: 冠一 一队 15/15  #2GGGGGGG  冠一  首领:zzz  管理:www 开战/捐兵给一份额外 │
 │  ...                                              │
 │  (空行)                                           │
-│  壳子: 大一 30/30   #AAAAA             管理:aaa  │
+│  壳子: 大一 30/30  #AAAAA  大一  首领:aaa  管理:bbb 开战/捐兵给一份额外 │
 │  p1 600    │ p2 610    │ p3 580    │ p4 590    │ p5 600    │
 │  ...                                              │
 └──────────────────────────────────────────────────┘
@@ -92,12 +92,13 @@ publish_part4_to_doc(period, publish_doc_id)
 | # | 规则 | 说明 |
 |---|------|------|
 | 1 | **队伍顺序** | 按 `team_results` 原始顺序（实战在前、壳子在后），从上到下排布 |
-| 2 | **抬头行** | `{cat}: {team_name} {cap_info}` 占第 1 列，`clan_tag` 占第 2 列，`管理:{manager}` 占第 5 列，第 3、4 列留空 |
+| 2 | **抬头行（v2.2）** | col1=`{cat}: {team_name} {cap_info}`、col2=`clan_tag`、col3=部落名（COC API 获取）、col4=首领（COC API 获取）、col5=`管理:{manager} 开战/捐兵给一份额外` |
 | 3 | **每行 5 格** | 固定 5 列，15 人队伍 3 行，30 人队伍 6 行；不足 5 人末尾留空 |
 | 4 | **实战队伍** | 单元格只显示 `account_name` |
 | 5 | **壳子队伍** | 单元格显示 `{account_name} {match_value}`（match_value 取整，空格分隔） |
 | 6 | **队伍间分隔** | 一空行 |
 | 7 | **写入方式** | Part4 独立 5 列写入，不经过 `ARRANGEMENT_OUTPUT_HEADERS` 的 dict 映射，避免 `cur_team`/`prev_team` 等列产生中间空列 |
+| 8 | **部落信息缓存（v2.2）** | `_fetch_clan_info()` 批量获取部落名+首领，带缓存，tag 格式校验（恰好一个 #） |
 
 ### 3.3 壳子 `match_value` 取整
 
@@ -109,7 +110,7 @@ int(m.get("match_value") or 0)
 
 ## 4. 代码变更
 
-### 4.1 `roster.py` — `_build_part4_grid` 方法
+### 4.1 `roster.py` — `_build_part4_grid` 方法（v2.2 更新）
 
 ```python
 def _build_part4_grid(self, team_results: list[dict]) -> tuple[list[list[str]], list[int]]:
@@ -119,38 +120,27 @@ def _build_part4_grid(self, team_results: list[dict]) -> tuple[list[list[str]], 
       - grid: list[list[str]]，每行 5 列
       - title_row_indices: 抬头行在 grid 中的行索引列表
     """
+    # 先收集所有 clan_tag，批量获取部落名称和首领（COC API）
+    all_tags = {tr.get("clan_tag", "") for tr in team_results}
+    all_tags.discard("")
+    clan_info = self._fetch_clan_info(all_tags)  # {tag: (name, leader)}
+
     grid: list[list[str]] = []
     title_indices: list[int] = []
 
     for i, tr in enumerate(team_results):
         cat = "实战" if tr["category"] == LEAGUE_COMBAT else "壳子"
         title_indices.append(len(grid))
-        # 抬头 5 列：队伍信息 | clan_tag | (空) | (空) | 管理
+        # 抬头 5 列：队伍信息 | clan_tag | 部落名 | 首领 | 管理
         cap_info = f"{tr['filled_count']}/{tr['member_count']}"
         col1 = f"{cat}: {tr['team_name']} {cap_info}"
         col2 = tr.get("clan_tag", "")
-        col3 = f"管理:{tr.get('manager', '')}"
-        grid.append([col1, col2, "", "", col3])
-
-        members = tr["members"]
-        is_shell = tr["category"] == LEAGUE_SHELL
-        for j in range(0, len(members), 5):
-            chunk = members[j:j + 5]
-            row: list[str] = []
-            for m in chunk:
-                name = m.get("account_name", "")
-                if is_shell:
-                    mv = int(m.get("match_value") or 0)
-                    row.append(f"{name} {mv}")
-                else:
-                    row.append(name)
-            row.extend([""] * (5 - len(row)))
-            grid.append(row)
-
-        if i < len(team_results) - 1:
-            grid.append(["", "", "", "", ""])
-
-    return grid, title_indices
+        clan_name, leader_name = clan_info.get(col2, ("", ""))
+        col3 = clan_name
+        col4 = f"首领:{leader_name}" if leader_name else ""
+        col5 = f"管理:{tr.get('manager', '')} 开战/捐兵给一份额外"
+        grid.append([col1, col2, col3, col4, col5])
+        # ... 成员行逻辑不变
 ```
 
 ### 4.2 `roster.py` — 修改 `arrange_and_export`（v2.1）
@@ -237,11 +227,15 @@ p_pub.add_argument("--file-id", default=None)
 
 | 文件 | 变更类型 |
 |------|---------|
-| `modules/cwl_registration/roster.py` | `_build_part4_grid`（管理信息放第 5 列）、`_append_part4_to_sheet`（新增）、`publish_part4_to_doc`、`PUBLISH_FIXED_ROWS`、`_write_publish_sheet`；`arrange_and_export` 中 Part4 独立写入 |
-| `modules/cwl_registration/config.py` | `ARRANGEMENT_OUTPUT_HEADERS` 删除 `team_name`，保留 `cur_team`/`prev_team` |
+| `modules/cwl_registration/roster.py` | `_build_part4_grid`（5 列：队伍信息/clan_tag/部落名/首领/管理）、`_append_part4_to_sheet`（新增）、`publish_part4_to_doc`、`PUBLISH_FIXED_ROWS`、`_write_publish_sheet`、`_fetch_clan_info`（新增，COC API 获取部落名+首领）；`arrange_and_export` 中 Part4 独立写入 + 标题行增加部落信息 |
+| `modules/cwl_registration/config.py` | `ARRANGEMENT_OUTPUT_HEADERS` 删除 `team_name`；`REGISTRATION_COLUMN_KEYWORDS` 新增 `willing_to_manage` |
+| `modules/cwl_registration/importer.py` | 新增 `_parse_willing_to_manage()`；解析产出增加 `willing_to_manage` 字段 |
+| `modules/cwl_registration/team_builder.py` | `_assign_managers` 三级分配逻辑 |
+| `modules/cwl_registration/repository.py` | `add_registration` 新增 `willing_to_manage` 列 |
+| `shared/db/connection.py` | registrations DDL + 迁移新增 `willing_to_manage` 列 |
 | `cli.py` | 新增 `publish-results` 命令 |
 | `scripts/publish_to_results.sh` | 新增发布公示脚本 |
-| `docs/roster_part4_design.md` | 本文档（更新至 v2.1） |
+| `docs/roster_part4_design.md` | 本文档（更新至 v2.2） |
 
 ---
 
@@ -256,4 +250,6 @@ p_pub.add_argument("--file-id", default=None)
 | 5 | 壳子队伍 | 单元格含 `名称 匹配值`，匹配值为整数 |
 | 6 | 实战队伍 | 单元格只含 `名称` |
 | 7 | 不足 5 人队伍 | 末尾单元格为空 |
-| 8 | Part4 中间无空列 | 抬头行第 3、4 列为空，第 5 列为管理信息；成员行 5 列名字紧凑 |
+| 8 | Part4 抬头行 5 列完整 | col1=队伍信息、col2=clan_tag、col3=部落名（COC API）、col4=首领、col5=管理+后缀 |
+| 9 | COC API 查询失败 | 部落名/首领为空，不影响整体输出 |
+| 10 | tag 格式非法（如 `##xxx`） | 跳过 API 查询，不报 404 |

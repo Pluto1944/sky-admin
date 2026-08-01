@@ -56,18 +56,19 @@ CREATE TABLE IF NOT EXISTS {table} (
 # {table} 便于重建迁移时先建新表再改名。
 _REGISTRATIONS_DDL = """
 CREATE TABLE IF NOT EXISTS {table} (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    account_name  TEXT NOT NULL,           -- 报名昵称：报名事实主标识（报名表必有）
-    player_name   TEXT,                    -- 主号归属（报名表自持，不再从 accounts join）
-    period        TEXT NOT NULL,
-    match_value   REAL,
-    join_combat   INTEGER,
-    account_type  TEXT,                    -- 本月账号分类 combat / normal
-    prev_rank     INTEGER,                 -- 上月名单排名位次（战营排序微调参考）
-    league_type   TEXT,                    -- 编排产物
-    rank_order    INTEGER,                 -- 编排产物
-    player_tag    TEXT,                    -- 可空：命中的真实账号 tag，作关联缓存（无 FK）
-    team_name     TEXT,                    -- 分配到哪个队伍（如"实战一队"），NULL=未分配
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_name      TEXT NOT NULL,           -- 报名昵称：报名事实主标识（报名表必有）
+    player_name       TEXT,                    -- 主号归属（报名表自持，不再从 accounts join）
+    period            TEXT NOT NULL,
+    match_value       REAL,
+    join_combat       INTEGER,
+    willing_to_manage INTEGER,                 -- 是否愿意做联赛管理员（报名表字段）
+    account_type      TEXT,                    -- 本月账号分类 combat / normal
+    prev_rank         INTEGER,                 -- 上月名单排名位次（战营排序微调参考）
+    league_type       TEXT,                    -- 编排产物
+    rank_order        INTEGER,                 -- 编排产物
+    player_tag        TEXT,                    -- 可空：命中的真实账号 tag，作关联缓存（无 FK）
+    team_name         TEXT,                    -- 分配到哪个队伍（如"实战一队"），NULL=未分配
     UNIQUE(account_name, period)
 );
 """
@@ -164,6 +165,10 @@ class Database:
         if "team_name" not in reg_cols:
             self.conn.execute("ALTER TABLE registrations ADD COLUMN team_name TEXT")
 
+        # 管理意愿列（报名表"是否愿意做联赛管理员"）
+        if "willing_to_manage" not in reg_cols:
+            self.conn.execute("ALTER TABLE registrations ADD COLUMN willing_to_manage INTEGER")
+
         acc_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(accounts)")}
         # 回填下沉列：仅当报名行 account_type 为空时，取该账号旧 accounts 上的值补入
         # （camp_order 语义已废弃为上月排名，不再从旧 accounts 回填）
@@ -220,11 +225,12 @@ class Database:
             f"""
             INSERT OR IGNORE INTO registrations_new
                 (id, account_name, player_name, period, match_value, join_combat,
-                 account_type, prev_rank, league_type, rank_order, player_tag, team_name)
+                 willing_to_manage, account_type, prev_rank, league_type, rank_order, player_tag, team_name)
             SELECT r.id,
                    COALESCE(a.account_name, r.player_tag),
                    a.player_name,
                    r.period, r.match_value, r.join_combat,
+                   COALESCE(r.willing_to_manage, 0),
                    r.account_type, {prev_src}, r.league_type, r.rank_order,
                    r.player_tag,
                    r.team_name

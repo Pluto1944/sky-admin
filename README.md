@@ -61,6 +61,7 @@ python cli.py reset-db
 | 游戏昵称 | 账号名，用于反查真实 Tag |
 | 匹配值 | 本月匹配值 |
 | 想实战？ | 是 / 否（普通账号有效；战营默认实战） |
+| 是否愿意做联赛管理员 | 是 / 否（管理员分配时优先使用） |
 | 提交时间 | 同名去重取最新 |
 
 ## 项目结构（v2.0 领域模块）
@@ -70,7 +71,7 @@ cli.py                       # 命令行入口
 shared/                      # 基础设施：config/common、columns、io_adapter、db/connection
 modules/
   player/                    # ① 玩家中枢：PlayerService（账号读写唯一入口）+ repository + status_rule
-  cwl_registration/          # ② CWL 报名：importer(报名→registrations) + roster(报名快照→名单+队伍分配，含排除名单过滤) + sorter + rank_score + team_filler
+  cwl_registration/          # ② CWL 报名：importer(报名→registrations) + roster(名单+队伍分配+Part4输出，含排除名单过滤) + sorter + rank_score + team_filler + team_builder(管理员三级分配) + baseline_rebuilder + promotion
   war_result/                # ③ 战绩：importer(→历史分) + history_score + repository
   coc_sync/                  # ④ COC 同步：api_client(底层HTTP) + mapper(纯函数映射) + config(部落清单) + service(唯一API编排出口)
 scripts/                     # 运维脚本：register_and_arrange.sh（报名一体化）/ publish_to_results.sh（发布公示）/ sync_and_export.sh（长期维护）/ load_env.sh（凭证加载）
@@ -99,7 +100,7 @@ tests/                       # 按模块归类：shared / player / cwl_registrat
 | `leader` | 领队（默认空字符串） |
 | `member_count` | 标准人数（15 或 30） |
 | `league_level` | 联赛等级（默认空字符串） |
-| `manager` | 管理员名称 |
+| `manager` | 管理员（三级分配：config 优先 → 报名意愿 → 留空） |
 | `category` | `combat`（实战）或 `shell`（壳子） |
 | `reserved_slots` | 预留位置：`>0` 留空位 / `0` 不预留 / `<0` 多招备选 |
 
@@ -117,9 +118,9 @@ tests/                       # 按模块归类：shared / player / cwl_registrat
 
 同一 sheet 分为四个区域：
 - **Part 1**：完整排序名单（含 `cur_team`/`prev_team` 列）
-- **Part 2**：按队伍分组展示分配明细
+- **Part 2**：按队伍分组展示分配明细（含部落名+COC首领）
 - **Part 3**：缺席老兵列表
-- **Part 4**：联赛名单排布网格（5 列横向排布，备份留底）
+- **Part 4**：联赛名单排布网格（5 列：队伍信息 / clan_tag / 部落名 / 首领 / 管理+开战捐兵说明，备份留底）
 
 ## 配置说明
 

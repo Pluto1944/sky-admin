@@ -1,4 +1,4 @@
-# 工作状态（2026-07-31）
+# 工作状态（2026-08-01）
 
 ## 当前进度
 
@@ -12,6 +12,10 @@
 - [x] Part4 网格发布：publish-results 命令 + publish_to_results.sh（前 20 行固定文字硬编码，复用 arrange() 保证一致性）
 - [x] v2.7 列结构优化：ARRANGEMENT_OUTPUT_HEADERS 删除 team_name（由 cur_team/prev_team 替代），Part4 独立 5 列写入，insert_normal_new 改为追加到实战区末尾
 - [x] 文档全面更新 + scripts/README.md 使用文档
+- [x] **管理意愿**：报名表新增 `willing_to_manage` 字段解析与落库（是否愿意做联赛管理员）
+- [x] **管理员三级分配**：config 优先 → 队伍内报名意愿者 → 留空
+- [x] **Part4 部落信息**：col3=部落名、col4=首领（通过 COC API 获取）
+- [x] **管理员后缀**：col5 管理信息追加"开战/捐兵给一份额外"
 
 ## 时间语义（最终版）
 
@@ -86,7 +90,9 @@ PROMOTION_RELEGATION_CONFIG = {
 - data/cwl_202607/*.json (7 files)
 
 ### 修改
-- modules/cwl_registration/config.py, roster.py, repository.py
+- modules/cwl_registration/config.py, roster.py, repository.py, importer.py
+- modules/cwl_registration/team_builder.py
+- shared/db/connection.py
 - modules/war_result/repository.py
 - modules/player/service.py
 - modules/coc_sync/api_client.py
@@ -94,3 +100,4 @@ PROMOTION_RELEGATION_CONFIG = {
 - scripts/register_and_arrange.sh, scripts/publish_to_results.sh
 - scripts/fetch_cwl_data.py, scripts/probe_cwl_data.py
 - DESIGN.md, README.md, WORK_STATE.md, CODE_REVIEW.md, docs/promotion_relegation_design.md
+- docs/roster_part4_design.md

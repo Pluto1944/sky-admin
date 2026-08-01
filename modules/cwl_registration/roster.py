@@ -20,10 +20,13 @@ v3.0 数据流（基准升降级）：
 """
 from __future__ import annotations
 
+import sys
+
 from modules.cwl_registration.config import (
     ARRANGEMENT_OUTPUT_HEADERS,
     BLACK_LIST,
     EXCLUDED_CAMP_NAMES,
+    MANAGER_CANDIDATES,
     NEW_COMBAT_INSERT_START,
     NEW_NORMAL_INSERT_START,
     PROMOTION_RELEGATION_CONFIG,
@@ -35,6 +38,7 @@ from modules.cwl_registration.baseline_rebuilder import build_final_list
 from modules.cwl_registration.team_builder import build_teams
 from modules.cwl_registration.repository import RegistrationRepository
 from modules.cwl_registration.sorter import sort_accounts
+from modules.coc_sync.api_client import CocApiClient, CocApiError
 from modules.player.service import PlayerService
 from modules.war_result.repository import ResultRepository
 from shared.config.common import LEAGUE_COMBAT, LEAGUE_SHELL
@@ -102,6 +106,62 @@ class LeagueArranger:
         self.reg_repo = reg_repo
         self.excel_io = excel_io
         self.result_repo = result_repo
+        self._coc_client: CocApiClient | None = None
+        self._clan_info_cache: dict[str, tuple[str, str]] = {}
+
+    def _get_coc_client(self) -> CocApiClient:
+        if self._coc_client is None:
+            self._coc_client = CocApiClient()
+        return self._coc_client
+
+    def _fetch_clan_info(self, clan_tags: set[str]) -> dict[str, tuple[str, str]]:
+        """批量通过 COC API 获取部落名称和首领昵称。
+
+        返回 {clan_tag: (clan_name, leader_name)}。
+        查询失败的部落值设为 ("", "")。
+        已缓存的 tag 不会重复请求。
+        """
+        result: dict[str, tuple[str, str]] = {}
+        # 过滤非法 tag（如多个 # 号、空字符串等），避免无效 API 调用
+        def _valid_tag(t: str) -> bool:
+            return bool(t) and t.count("#") == 1 and len(t) > 2
+
+        tags_to_fetch = [
+            t for t in clan_tags
+            if _valid_tag(t) and t not in self._clan_info_cache
+        ]
+
+        if not tags_to_fetch:
+            # 全部命中缓存
+            for t in clan_tags:
+                if t:
+                    result[t] = self._clan_info_cache.get(t, ("", ""))
+            return result
+
+        client = self._get_coc_client()
+        for tag in tags_to_fetch:
+            try:
+                clan = client.get_clan(tag)
+                name = clan.get("name", "")
+                # 从 memberList 中找到 role=leader 的首领
+                leader = ""
+                for m in clan.get("memberList", []) or []:
+                    if m.get("role") == "leader":
+                        leader = m.get("name", "")
+                        break
+                self._clan_info_cache[tag] = (name, leader)
+                result[tag] = (name, leader)
+            except CocApiError as e:
+                print(f"[warn] 查询部落 {tag} 信息失败：{e}", file=sys.stderr)
+                self._clan_info_cache[tag] = ("", "")
+                result[tag] = ("", "")
+
+        # 补充缓存中已有的
+        for t in clan_tags:
+            if t and t not in result:
+                result[t] = self._clan_info_cache.get(t, ("", ""))
+
+        return result
 
     def _load_accounts(self, period: str) -> list[dict]:
         """由报名快照构造排序所需列表，账号档案（得分/奖杯）为可选增强。
@@ -142,6 +202,7 @@ class LeagueArranger:
                     or reg.get("prev_rank"),
                     "match_value": reg.get("match_value"),
                     "join_combat": bool(reg.get("join_combat")),
+                    "willing_to_manage": bool(reg.get("willing_to_manage")),
                     # 命中真实账号取历史分/奖杯，未命中的新人得 0
                     "history_score": (acc.get("history_score") or 0.0) if acc else 0.0,
                     "trophies": (acc.get("trophies") or 0) if acc else 0,
@@ -334,11 +395,12 @@ class LeagueArranger:
             new_normal_insert_start=NEW_NORMAL_INSERT_START,
         )
 
-        # === 阶段 7~8：贪心填充队伍 + 白名单处理 ===
+        # === 阶段 7~9：贪心填充队伍 + 白名单处理 + 管理员分配 ===
         team_results = build_teams(
             final_list=final_list,
             teams=teams_cfg,
             white_list=WHITE_LIST,
+            manager_candidates=MANAGER_CANDIDATES,
         )
 
         # 注入 movement 标识 + 修正 league_type（供导出展示）
@@ -457,6 +519,11 @@ class LeagueArranger:
           - grid: list[list[str]]，每行 5 列，可直接拼入 combined_rows
           - title_row_indices: 抬头行在 grid 中的行索引列表
         """
+        # 先收集所有 clan_tag，批量获取部落名称和首领
+        all_tags = {tr.get("clan_tag", "") for tr in team_results}
+        all_tags.discard("")
+        clan_info = self._fetch_clan_info(all_tags)
+
         grid: list[list[str]] = []
         title_indices: list[int] = []
 
@@ -464,12 +531,15 @@ class LeagueArranger:
             cat = "实战" if tr["category"] == LEAGUE_COMBAT else "壳子"
             # 记录抬头行索引
             title_indices.append(len(grid))
-            # 抬头 5 列：队伍信息 | clan_tag | (空) | (空) | 管理
+            # 抬头 5 列：队伍信息 | clan_tag | 部落名 | 首领 | 管理
             cap_info = f"{tr['filled_count']}/{tr['member_count']}"
             col1 = f"{cat}: {tr['team_name']} {cap_info}"
             col2 = tr.get("clan_tag", "")
-            col3 = f"管理:{tr.get('manager', '')}"
-            grid.append([col1, col2, "", "", col3])
+            clan_name, leader_name = clan_info.get(col2, ("", ""))
+            col3 = clan_name
+            col4 = f"首领:{leader_name}" if leader_name else ""
+            col5 = f"管理:{tr.get('manager', '')} 开战/捐兵给一份额外"
+            grid.append([col1, col2, col3, col4, col5])
 
             members = tr["members"]
             is_shell = tr["category"] == LEAGUE_SHELL
@@ -530,6 +600,11 @@ class LeagueArranger:
         )
 
         # 第二部分：逐队展示
+        # 先获取所有部落名称和首领（如果 _build_part4_grid 还没调用过的话）
+        all_tags = {tr.get("clan_tag", "") for tr in team_results}
+        all_tags.discard("")
+        clan_info = self._fetch_clan_info(all_tags)
+
         combat_label = {LEAGUE_COMBAT: "实战", LEAGUE_SHELL: "壳子"}
         for tr in team_results:
             cat = combat_label.get(tr["category"], tr["category"])
@@ -537,14 +612,19 @@ class LeagueArranger:
                 cap_info = f"{tr['filled_count']}/{tr['member_count'] - tr['reserved_empty']}+{tr['reserved_empty']}"
             else:
                 cap_info = f"{tr['filled_count']}/{tr['member_count']}"
+            clan_tag = tr.get("clan_tag", "")
+            clan_name, leader_name = clan_info.get(clan_tag, ("", ""))
             league_info = f"({tr.get('league_level')}) " if tr.get("league_level") else ""
-            leader_info = f"领队:{tr.get('leader', '')} " if tr.get("leader") else ""
+            config_leader = f"领队:{tr.get('leader', '')} " if tr.get("leader") else ""
+            clan_leader = f"首领:{leader_name} " if leader_name else ""
             title = (
                 f"{cat}: {tr['team_name']} "
                 f"{league_info}"
-                f"{tr.get('clan_tag', '')} "
-                f"{leader_info}"
-                f"管理:{tr.get('manager', '')} "
+                f"{clan_tag} "
+                f"{clan_name} "
+                f"{config_leader}"
+                f"{clan_leader}"
+                f"管理:{tr.get('manager', '')} 开战/捐兵给一份额外 "
                 f"满员:{cap_info}"
             )
             # 队伍标题行

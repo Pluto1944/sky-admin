@@ -26,15 +26,16 @@ class RegistrationRepository:
         sql = """
         INSERT INTO registrations
             (account_name, player_name, period, match_value, join_combat,
-             account_type, prev_rank, league_type, rank_order, player_tag)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             willing_to_manage, account_type, prev_rank, league_type, rank_order, player_tag)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(account_name, period) DO UPDATE SET
-            player_name  = excluded.player_name,
-            match_value  = excluded.match_value,
-            join_combat  = excluded.join_combat,
-            account_type = excluded.account_type,
-            prev_rank    = excluded.prev_rank,
-            player_tag   = COALESCE(excluded.player_tag, registrations.player_tag)
+            player_name        = excluded.player_name,
+            match_value        = excluded.match_value,
+            join_combat        = excluded.join_combat,
+            willing_to_manage  = excluded.willing_to_manage,
+            account_type       = excluded.account_type,
+            prev_rank          = excluded.prev_rank,
+            player_tag         = COALESCE(excluded.player_tag, registrations.player_tag)
         """
         cur = self.conn.execute(
             sql,
@@ -44,6 +45,7 @@ class RegistrationRepository:
                 reg["period"],
                 reg.get("match_value"),
                 1 if reg.get("join_combat") else 0,
+                1 if reg.get("willing_to_manage") else 0,
                 reg.get("account_type"),
                 reg.get("prev_rank"),
                 reg.get("league_type"),

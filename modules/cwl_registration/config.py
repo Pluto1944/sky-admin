@@ -17,11 +17,12 @@ SORT_WEIGHTS = {
 # 命中多个时取第一个。
 # ---------------------------------------------------------------------------
 REGISTRATION_COLUMN_KEYWORDS = {
-    "player_name":  {"include": ["主号游戏昵称", "主号"], "exclude": []},
-    "account_name": {"include": ["游戏昵称"], "exclude": ["主号"]},
-    "match_value":  {"include": ["匹配值"], "exclude": []},
-    "join_combat":  {"include": ["想实战"], "exclude": []},
-    "submit_time":  {"include": ["提交时间"], "exclude": []},
+    "player_name":        {"include": ["主号游戏昵称", "主号"], "exclude": []},
+    "account_name":       {"include": ["游戏昵称"], "exclude": ["主号"]},
+    "match_value":        {"include": ["匹配值"], "exclude": []},
+    "join_combat":        {"include": ["想实战"], "exclude": []},
+    "submit_time":        {"include": ["提交时间"], "exclude": []},
+    "willing_to_manage":  {"include": ["愿意做联赛管理员"], "exclude": []},
 }
 
 # 账号标识来源开关（问题 4 根治的预留切换点，当前未接线）。
@@ -98,19 +99,19 @@ COMBAT_MIN_MATCH_VALUE = 600
 # 列表顺序即分配优先级：实战团队从前到后依次填充，壳子团队同理。
 TEAMS = [
     # ===== 实战队伍 =====
-    {"name": "泰坦二",    "clan_tag": "#2QQ",       "leader": "leader2QQ", "member_count": 15, "league_level": "", "manager": "xxx", "category": "combat", "reserved_slots": 0},
-    {"name": "冠一 一队",  "clan_tag": "#2GGGGGGG",  "leader": "leader5", "member_count": 15, "league_level": "", "manager": "yyy", "category": "combat", "reserved_slots": 0},
-    {"name": "冠二",      "clan_tag": "##2C822CJJC", "leader": "Pluto leader6", "member_count": 15, "league_level": "", "manager": "zzz", "category": "combat", "reserved_slots": 0},
-    {"name": "冠三",      "clan_tag": "#2QQQQ2G",   "leader": "leader4", "member_count": 15, "league_level": "", "manager": "www", "category": "combat", "reserved_slots": 0},
-    {"name": "大一",      "clan_tag": "#UUP2",  "leader": "leader", "member_count": 15, "league_level": "", "manager": "www", "category": "combat", "reserved_slots": 0},
-    {"name": "大一",      "clan_tag": "#CYYL",  "leader": "leader2", "member_count": 30, "league_level": "", "manager": "www", "category": "combat", "reserved_slots": 0},
-    {"name": "大一",      "clan_tag": "#2CU9JPYU8",  "leader": "南门 ", "member_count": 30, "league_level": "", "manager": "www", "category": "combat", "reserved_slots": 0},
+    {"name": "泰坦二",    "clan_tag": "#2QQ",       "leader": "leader2QQ", "member_count": 15, "league_level": "", "manager": "", "category": "combat", "reserved_slots": 0},
+    {"name": "冠一 一队",  "clan_tag": "#2GGGGGGG",  "leader": "leader5", "member_count": 15, "league_level": "", "manager": "", "category": "combat", "reserved_slots": 0},
+    {"name": "冠二",      "clan_tag": "#2C822CJJC", "leader": "Pluto leader6", "member_count": 15, "league_level": "", "manager": "", "category": "combat", "reserved_slots": 0},
+    {"name": "冠三",      "clan_tag": "#2QQQQ2G",   "leader": "leader4", "member_count": 15, "league_level": "", "manager": "", "category": "combat", "reserved_slots": 0},
+    {"name": "大一",      "clan_tag": "#UUP2",  "leader": "leader", "member_count": 15, "league_level": "", "manager": "", "category": "combat", "reserved_slots": 0},
+    {"name": "大一",      "clan_tag": "#CYYL",  "leader": "leader2", "member_count": 30, "league_level": "", "manager": "", "category": "combat", "reserved_slots": 0},
+    {"name": "大一",      "clan_tag": "#2CU9JPYU8",  "leader": "南门 ", "member_count": 30, "league_level": "", "manager": "", "category": "combat", "reserved_slots": 0},
 
     # ===== 壳子队伍 =====
-    {"name": "大一",      "clan_tag": "#2R9Y209LY",      "leader": "leader10", "member_count": 30, "league_level": "", "manager": "aaa", "category": "shell",  "reserved_slots": 0},
-    {"name": "大三",      "clan_tag": "#2JQR89P9G",      "leader": "leader6", "member_count": 30, "league_level": "", "manager": "bbb", "category": "shell",  "reserved_slots": 0},
-    {"name": "水一",      "clan_tag": "#2JUJRYVQP",      "leader": "登悟", "member_count": 30, "league_level": "", "manager": "ccc", "category": "shell",  "reserved_slots": 0},
-    {"name": "水二",      "clan_tag": "#2GR0LPGVQ",      "leader": "leader8", "member_count": 30, "league_level": "", "manager": "ddd", "category": "shell",  "reserved_slots": 0},
+    {"name": "大一",      "clan_tag": "#2R9Y209LY",      "leader": "leader10", "member_count": 30, "league_level": "", "manager": "", "category": "shell",  "reserved_slots": 0},
+    {"name": "大三",      "clan_tag": "#2JQR89P9G",      "leader": "leader6", "member_count": 30, "league_level": "", "manager": "", "category": "shell",  "reserved_slots": 0},
+    {"name": "水一",      "clan_tag": "#2JUJRYVQP",      "leader": "登悟", "member_count": 30, "league_level": "", "manager": "", "category": "shell",  "reserved_slots": 0},
+    {"name": "水二",      "clan_tag": "#2GR0LPGVQ",      "leader": "leader8", "member_count": 30, "league_level": "", "manager": "", "category": "shell",  "reserved_slots": 0},
 ]
 
 # TEAMS_LAST：上月联赛队伍配置，供 fetch_cwl_data.py 拉取上月 CWL 战绩时使用。
@@ -162,6 +163,44 @@ PROMOTION_RELEGATION_CONFIG = {
     "relegation_max_stars": 18,  # 降级门槛：≤ 此值触发降级
 }
 
+
+# ---------------------------------------------------------------------------
+# 备选管理员名单（顺序即优先级，从前往后）
+# 队伍分配完成后，对每个队伍按此顺序逐个查询成员是否包含该管理员
+# （按 account_name 精确匹配），命中则设为该队伍管理员并从候选池移除，
+# 后续队伍不再匹配该管理员；全部未命中则为空。
+# ---------------------------------------------------------------------------
+MANAGER_CANDIDATES: list[str] = [
+    # ===== 当前 TEAMS 队伍的历史管理员 =====
+    "鸟不拉不拉",       # 泰坦二 #2QQ
+    "ELIKI",            # 冠一 一队 #2GGGGGGG
+    "Sunken ship",      # 冠二 #2C822CJJC（手动添加）
+    "TT",               # 冠三 #2QQQQ2G
+    "星空之翼",         # 大一 #UUP2
+    "QAQ",              # 大一 #CYYL（手动添加）
+    "星空:宗主",        # 大一 #2CU9JPYU8
+    "Ghost✨Almighty",  # 手动添加
+    "小小龙",           # 手动添加
+    "帝都",             # 大一(壳) #2R9Y209LY
+    "武瞾",             # 大三(壳) #2JQR89P9G
+    "武曌",             # 大三(壳) 历史变体
+    "Always",           # 水一(壳) #2JUJRYVQP
+    "always",           # 水一(壳) 历史变体
+    "ghost",            # 水一/水二(壳) 历史
+    "yolo",             # 水一(壳) 历史
+    "Always#3",         # 水二(壳) #2GR0LPGVQ
+    "沉舟大大1号",      # 水二(壳) 历史
+    "爱吃贝果小太阳",   # 水二(壳) 历史
+
+    # ===== 历史出现过的其他管理员（其他 clan_tag） =====
+    "Snzed",
+    "于我",
+    "如梦",
+    "故浅",
+    "芝士芒果龙利鱼",
+    "苏瞬卿",
+    "虚伪、",
+]
 
 # ---------------------------------------------------------------------------
 # 黑名单与白名单（基准升降级方案 v3.0）

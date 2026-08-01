@@ -1,6 +1,6 @@
 # 联赛报名与名单编排管理系统 — 设计方案
 
-> 版本：v2.7
+> 版本：v2.8
 > 说明：本文档为编码前的完整设计，并已随真实报名表结构落地更新（见 §5.x）。IO 层采用可替换适配器，第一版走本地 xlsx，预留腾讯文档 API 接口；战绩计算做成可插拔的空函数，后续补充公式。
 >
 > **v2.0 架构升级**：由"技术分层"（core/io_adapter/db）重构为"业务领域分模块"（player 中枢 + cwl_registration + war_result + coc_sync），详见 §十三。原设计中的分层思想（纯函数 / IO 抽象 / 存储抽象 / 依赖注入）在新架构中完整保留，只是按领域重新组织归属。
@@ -18,6 +18,12 @@
 > **v2.6 发布简化**：新增 `publish-results` 命令，将 Part4 网格发布到公示文档。前 20 行固定文字直接硬编码（`PUBLISH_FIXED_ROWS`），Part4 数据复用 `arrange()` 结果保证一致性。删除了 ~170 行复杂的模板匹配逻辑（`_get_template_fixed_rows`、`_assemble_publish_content`、`_rebuild_team_results`）。
 >
 > **v2.7 列结构优化**：`ARRANGEMENT_OUTPUT_HEADERS` 删除 `team_name`（由 `cur_team`/`prev_team` 替代）。Part4 改为独立 5 列写入（不经过 header dict 映射），避免 `cur_team`/`prev_team` 在 Part4 区域产生中间空列。`insert_normal_new` 从二分插入改为追加到实战区末尾（壳子区之前）。`NEW_NORMAL_INSERT_START` 已废弃。Part4 抬头行管理信息放第 5 列。
+>
+> **v2.8 管理意愿 + 部落信息**：
+> - **管理意愿**：报名表新增 `willing_to_manage` 字段（报名表列"是否愿意做联赛管理员"），解析时读取并落库到 `registrations.willing_to_manage`。`REGISTRATION_COLUMN_KEYWORDS` 新增 `willing_to_manage` 映射。
+> - **管理员三级分配**：`_assign_managers()` 改造为三级优先级：① `MANAGER_CANDIDATES` 列表顺序匹配（现有逻辑）；② config 未命中时，在队伍成员中找 `willing_to_manage=True` 的第一个；③ 都没有则留空。
+> - **Part4 部落信息**：抬头行 5 列全部填充——col1 队伍信息、col2 clan_tag、col3 部落名（COC API 获取）、col4 首领（COC API 从 memberList 找 role=leader）、col5 管理（追加"开战/捐兵给一份额外"）。`_fetch_clan_info()` 批量获取部落信息并缓存，tag 格式校验（恰好一个 #）。
+> - `arrange_and_export` 队伍标题行同步增加部落名和 COC 首领信息。
 
 ---
 
@@ -258,7 +264,7 @@ flowchart TD
 
 | 配置项 | 类型 | 说明 |
 |--------|------|------|
-| `REGISTRATION_COLUMN_KEYWORDS` | `dict` | 报名表列关键词映射：`player_name`(主号)/`account_name`(游戏昵称)/`match_value`(匹配值)/`join_combat`(想实战)/`submit_time`(提交时间)。每个字段含 `include`/`exclude` 关键词数组 |
+| `REGISTRATION_COLUMN_KEYWORDS` | `dict` | 报名表列关键词映射：`player_name`(主号)/`account_name`(游戏昵称)/`match_value`(匹配值)/`join_combat`(想实战)/`willing_to_manage`(愿意做联赛管理员)/`submit_time`(提交时间)。每个字段含 `include`/`exclude` 关键词数组 |
 | `SORT_WEIGHTS` | `dict` | 综合分权重：`match_value=0.6` / `history_score=0.4` |
 | `CAMP_CLAN_TAG` | `str` | 战营部落标签 `#2QQ` |
 | `EXCLUDED_CAMP_NAMES` | `set[str]` | 战营排除名单（双阶段过滤） |
@@ -288,8 +294,9 @@ flowchart TD
 - `resolve_columns(headers, REGISTRATION_COLUMN_KEYWORDS)` 按关键词映射列名（`shared/columns.py`）：表头去空白后包含任一 `include` 且不含任何 `exclude` 即命中，命中多个取第一个。解决真实表头带换行/空格且列语义随月份漂移的问题。
 - `clean_str()` / `to_float()` 清洗取值。
 - `_parse_join_combat()` 把"想实战"文本（是/否/yes/no 等）转为 bool。
+- `_parse_willing_to_manage()` 把"是否愿意做联赛管理员"文本转为 bool（复用 `JOIN_COMBAT_TRUE_TEXTS`）。
 - 缺少 `account_name`（报名事实主标识）的行返回 None 跳过。
-- 产出标准报名 dict：`{account_name, player_name, match_value, join_combat, submit_time, account_type: NORMAL, prev_rank: None}`。
+- 产出标准报名 dict：`{account_name, player_name, match_value, join_combat, willing_to_manage, submit_time, account_type: NORMAL, prev_rank: None}`。
 
 **3. 主号前向填充** → `_fill_player_name_forward(parsed)`（兜底逻辑）
 - 源表未真·合并单元格（仅视觉留空）时，按物理行顺序把空主号向前填充为最近一个非空主号。对齐"一对多"归属关系。
@@ -380,6 +387,7 @@ flowchart TD
 | `join_combat` | INTEGER | | 是否实战 (0/1) |
 | `account_type` | TEXT | | 本月分类：combat/normal |
 | `prev_rank` | INTEGER | | 上月排名 |
+| `willing_to_manage` | INTEGER | | 是否愿意做联赛管理员 (0/1)（v2.8） |
 | `league_type` | TEXT | | 编排结果（最终类别）：combat/shell |
 | `rank_order` | INTEGER | | 名单位次 |
 | `player_tag` | TEXT | 可空，无 FK | 真实 Tag 关联缓存 |
@@ -475,6 +483,18 @@ flowchart TD
 - `fill_teams()` 返回 `(ordered_with_team, team_results)`
 - `ordered_with_team`：原排序名单每项追加 `team_name` 字段，`league_type` 同步为最终分类
 - `team_results`：`[{team_name, category, member_count, filled_count, reserved_empty, members: [...]}, ...]`
+
+**管理员分配（v2.8 三级优先级）**：
+
+`_assign_managers()` 在队伍填充完成后，按三级优先级为每个队伍匹配管理员：
+
+1. **config 优先**：按 `MANAGER_CANDIDATES` 列表顺序逐个匹配队伍成员（按 account_name 精确匹配），命中后从候选池移除，后续队伍不再匹配。
+2. **报名意愿兜底**：config 未命中时，在队伍成员中找 `willing_to_manage=True` 的第一个作为管理员。
+3. **留空**：以上两级均未命中则留空。
+
+**Part4 部落信息展示（v2.8）**：
+
+`_fetch_clan_info()` 通过 COC API `/clans/{tag}` 批量获取部落名称和首领（从 memberList 找 role=leader），带缓存避免重复请求。Part4 抬头行 5 列：col1 队伍信息、col2 clan_tag、col3 部落名、col4 首领、col5 管理（追加"开战/捐兵给一份额外"）。
 - 同一 sheet 导出时上半部分为排序名单，下半部分按队伍分组展示明细
 
 ---
