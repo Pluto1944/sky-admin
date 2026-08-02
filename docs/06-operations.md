@@ -30,8 +30,8 @@ register_and_arrange.sh 2026-08
   │     COC API → league_results + results（双写）
   │
   └─ [3] arrange --period 2026-08
-        → 读 registrations(2026-08) + league_results(2026-07)
-        → 基准重建 + 升降级 + 队伍填充
+        → 读 registrations(2026-08) + league_results(2026-07) + league_teams(2026-07)
+        → 基准重建（阶段0~6）+ 贪心填充（阶段7~9）
         → 导出腾讯文档 "名单_2026-08"
 ```
 
@@ -39,8 +39,8 @@ register_and_arrange.sh 2026-08
 
 ```
 arrange(period)
-  ├─ 从 league_teams 读 team_name → 注入 teams_cfg.coc_name
   ├─ _write_league_teams() 幂等写入当月配置
+  ├─ _fetch_clan_info() 从 COC API 获取部落名和首领
   ├─ _load_accounts() 加载报名 + 注入分数/奖杯
   ├─ sort_accounts() 分组+排序
   ├─ _load_combat_star_data() 从 league_results 读星数
@@ -48,9 +48,9 @@ arrange(period)
   ├─ _load_prev_teams_config() 从 league_teams 读上月配置
   ├─ build_final_list() 基准重建+升降级（阶段0~6）
   ├─ build_teams() 贪心填充+白名单+管理员（阶段7~9）
-  ├─ 构建 ordered_with_team
-  ├─ 白名单人员插入到 Part1 对应队伍开头
-  └─ arrange_and_export() 导出 Excel
+  ├─ 构建 ordered_with_team + 注入 movement 标识
+  ├─ 回写 team_name → registrations
+  └─ arrange_and_export() 导出 Excel（Part1-4）
 ```
 
 ### 参数与环境变量
@@ -215,8 +215,8 @@ data/
 | `arrange` | 联赛月份 | `--period 2026-08` |
 | `register_and_arrange.sh` | 联赛月份 | `2026-08` |
 
-> `registrations.period` = 联赛月份，`results.period` = CWL/战绩实际发生月。
-> 编排 N 月联赛时：读 `registrations(N)` + `results(N-1)`。
+> `registrations.period` = 联赛月份，`results.period` = CWL/战绩实际发生月，`league_teams.period` = 联赛月份，`league_results.period` = CWL 实际发生月。
+> 编排 N 月联赛时：读 `registrations(N)` + `league_results(N-1)` + `league_teams(N-1)`。
 
 ---
 

@@ -14,7 +14,7 @@
 
 | `publish-results` | 联赛月份 | `--period 2026-08` |
 
-规则：**registrations.period = 联赛月份，results.period = CWL/战绩实际发生月。**
+规则：**registrations.period = 联赛月份，results.period = CWL/战绩实际发生月，league_teams.period = 联赛月份，league_results.period = CWL 实际发生月。**
 
 示例：8 月联赛需要 8 月报名数据 + 7 月 CWL 星数
 - 导入报名：`--period 2026-08`
@@ -36,8 +36,8 @@ scripts/register_and_arrange.sh 2026-08
 
 内部三步：
 1. 导入报名表 → `registrations`（联赛月份 = 2026-08；sheet 名按报名月 2026-07 推算）
-2. 拉取 CWL 星数 → `results` 表（CWL 月 = 2026-07，自动推算 = 联赛-1）
-3. 编排名单 + 升降级 → 腾讯在线文档（联赛月份 = 2026-08）
+2. 拉取 CWL 星数 → `league_results` + `results` 表（CWL 月 = 2026-07，自动推算 = 联赛-1）
+3. 编排名单 + 基准重建 + 升降级 → 腾讯在线文档（联赛月份 = 2026-08）
 
 前置：`.env` 中配置 `COC_API_TOKEN` + `TENCENT_DOC_*` + `REG_DOC_FILE_ID` + `ROSTER_DOC_FILE_ID`
 
@@ -58,32 +58,20 @@ scripts/publish_to_results.sh 2026-08
 
 ---
 
-### `fetch_cwl_data.py` — 拉取 CWL 战绩 + 导入 results 表
+### `fetch_cwl_data.py` — 拉取 CWL 战绩 + 导入 league_results + results 表
 
 ```bash
-# 拉取 7 月 CWL 数据 + 导入 results 表（为 8 月联赛准备）
+# 拉取 7 月 CWL 数据 + 导入 league_results + results 表（为 8 月联赛准备）
 python scripts/fetch_cwl_data.py --period 2026-07
-
-# 仅拉 JSON，不导入 DB
-python scripts/fetch_cwl_data.py --period 2026-07 --fetch-only
 ```
 
-回退逻辑：
-1. COC API 拉取 → JSON → 导入 results 表
-2. API 失败 → 检查本地 JSON 是否存在 → 导入
-3. 全部失败 → 告警，编排时自动跳过升降级
+流程：
+1. 查 `league_teams` 表获取当月 combat 队伍信息
+2. COC API 拉取 → 直接写入 `league_results` + `results`（双写）
+3. league_teams 查不到 → 冷启动：读本地 JSON 导入
+4. API 失败 → 自动回退到本地 JSON
 
 升降级参与规则：只有**相邻两支队伍都成功拉到数据**时，该对相邻队伍才参与升降级。
-
----
-
-### `fetch_cwl_data.sh` — 仅拉 JSON 的便捷包装
-
-```bash
-scripts/fetch_cwl_data.sh --period 2026-07
-```
-
-等价于 `python scripts/fetch_cwl_data.py --fetch-only --period 2026-07`
 
 ---
 
@@ -116,8 +104,9 @@ register_and_arrange.sh 2026-08          ← 用户参数：联赛月份
   │       → results.period = 2026-07
   │
   └─ [3] arrange --period 2026-08        ← 联赛月份
-          → 读 registrations(2026-08) + results(2026-07)
-          → 升降级 → 导出 "名单_2026-08"
+          → 读 registrations(2026-08) + league_results(2026-07) + league_teams(2026-07)
+          → build_final_list() 基准重建 + build_teams() 贪心填充
+          → 导出 "名单_2026-08"
 ```
 
 ---

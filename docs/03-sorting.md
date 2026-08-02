@@ -26,6 +26,7 @@ TEAMS = [
 ```
 
 11 支队伍：7 combat + 4 shell。`team_index` = 列表索引（0~10），**是队伍的唯一身份标识**。
+> 实际 `config.py` 中为 11 支队伍，其中实战 7 支（泰坦二、冠一、冠二、冠三、3 支大一），壳子 4 支（1 支大一、大三、水一、水二）。
 
 每个 team dict 字段：
 
@@ -481,13 +482,13 @@ EXCLUDED_CAMP_NAMES = {"Pluto2QQ", "落花归尘", ...}     # 双阶段过滤
 | Part1 | 排序名单（含白名单） | 完整名单 |
 | Part2 | 队伍明细（逐队展示） | 队伍分配明细 |
 | Part3 | 离队/缺失/黑名单 | 名单4 + 黑名单命中 |
-| Part4 | 联赛名单排布网格（5列） | 见 `05-roster-part4.md` |
+| Part4 | 联赛名单排布网格（5列） | 见 `05-roster-output.md` |
 
-**ARRANGEMENT_OUTPUT_HEADERS**：
+**ARRANGEMENT_OUTPUT_HEADERS**（13 列）：
 ```
 rank_order, league_type, cur_team, prev_team, movement,
-player_tag, account_name, player_name, account_type,
-trophies, match_value, history_score
+player_tag, account_name, player_name, team_name,
+account_type, trophies, match_value, history_score
 ```
 
 ### movement 标识
@@ -533,8 +534,7 @@ registrations.team_name 回写格式：`"{team_index} {team_alias} {coc_name} {c
 | `baseline_rebuilder.py` | 阶段 0-6：基准重建+升降级+增删 | 纯函数 |
 | `promotion.py` | 升降级配对交换算法 | 纯函数 |
 | `team_builder.py` | 阶段 7-9：贪心填充+白名单+管理员 | 纯函数 |
-| `team_filler.py` | 旧版队伍填充（保留兼容） | 纯函数 |
-| `roster.py` | 编排主控 | 编排器 |
+| `roster.py` | 编排主控 + Part4 输出 + 公示发布 | 编排器 |
 | `config.py` | 所有配置项 | 配置 |
 
 ---
@@ -594,66 +594,6 @@ v2.x 的排序流程是：`sort_accounts()` 完全重排 → `fill_teams()` 贪�
 
 ---
 
-## 十五、旧版队伍填充详解（team_filler.py，v2.3）
+## 十五、旧版队伍填充（team_filler.py，已退役）
 
-> v3.0 中 `team_filler.py` 已被 `team_builder.py` 替代，但保留兼容。以下记录旧版算法供历史参考。
-
-### 队伍配置结构（TEAMS）
-
-```python
-{
-    "name": "实战一队",          # 队伍名称
-    "clan_tag": "#XXXXX",        # 部落标签
-    "leader": "",                # 领队
-    "member_count": 15,          # 标准人数（15 或 30）
-    "league_level": "",          # 联赛等级
-    "manager": "xxx",            # 管理员
-    "category": "combat",        # combat=实战 / shell=壳子
-    "reserved_slots": 0,         # >0 留空位 / 0 不预留 / <0 多招备选
-}
-```
-
-### 分配流程
-
-```mermaid
-flowchart TD
-    A[sort_accounts 排序结果] --> B["① 阈值过滤<br/>普通实战账号 match_value < 门槛 → 转壳子<br/>（战营账号不受阈值影响）"]
-    B --> C["② 拆分 combat_pool / shell_pool"]
-    C --> D["③ 逐队填充前 N-1 个实战队伍<br/>含 reserved_slots 处理"]
-    D --> E{"④ 最后一个实战队状态？"}
-    E -->|"③a 刚好满员"| F["→ 填充壳子队伍"]
-    E -->|"③b 实战人溢出"| G["溢出实战人 → 注入 shell_pool<br/>按匹配值降序重排 → 填充壳子队伍"]
-    E -->|"③c 实战缺口 <5"| H["取最后实战入选人匹配值为 ref<br/>从 shell_pool 找最相近 N 人补入<br/>→ 剩余壳子池填充壳子队伍"]
-    E -->|"③d 缺口 ≥5"| I["不协调，队伍不满员<br/>→ 壳子池填充壳子队伍"]
-    F --> J["⑤ 重新编号 rank_order + 回写 DB + 输出"]
-    G --> J
-    H --> J
-    I --> J
-```
-
-### 阈值过滤例外
-
-战营账号（`account_type=combat`）不受 `COMBAT_MIN_MATCH_VALUE` 影响，始终留在实战池中——即使 `match_value` 为空（未报名自动纳入）或低于门槛也不会被转壳子。这样保证战营成员优先进入实战队伍。
-
-### 预留位置（reserved_slots）语义
-
-| reserved_slots | 实际容量 | 说明 |
-|----------------|---------|------|
-| `0` | `member_count` | 标准人数，不预留 |
-| `>0`（如 2） | `member_count - 2` | 留空位给后续手动安排 |
-| `<0`（如 -2） | `member_count + 2` | 多招备选，超出标准人数 |
-
-### 协调匹配值相近成员（③c）
-
-当最后一个实战队缺口 <5 时，取最后一个实战入选者的 `match_value` 作为参考值，从壳子池中选取差值绝对值最小的 N 人补入（`_pick_closest_by_match_value`），补入者 `league_type` 更新为 combat。
-
-### 函数签名
-
-```python
-def fill_teams(
-    ordered: list[dict],       # sort_accounts 输出（含 league_type/rank_order）
-    teams: list[dict],         # TEAMS 配置
-    threshold: float | None,   # COMBAT_MIN_MATCH_VALUE
-) -> tuple[list[dict], list[dict]]:
-    """返回 (ordered_with_team, team_results)"""
-```
+> v3.0 中 `team_filler.py` 已被 `team_builder.py` 完全替代，文件已删除。旧版采用"阈值过滤 + 逐队填充 + 最后一个实战队边界处理"流程，新版改为"基准重建 → 贪心填充"的简化方案。详见上方第六、七节。

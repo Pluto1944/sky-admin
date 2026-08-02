@@ -1,9 +1,9 @@
 # 04 — 实战队伍升降级系统
 
-> 版本：v2.0
-> 日期：2026-07-30
+> 版本：v3.0（基准重建内嵌升降级）
+> 日期：2026-08-02
 > 状态：已实现，135 测试全绿
-> 关联代码：`promotion.py`、`roster.py`
+> 关联代码：`promotion.py`、`baseline_rebuilder.py`、`roster.py`
 
 ---
 
@@ -52,18 +52,17 @@ arrange("2026-08")                ← 联赛月份
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
-| `team_results` | `list[dict]` | `fill_teams()` 的输出 |
+| `prev_slots` | `list[list[dict]]` | 上月实战队伍分组（`baseline_rebuilder` 阶段 2a 切分） |
 | `star_data` | `dict[str, int]` | `{account_name: total_stars}` |
 | `config` | `dict` | `PROMOTION_RELEGATION_CONFIG` |
 
-### 步骤
+### 步骤（v3.0 基准重建阶段 2b）
 
 ```
-对于每对相邻实战队伍 (Team_Higher, Team_Lower)，自上而下依次处理：
+在 baseline_rebuilder.py 的阶段 2b 中，对每对相邻实战队伍执行配对交换：
 
-步骤 1：识别实战队伍
-  从 team_results 中筛选 category=="combat" 的队伍
-  按配置顺序，从第 0 队到第 n-2 队，依次与下一队配对处理
+步骤 1：识别相邻实战队伍对
+  从 prev_slots 中按顺序取相邻队伍 (Team_Higher, Team_Lower)
 
 步骤 2：筛选降级候选（来自 Team_Higher）
   条件：有星数数据 + total_stars ≤ 18 + 不在 moved 集合中
@@ -82,18 +81,14 @@ arrange("2026-08")                ← 联赛月份
 ### 函数签名
 
 ```python
-def apply_promotion_relegation(
-    team_results: list[dict],
+# promotion.py（纯函数，被 baseline_rebuilder 阶段 2b 调用）
+def _apply_promotion_relegation_on_slots(
+    prev_slots: list[list[dict]],
     star_data: dict[str, int],
     config: dict | None = None,
-) -> tuple[list[dict], list[dict]]:
-    """返回 (调整后的 team_results, 升降级日志列表)。"""
-
-def rebuild_assignment_map(
-    ordered_with_team: list[dict],
-    team_results: list[dict],
-) -> None:
-    """升降级交换后重建 ordered_with_team 的 team_name 映射。"""
+) -> tuple[list[list[dict]], list[dict]]:
+    """在队伍分组(slots)上执行配对交换升降级。
+    返回 (调整后的 slots, 升降级日志列表)。"""
 ```
 
 ---
@@ -127,31 +122,39 @@ PROMOTION_RELEGATION_CONFIG = {
 
 ---
 
-## 六、数据流与架构
+## 六、数据流与架构（v3.0 基准重建内嵌）
 
 ```mermaid
 flowchart TD
     A["arrange(period)"] --> B["_load_accounts(period)"]
     B --> C["sort_accounts()"]
-    C --> D["fill_teams()"]
-    D --> E["apply_promotion_relegation()"]
-    E --> F["rebuild_assignment_map()"]
-    F --> G["回写 team_name"]
+    C --> D["_load_prev_combat_from_results()"]
+    D --> E["_load_prev_teams_config()"]
+    E --> F["build_final_list()<br/>baseline_rebuilder 阶段0~6"]
+    F --> G["阶段2b: 在 prev_slots 上执行升降级"]
+    G --> H["阶段2c: 展开为 final_list"]
+    H --> I["build_teams()<br/>贪心填充 阶段7~9"]
 ```
 
-### roster.py 集成
+### roster.py 集成（v3.0）
 
 ```python
 def arrange(self, period, ...):
     accounts = self._load_accounts(period)
     ordered = sort_accounts(accounts, ...)
-    ordered_with_team, team_results = fill_teams(ordered, ...)
     
-    # 升降级（星数从上月 CWL 加载：联赛月 -1）
-    cwl_period = _prev_period(period)
-    star_data = star_data or self._load_combat_star_data(cwl_period)
-    team_results, movements = apply_promotion_relegation(team_results, star_data, ...)
-    rebuild_assignment_map(ordered_with_team, team_results)
+    # 读上月数据
+    prev_combat_regs = self._load_prev_combat_from_results(prev_period)
+    star_data = self._load_combat_star_data(prev_period)
+    prev_teams_config = self._load_prev_teams_config(prev_period)
+    
+    # 基准重建（阶段0~6，升降级内嵌在阶段2b）
+    final_list, removed_list, movements, black_hits = build_final_list(
+        accounts, prev_combat_regs, star_data, teams, ...
+    )
+    
+    # 贪心填充（阶段7~9）
+    team_results = build_teams(final_list, teams, ...)
     ...
 ```
 
@@ -197,9 +200,9 @@ python scripts/cold_start_arrange.py --period 2026-08 -o 2026-08名单.xlsx
 | 9 | 空队伍 | 无异常 |
 | 10 | 仅壳子队伍 | 返回原结果 |
 | 11 | 自定义配置 | 阈值可覆盖 |
-| 12 | rebuild_assignment_map | team_name 正确回写 |
+| 12 | 升降级后映射重建 | 数据正确回写 |
 
-完整测试套件：**135 passed**
+完整测试套件：**135 passed**（含 promotion 12 个 + baseline_rebuilder + team_builder 等）
 
 ---
 
@@ -236,7 +239,7 @@ leaguegroup → warTags[28] → clanwarleagues/wars/{warTag} → per-player star
 # 步骤 1：导入报名表
 python cli.py import-reg 8月报名表.xlsx --period 2026-08
 
-# 步骤 2：编排 + 导出（升降级自动生效）
+# 步骤 2：编排 + 导出（升降级在 build_final_list 阶段2b 自动生效）
 python cli.py arrange --period 2026-08 -o 2026-08名单.xlsx
 ```
 

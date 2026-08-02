@@ -9,12 +9,16 @@
 - **排序重构**：从"完全重排 + 升降级微调"改为"以上月实战名单为锚点做基准重建"
   - 新增 `baseline_rebuilder.py`：阶段 0~6（黑名单过滤 → 构建 7 个临时名单 → 基准重建+升降级 → 删除缺失 → 插入战营新增 → 插入普通营新增 → 追加壳子）
   - 新增 `team_builder.py`：阶段 7~9（贪心填充 → 白名单 → 管理员）
-  - `team_filler.py` 保留兼容，实际已弃用
+  - `team_filler.py` 已删除，由 `team_builder.py` 完全替代
 - **排序键调整**：战营按奖杯降序（原综合分），普通营按综合分降序
 - **新增配置**：`BLACK_LIST`、`WHITE_LIST`、`NEW_COMBAT_INSERT_START`、`NEW_NORMAL_INSERT_START`
 - **新表**：`league_teams`（队伍配置快照）、`league_results`（联赛战绩结构化存储）
 - **双写过渡**：`league_results` 写入时同时双写到旧 `results` 表
 - **cur_team 格式**：从 `"{team_index} {team_alias}"` 升级为 `"{team_index} {team_alias} {coc_name}"`
+- **TEAMS_LAST 已删除**：由 `league_teams` 表替代，每月 `arrange()` 幂等写入配置快照
+- **升降级内嵌**：`promotion.py` 从独立调用改为被 `baseline_rebuilder` 阶段 2b 调用（在 prev_slots 上执行配对交换）
+- **registrations.team_name 回写格式**：`"{team_index} {team_alias} {coc_name} {clan_tag}"`
+- **fetch_cwl_data.py**：不依赖 config.py TEAMS，从 `league_teams` 表获取队伍信息
 
 ---
 
@@ -28,7 +32,7 @@
 
 ## v2.7 — 列结构优化
 
-- `ARRANGEMENT_OUTPUT_HEADERS` 删除 `team_name`（由 `cur_team`/`prev_team` 替代）
+- `ARRANGEMENT_OUTPUT_HEADERS` 为 13 列（含 `team_name`）
 - Part4 改为独立 5 列写入（`_append_part4_to_sheet`），不经过 header dict 映射，避免中间空列
 - `insert_normal_new` 从二分插入改为追加到实战区末尾（壳子区之前）
 - `NEW_NORMAL_INSERT_START` 已废弃

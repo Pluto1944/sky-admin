@@ -42,10 +42,12 @@ erDiagram
         TEXT account_name
         TEXT period
         REAL match_value
+        INTEGER join_combat
         TEXT account_type
         TEXT league_type
         INTEGER rank_order
         TEXT team_name
+        TEXT player_tag
     }
 
     league_teams {
@@ -127,9 +129,11 @@ v2.2 B 方案：自成一体的报名事实源。自持 `account_name`/`player_n
 | `league_type` | TEXT | | 编排结果：combat/shell |
 | `rank_order` | INTEGER | | 最终名单位次（编排产物，arrange() 结束时回写） |
 | `player_tag` | TEXT | 可空，无 FK | 真实 Tag 关联缓存 |
-| `team_name` | TEXT | 可空 | 分配到哪个队伍（v2.3） |
+| `team_name` | TEXT | 可空 | 分配到哪个队伍（v2.3，回写格式含 index+alias+coc_name+clan_tag） |
 
 **team_name 回写格式**：`"{team_index} {team_alias} {coc_name} {clan_tag}"`
+
+**team_name 在 ARRANGEMENT_OUTPUT_HEADERS 中**：COC 真实部落名称列（v2.8 新增），供 Excel 展示使用。
 
 ---
 
@@ -340,9 +344,9 @@ v2.x 的数据库只有 3 张表（accounts / registrations / results），随�
 1. ✅ DDL 添加 `league_teams` 和 `league_results`
 2. ✅ `arrange()` 开始时写入 `league_teams`
 3. ✅ `fetch_cwl_data.py` 读写新表
-4. ✅ `registrations.team_name` 回写格式改为含 coc_name + clan_tag
+4. ✅ `registrations.team_name` 回写格式改为含 index + alias + coc_name + clan_tag
 5. ✅ `baseline_rebuilder.py` 从 `league_teams` 读取上月配置
-6. ✅ Excel 导出新增 `team_name` 列
+6. ✅ Excel 导出 `ARRANGEMENT_OUTPUT_HEADERS` 新增 `team_name` 列（13 列）
 7. ✅ 迁移脚本 `migrate_results_202607.py` 将旧数据迁入新表
 8. ✅ 回填脚本 `backfill_team_names.py` 通过 COC API 补全 team_name
 

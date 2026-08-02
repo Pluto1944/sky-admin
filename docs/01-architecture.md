@@ -1,7 +1,7 @@
 # 01 — 系统架构
 
 > 联赛报名与名单编排管理系统 · 架构设计文档
-> 版本：v3.0
+> 版本：v3.0（2026-08）
 
 ---
 
@@ -56,9 +56,9 @@ flowchart TD
     CLI[cli.py<br/>命令行入口]
 
     subgraph M2["② cwl_registration 报名"]
-        IMP[RegistrationImporter<br/>报名→player]
-        ROS[LeagueArranger<br/>player→名单+队伍分配]
-        SORT[sorter/team_filler/rank_score<br/>纯函数]
+        IMP[RegistrationImporter<br/>报名→registrations]
+        ROS[LeagueArranger<br/>registrations→名单+队伍分配]
+        SORT[sorter/baseline_rebuilder/team_builder<br/>纯函数]
         RR[(registrations)]
     end
     subgraph M3["③ war_result 战绩"]
@@ -159,13 +159,12 @@ flowchart TD
 | 文件 | 职责 |
 |------|------|
 | `importer.py` | 报名导入（7 步流水线） |
-| `roster.py` | 编排主控：串联所有阶段、加载数据、回写 DB、输出 Excel |
+| `roster.py` | 编排主控：串联所有阶段、加载数据、回写 DB、输出 Excel + 公示发布 |
 | `sorter.py` | 分组排序纯函数 |
 | `rank_score.py` | 综合分公式 |
 | `baseline_rebuilder.py` | 阶段 0-6：基准重建+升降级+增删（v3.0） |
 | `team_builder.py` | 阶段 7-9：贪心填充+白名单+管理员（v3.0） |
 | `promotion.py` | 升降级配对交换算法（纯函数） |
-| `team_filler.py` | 旧版队伍填充（v2.3，保留兼容） |
 | `repository.py` | registrations 表数据访问 |
 | `config.py` | 全部配置 |
 
@@ -221,10 +220,9 @@ flowchart TD
 |------|------|---------|
 | `rank_score.py` | 综合分（纯函数） | 纯输入输出断言 |
 | `sorter.py` | 分组排序（纯函数） | 纯输入输出断言 |
-| `team_filler.py` | 队伍分配（纯函数） | 纯输入输出断言 |
 | `promotion.py` | 升降级（纯函数） | 纯输入输出断言 |
 | `baseline_rebuilder.py` | 基准重建（纯函数） | 纯输入输出断言 |
-| `team_builder.py` | 贪心填充（纯函数） | 纯输入输出断言 |
+| `team_builder.py` | 贪心填充+白名单+管理员（纯函数） | 纯输入输出断言 |
 | `history_score.py` | 历史分（占位） | 纯输入输出断言 |
 | `status_rule.py` | 状态推断（纯函数） | 纯输入输出断言 |
 | `player/service.py` | PlayerService | 内存库集成 |
@@ -267,8 +265,7 @@ sky-admin/
 │   │   ├── service.py / repository.py / status_rule.py / config.py
 │   ├── cwl_registration/               # ② CWL 报名
 │   │   ├── importer.py / roster.py / sorter.py / rank_score.py
-│   │   ├── team_filler.py / promotion.py
-│   │   ├── baseline_rebuilder.py / team_builder.py
+│   │   ├── promotion.py / baseline_rebuilder.py / team_builder.py
 │   │   ├── repository.py / config.py
 │   ├── war_result/                     # ③ 战绩
 │   │   ├── importer.py / history_score.py / repository.py / config.py
@@ -534,6 +531,6 @@ flowchart TD
 - `02-database.md` — 数据库表结构与数据流
 - `03-sorting.md` — 排序全流程与队伍填充
 - `04-promotion-relegation.md` — 升降级算法
-- `05-roster-part4.md` — Part4 网格布局
+- `05-roster-output.md` — Part1-Part4 输出 + 公示发布
 - `06-operations.md` — 运维脚本与月度循环
 - `CHANGELOG.md` — 版本更新记录

@@ -432,7 +432,9 @@ class LeagueArranger:
         """
         teams_cfg = teams if teams is not None else TEAMS
 
-        # 通过 COC API 获取所有队伍的部落真实名称，注入 teams_cfg 的 coc_name
+        # 通过 COC API 获取所有队伍的部落真实名称和首领，注入 teams_cfg
+        # （config.py TEAMS 中的信息不完整，首次编排时必须走 API 补全，
+        #   后续 _write_league_teams 会持久化到 league_teams 表）
         all_tags = {t.get("clan_tag", "") for t in teams_cfg}
         all_tags.discard("")
         if all_tags:
@@ -441,6 +443,7 @@ class LeagueArranger:
                 tag = t.get("clan_tag", "")
                 if tag and tag in clan_info:
                     t["coc_name"] = clan_info[tag][0]
+                    t["leader_name"] = clan_info[tag][1]
 
         # 幂等写入当月队伍配置到 league_teams 表
         self._write_league_teams(period, teams_cfg)
@@ -682,11 +685,8 @@ class LeagueArranger:
           - grid: list[list[str]]，每行 5 列，可直接拼入 combined_rows
           - title_row_indices: 抬头行在 grid 中的行索引列表
         """
-        # 先收集所有 clan_tag，批量获取部落名称和首领
-        all_tags = {tr.get("clan_tag", "") for tr in team_results}
-        all_tags.discard("")
-        clan_info = self._fetch_clan_info(all_tags)
-
+        # clan_name / leader_name 已在 arrange() 阶段通过 COC API 注入 teams_cfg，
+        # 并由 build_teams 透传到 team_results，此处直接从 team_results 取。
         grid: list[list[str]] = []
         title_indices: list[int] = []
 
@@ -698,8 +698,8 @@ class LeagueArranger:
             cap_info = f"{tr['filled_count']}/{tr['member_count']}"
             col1 = f"{cat}: {tr['team_name']} {cap_info}"
             col2 = tr.get("clan_tag", "")
-            clan_name, leader_name = clan_info.get(col2, ("", ""))
-            col3 = clan_name
+            col3 = tr.get("coc_name", "")
+            leader_name = tr.get("leader_name", "")
             col4 = f"首领:{leader_name}" if leader_name else ""
             col5 = f"管理:{tr.get('manager', '')} 开战/捐兵给一份额外"
             grid.append([col1, col2, col3, col4, col5])
@@ -763,11 +763,8 @@ class LeagueArranger:
         )
 
         # 第二部分：逐队展示
-        # 先获取所有部落名称和首领（如果 _build_part4_grid 还没调用过的话）
-        all_tags = {tr.get("clan_tag", "") for tr in team_results}
-        all_tags.discard("")
-        clan_info = self._fetch_clan_info(all_tags)
-
+        # clan_name / leader_name 已在 arrange() 阶段注入 teams_cfg 并透传到 team_results，
+        # 此处直接取，不需要再调 _fetch_clan_info。
         combat_label = {LEAGUE_COMBAT: "实战", LEAGUE_SHELL: "壳子"}
         for tr in team_results:
             cat = combat_label.get(tr["category"], tr["category"])
@@ -776,7 +773,8 @@ class LeagueArranger:
             else:
                 cap_info = f"{tr['filled_count']}/{tr['member_count']}"
             clan_tag = tr.get("clan_tag", "")
-            clan_name, leader_name = clan_info.get(clan_tag, ("", ""))
+            clan_name = tr.get("coc_name", "") or ""
+            leader_name = tr.get("leader_name", "")
             league_info = f"({tr.get('league_level')}) " if tr.get("league_level") else ""
             config_leader = f"领队:{tr.get('leader', '')} " if tr.get("leader") else ""
             clan_leader = f"首领:{leader_name} " if leader_name else ""

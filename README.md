@@ -8,16 +8,17 @@
 |------|------|
 | [`docs/01-architecture.md`](./docs/01-architecture.md) | 系统架构、模块划分、技术选型 |
 | [`docs/02-database.md`](./docs/02-database.md) | 5 张表定义、ER 图、数据流转 |
-| [`docs/03-sorting.md`](./docs/03-sorting.md) | 排序全流程、TEAMS 体系、队伍填充 |
-| [`docs/04-promotion-relegation.md`](./docs/04-promotion-relegation.md) | 升降级算法 |
-| [`docs/05-roster-part4.md`](./docs/05-roster-part4.md) | Part4 网格布局（备份留底 + 公示发布） |
+| [`docs/03-sorting.md`](./docs/03-sorting.md) | 排序全流程、TEAMS 体系、基准重建+贪心填充 |
+| [`docs/04-promotion-relegation.md`](./docs/04-promotion-relegation.md) | 升降级算法（v3.0 内嵌于基准重建） |
+| [`docs/05-roster-output.md`](./docs/05-roster-output.md) | Part1-Part4 输出 + 公示发布 |
 | [`docs/06-operations.md`](./docs/06-operations.md) | 月度循环、运维脚本、数据目录 |
 | [`docs/CHANGELOG.md`](./docs/CHANGELOG.md) | 版本更新记录 |
+| [`docs/fetch_cwl_data_design.md`](./docs/fetch_cwl_data_design.md) | CWL 数据拉取设计 |
 | [`scripts/README.md`](./scripts/README.md) | 脚本使用说明 |
 
 ## 环境
 
-- Python 3.9+
+- Python 3.10+
 - 安装依赖：
 
 ```bash
@@ -32,17 +33,17 @@ pip install -r requirements-dev.txt    # 测试依赖 (pytest, pytest-cov)
 python cli.py coc-sync                              # 同步 config.CLANS 里全部 enabled 部落
 python cli.py coc-sync --clan '#2QQ' --clan '#XX'   # 临时只同步指定部落（覆盖配置）
 
-# 1. 导入报名表（写入 registrations 报名事实；按昵称反查真实 Tag 缓存，并刷新账号报名状态）
-python cli.py import-reg 报名表.xlsx --period 2026-07
+# 1. 导入报名表（写入 registrations 报名事实；按昵称反查真实 Tag 缓存）
+python cli.py import-reg 报名表.xlsx --period 2026-08
 
 # 2. 生成实战/壳子名单、队伍分配并导出（同一 sheet：排序名单 + 队伍明细 + Part4 网格）
-python cli.py arrange --period 2026-07 -o 名单.xlsx
+python cli.py arrange --period 2026-08 -o 名单.xlsx
 
 # 3. 将 Part4 编排结果发布到公示文档
-python cli.py publish-results --period 2026-07 --file-id <docId>
+python cli.py publish-results --period 2026-08 --file-id <docId>
 
 # 4. 联赛结束后导入战绩，更新历史分
-python cli.py import-result 战绩表.xlsx --period 2026-07
+python cli.py import-result 战绩表.xlsx --period 2026-08
 
 # 查看账号档案（可按状态过滤）
 python cli.py accounts --status active
@@ -77,39 +78,39 @@ python cli.py reset-db
 | 是否愿意做联赛管理员 | 是 / 否（管理员分配时优先使用） |
 | 提交时间 | 同名去重取最新 |
 
-## 项目结构（v2.0 领域模块）
+## 项目结构（v3.0 领域模块）
 
 ```
-cli.py                       # 命令行入口
+cli.py                       # 命令行入口（8 个命令）
 shared/                      # 基础设施：config/common、columns、io_adapter、db/connection
 modules/
   player/                    # ① 玩家中枢：PlayerService（账号读写唯一入口）+ repository + status_rule
-  cwl_registration/          # ② CWL 报名：importer(报名→registrations) + roster(名单+队伍分配+Part4输出，含排除名单过滤) + sorter + rank_score + team_filler + team_builder(管理员三级分配) + baseline_rebuilder + promotion
-  war_result/                # ③ 战绩：importer(→历史分) + history_score + repository
-  coc_sync/                  # ④ COC 同步：api_client(底层HTTP) + mapper(纯函数映射) + config(部落清单) + service(唯一API编排出口)
-scripts/                     # 运维脚本：register_and_arrange.sh（报名一体化）/ publish_to_results.sh（发布公示）/ sync_and_export.sh（长期维护）/ load_env.sh（凭证加载）
-tests/                       # 按模块归类：shared / player / cwl_registration / war_result / coc_sync
+  cwl_registration/          # ② CWL 报名：importer + roster(编排主控+Part4输出+公示发布) + sorter + rank_score + baseline_rebuilder(基准重建阶段0~6) + team_builder(贪心填充阶段7~9) + promotion(升降级纯函数)
+  war_result/                # ③ 战绩：importer + history_score + repository
+  coc_sync/                  # ④ COC 同步：api_client + mapper + config + service
+scripts/                     # 运维脚本：register_and_arrange.sh / publish_to_results.sh / sync_and_export.sh / load_env.sh
+tests/                       # 按模块归类：shared / player / cwl_registration / war_result / coc_sync（15 个测试文件，135 用例全绿）
 ```
 
-> 架构：按业务领域分模块，`player` 为数据中枢，其他模块只通过 `PlayerService` 读写账号；**所有 COC API 调用统一经 `CocSyncService` 封装**，其它模块/脚本不直接使用 `CocApiClient`。详见 [`docs/01-architecture.md`](./docs/01-architecture.md)。
+> 架构：按业务领域分模块，`player` 为数据中枢，其他模块只通过 `PlayerService` 读写账号；**所有 COC API 调用统一经 `CocSyncService` 封装**。v3.0 起 `team_filler.py` 已删除，由 `baseline_rebuilder.py` + `team_builder.py` 替代。详见 [`docs/01-architecture.md`](./docs/01-architecture.md)。
 
 ## 两个可插拔开放函数（后续自行完善）
 
 - `modules/war_result/history_score.py :: compute_history_score()` — 历史战绩综合分，**占位待补公式**。
 - `modules/cwl_registration/rank_score.py :: compute_rank_score()` — 名单排序综合分，**已给归一化加权默认实现**，可深入替换。
 
-## 队伍分配（在排序名单基础上自动分区）
+## 队伍分配（v3.0 基准重建 + 贪心填充）
 
-`arrange` 命令在生成排序名单后，会**自动按 `TEAMS` 配置将人员分配到各队伍**，并输出到同一 sheet 的下半部分。
+`arrange` 命令采用 **v3.0 基准重建**流程：以上月实战名单为锚点，做升降级 → 删除缺失 → 插入新人 → 追加壳子 → 贪心填充队伍。
 
 ### 队伍配置 (`TEAMS`)
 
-每队包含以下字段：
+11 支队伍（7 combat + 4 shell），每队包含以下字段：
 
 | 字段 | 说明 |
 |------|------|
-| `name` | 队伍名称，如"实战一队" |
-| `clan_tag` | 部落标签 `#XXXXX` |
+| `name` | 队伍别名（如"泰坦二"、"大一"，不唯一） |
+| `clan_tag` | 部落标签 `#XXXXX`（唯一） |
 | `leader` | 领队（默认空字符串） |
 | `member_count` | 标准人数（15 或 30） |
 | `league_level` | 联赛等级（默认空字符串） |
@@ -117,23 +118,28 @@ tests/                       # 按模块归类：shared / player / cwl_registrat
 | `category` | `combat`（实战）或 `shell`（壳子） |
 | `reserved_slots` | 预留位置：`>0` 留空位 / `0` 不预留 / `<0` 多招备选 |
 
-### 分配规则
+### 编排流程（阶段 0~9）
 
-1. **阈值过滤**：`match_value < COMBAT_MIN_MATCH_VALUE` 的**普通实战账号**强制参加壳子（战营账号 `account_type=combat` 不受阈值影响，始终留在实战池）
-2. **按序填充**：按排序名单顺序依次分配到各队伍
-3. **最后一个实战队边界处理**：
-   - ③a 人数刚好 → 不做修改
-   - ③b 实战人溢出 → 多的人注入壳子池，按匹配值重新排序
-   - ③c 实战缺口 <5 → 从壳子池协调匹配值相近的成员过来
-   - ③d 实战缺口 ≥5 → 不协调，队伍不满员
+| 阶段 | 说明 |
+|------|------|
+| 0 | 黑名单过滤 |
+| 1 | 构建 7 个临时名单（名单1~7） |
+| 2 | 基准重建 + 升降级（在上月队伍分组上配对交换） |
+| 3 | 删除实战缺失人员 |
+| 4 | 插入战营实战新增（编号30） |
+| 5 | 插入普通营实战新增（追加到实战末尾） |
+| 6 | 追加壳子名单 |
+| 7 | 贪心填充队伍 |
+| 8 | 白名单强制插入 |
+| 9 | 管理员分配 |
 
 ### 输出格式
 
 同一 sheet 分为四个区域：
-- **Part 1**：完整排序名单（含 `cur_team`/`prev_team` 列）
+- **Part 1**：完整排序名单（含 `cur_team`/`prev_team`/`movement` 列）
 - **Part 2**：按队伍分组展示分配明细（含部落名+COC首领）
-- **Part 3**：缺席老兵列表
-- **Part 4**：联赛名单排布网格（5 列：队伍信息 / clan_tag / 部落名 / 首领 / 管理+开战捐兵说明，备份留底）
+- **Part 3**：离队/缺失/黑名单
+- **Part 4**：联赛名单排布网格（5 列独立写入）
 
 ## 配置说明
 
@@ -142,7 +148,10 @@ tests/                       # 按模块归类：shared / player / cwl_registrat
 | `SORT_WEIGHTS` | `cwl_registration/config.py` | 排序权重：匹配值 0.6 / 历史分 0.4 |
 | `CAMP_CLAN_TAG` | `cwl_registration/config.py` | 战营部落标签（`#2QQ`，成员即战营账号） |
 | `EXCLUDED_CAMP_NAMES` | `cwl_registration/config.py` | 战营排除名单：不参与排序的账号昵称集合，在导入和排序两阶段过滤 |
-| `TEAMS` | `cwl_registration/config.py` | 队伍配置列表：每队含名称/人数/联赛等级/标签/管理/类别(combat\|shell)/预留位置 |
+| `BLACK_LIST` | `cwl_registration/config.py` | 黑名单：阶段0 从所有数据源排除的账号（当前为空） |
+| `WHITE_LIST` | `cwl_registration/config.py` | 白名单：阶段8 强制插入指定队伍的 `(name, clan_tag)` 列表 |
+| `TEAMS` | `cwl_registration/config.py` | 队伍配置列表（11 支队伍）：每队含名称/人数/标签/管理/类别(combat\|shell)/预留位置 |
+| `NEW_COMBAT_INSERT_START` | `cwl_registration/config.py` | 战营新增插入起始编号（默认30） |
 | `COMBAT_MIN_MATCH_VALUE` | `cwl_registration/config.py` | 实战最低匹配值门槛：低于此值的普通实战账号强制转壳子（战营账号豁免） |
 | `IO_ADAPTER` | `shared/config/common.py` | IO 适配器：`tencent`（腾讯文档）或默认本地 xlsx |
 
