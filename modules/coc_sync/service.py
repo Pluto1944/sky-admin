@@ -15,8 +15,8 @@ from __future__ import annotations
 import sys
 
 import config
-from modules.coc_sync.api_client import CocApiClient, CocApiError
-from modules.coc_sync.mapper import map_member, normalize_tag
+from modules.coc_sync.official.api_client import CocApiClient, CocApiError
+from modules.coc_sync.official.mapper import map_member, normalize_tag
 from modules.player.service import PlayerService
 
 

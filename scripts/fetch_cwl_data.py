@@ -1,8 +1,14 @@
 """拉取 CWL 数据并写入数据库。
 
-流程：
-  1. 查 league_teams 表获取 combat 队伍 → 调 COC API 拉取战绩 → 直接写 DB（正常流程）
-  2. 查不到 league_teams → 尝试读本地 JSON 导入（冷启动回退）
+流程（两级降级）：
+  1. 查 league_teams 表获取 combat 队伍列表
+  2. 逐队拉取 CWL 战绩（两级降级）：
+     a. 通道1 🥇 ClashKing War Log — 主力数据源，支持按月份筛选
+     b. 通道2 🥈 本地 JSON 文件 — 兜底
+  3. 查不到 league_teams → 冷启动：读本地 JSON 导入
+
+注意：Supercell 官方 API 的 get_league_group 只能查当前 CWL，不按月份过滤，
+会误把当月数据写入历史月份，因此不纳入降级链路。
 
 --period 语义：CWL 实际发生月（与联赛月相同）。
   - fetch --period 2026-08 → 拉取 2026-08 CWL 战绩
@@ -17,8 +23,6 @@ import json
 import os
 import sqlite3
 import sys
-from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -26,7 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared.config.env_loader import load_env  # noqa: E402
 load_env()
 
-from modules.coc_sync.api_client import CocApiClient, CocApiError  # noqa: E402
+from modules.coc_sync.clashking.client import fetch_cwl_players  # noqa: E402
 from config import DB_PATH, LEAGUE_COMBAT  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -71,101 +75,100 @@ def _load_teams_from_db(period: str) -> list[TeamInfo]:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# COC API 拉取
+# 工具函数
 # ═══════════════════════════════════════════════════════════════════════
 
 def _normalize_tag(tag: str) -> str:
     return tag.strip().lstrip("#").upper()
 
 
-def _fetch_one_war(client: CocApiClient, wt: str, normalized_tag: str) -> dict | None:
-    """拉取单场 war 详情，返回我方成员数据（失败返回 None）。"""
-    try:
-        d = client.get_cwl_war(wt)
-    except Exception:
-        return None
+# ═══════════════════════════════════════════════════════════════════════
+# 通道 1：ClashKing API
+# ═══════════════════════════════════════════════════════════════════════
 
-    clan_side = d.get("clan", {})
-    opp_side = d.get("opponent", {})
-
-    if _normalize_tag(clan_side.get("tag", "")) == normalized_tag:
-        my_side = clan_side
-    elif _normalize_tag(opp_side.get("tag", "")) == normalized_tag:
-        my_side = opp_side
-    else:
-        return None
-
-    return {"members": my_side.get("members", [])}
-
-
-def _fetch_team_players(client: CocApiClient, team_alias: str, clan_tag: str) -> list[dict] | None:
-    """拉取一个队伍的 CWL 战绩，返回玩家列表（失败返回 None）。
+def _fetch_via_clashking(team_alias: str, clan_tag: str, period: str) -> list[dict] | None:
+    """通道1：通过 ClashKing War Log 拉取 CWL 历史战绩。
 
     每个玩家: {"tag", "name", "total_stars", "total_attacks"}
+    返回 None 表示该通道不可用。
     """
-    normalized = _normalize_tag(clan_tag)
+    players = fetch_cwl_players(clan_tag, period)
+    if not players:
+        return None
+    return players
 
-    try:
-        lg = client.get_league_group(clan_tag)
-    except CocApiError as e:
-        print(f"  {team_alias}({clan_tag}): ❌ {e}")
+
+# ═══════════════════════════════════════════════════════════════════════
+# 通道 2：本地 JSON
+# ═══════════════════════════════════════════════════════════════════════
+
+def _fetch_via_local_json(team_alias: str, period: str) -> list[dict] | None:
+    """通道2：从本地 data/cwl_YYYYMM/X_alias.json 读取队伍战绩。
+
+    返回格式与 _fetch_via_clashking() 一致。
+    返回 None 表示该通道不可用。
+    """
+    data_dir = DATA_ROOT / f"cwl_{period.replace('-', '')}"
+    if not data_dir.exists():
         return None
 
-    if lg is None:
-        print(f"  {team_alias}({clan_tag}): ⚠️ 无联赛组数据（非CWL周，API返回404）")
-        return None
+    # 按 team_alias 匹配 JSON 文件（文件名格式: 1_冠一_一队.json）
+    for f in sorted(data_dir.glob("*.json")):
+        team_data = json.loads(f.read_text(encoding="utf-8"))
+        if team_data.get("team_name", "") == team_alias:
+            return [
+                {"tag": p["tag"], "name": p["name"],
+                 "total_stars": p["total_stars"], "total_attacks": p["total_attacks"]}
+                for p in team_data.get("players", [])
+            ]
 
-    my_war_tags: list[str] = []
-    for rd in lg.get("rounds", []):
-        my_war_tags.extend(rd.get("warTags", []))
-
-    print(f"  {team_alias}: {len(lg.get('clans', []))}部 {len(lg.get('rounds', []))}轮 {len(my_war_tags)}wars", end="", flush=True)
-
-    player_stats: dict[str, dict] = defaultdict(
-        lambda: {"tag": "", "name": "", "total_stars": 0, "total_attacks": 0},
-    )
-    n_wars = 0
-
-    max_workers = min(8, len(my_war_tags)) if my_war_tags else 0
-    if max_workers > 0:
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {
-                pool.submit(_fetch_one_war, client, wt, normalized): wt
-                for wt in my_war_tags
-            }
-            for future in as_completed(futures):
-                result = future.result()
-                if result is None:
-                    continue
-                n_wars += 1
-                for m in result.get("members", []):
-                    ptag = m["tag"]
-                    stars = sum(a.get("stars", 0) for a in m.get("attacks", []))
-                    rec = player_stats[ptag]
-                    rec["tag"] = ptag
-                    rec["name"] = m["name"]
-                    rec["total_stars"] += stars
-                    rec["total_attacks"] += len(m.get("attacks", []))
-
-    print(f" → {n_wars}场已解析")
-
-    return [
-        {"tag": rec["tag"], "name": rec["name"],
-         "total_stars": rec["total_stars"], "total_attacks": rec["total_attacks"]}
-        for rec in player_stats.values()
-    ]
+    return None
 
 
-def _fetch_and_write(period: str, teams: list[TeamInfo]) -> tuple[list[str], int, int]:
-    """逐队拉取 CWL 战绩并直接写入数据库。
+# ═══════════════════════════════════════════════════════════════════════
+# 统一入口：三级降级
+# ═══════════════════════════════════════════════════════════════════════
 
-    返回 (ok_team_aliases, n_ok, n_skip)。
+def _fetch_team_players(team_alias: str, clan_tag: str, period: str) -> tuple[list[dict] | None, str]:
+    """两级降级拉取一个队伍的 CWL 战绩。
+
+    ClashKing → 本地 JSON，任一成功即返回。
+    两个通道全部失败返回 (None, "") 并打印明显告警。
+
+    注意：官方 API 的 get_league_group 只能查当前 CWL，不按月份过滤，
+    会误把当月数据写入历史月份，因此不纳入降级链路。
+
+    Returns:
+        (players, source): players 为玩家列表，source 为数据来源标识
     """
-    if not os.environ.get("COC_API_TOKEN"):
-        print(ALERT_LINE + "❌ 未设置 COC_API_TOKEN" + ALERT_LINE)
-        return [], 0, 0
+    # ── 通道 1：ClashKing API ──
+    players = _fetch_via_clashking(team_alias, clan_tag, period)
+    if players:
+        print(f"  {team_alias}: ✅ [ClashKing] ({len(players)}人)")
+        return players, "ClashKing"
+    print(f"  {team_alias}: ⚠️ [ClashKing] 失败 → 降级本地 JSON")
 
-    client = CocApiClient()
+    # ── 通道 2：本地 JSON 文件 ──
+    players = _fetch_via_local_json(team_alias, period)
+    if players:
+        print(f"  {team_alias}: ✅ [本地JSON] ({len(players)}人)")
+        return players, "本地JSON"
+
+    # ── 全部失败 ──
+    print(ALERT_LINE)
+    print(f"  🚨 [全部失败] {team_alias}({clan_tag}) 无任何数据源可用！")
+    print(f"      请检查: 1) ClashKing 是否可访问")
+    print(f"              2) data/cwl_{period.replace('-', '')}/ 目录是否存在 JSON 文件")
+    print(ALERT_LINE)
+    return None, ""
+
+
+def _fetch_and_write(period: str, teams: list[TeamInfo]) -> tuple[list[str], int, int, dict[str, str]]:
+    """逐队拉取 CWL 战绩并直接写入数据库（两级降级）。
+
+    返回 (ok_team_aliases, n_ok, n_skip, source_map)。
+    source_map 记录每队的数据来源 {team_alias: source}，用于汇总报告。
+    """
     conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA foreign_keys = ON")
     cur = conn.execute("SELECT player_tag, account_name FROM accounts")
@@ -173,14 +176,13 @@ def _fetch_and_write(period: str, teams: list[TeamInfo]) -> tuple[list[str], int
 
     ok_teams: list[str] = []
     n_ok = n_skip = 0
+    source_map: dict[str, str] = {}  # team_alias → 数据来源
 
     for team_index, team_alias, team_name, clan_tag in teams:
-        players = _fetch_team_players(client, team_alias, clan_tag)
+        players, source = _fetch_team_players(team_alias, clan_tag, period)
         if players is None:
-            print(f"  {team_alias}: ❌ 拉取失败")
             continue
-
-        print(f"  {team_alias}: ✅ ({len(players)}人)")
+        source_map[team_alias] = source
         ok_teams.append(team_alias)
 
         for p in players:
@@ -241,7 +243,7 @@ def _fetch_and_write(period: str, teams: list[TeamInfo]) -> tuple[list[str], int
         print(f"[write] {n_ok} 条战绩 → league_results + results（period={period}）" +
               (f"，跳过 {n_skip} 条（不在 accounts）" if n_skip else ""))
 
-    return ok_teams, n_ok, n_skip
+    return ok_teams, n_ok, n_skip, source_map
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -381,9 +383,16 @@ def main() -> int:
     teams = _load_teams_from_db(period)
 
     if teams:
-        # ── 正常流程：查 league_teams → 调 API → 写 DB ──
+        # ── 正常流程：查 league_teams → 三级降级拉取 → 写 DB ──
         print(f"拉取队伍: {[alias for _, alias, _, _ in teams]}")
-        ok_teams, n_ok, n_skip = _fetch_and_write(period, teams)
+        ok_teams, n_ok, n_skip, source_map = _fetch_and_write(period, teams)
+
+        # ── 汇总报告：数据来源 ──
+        print(f"\n── 数据来源汇总（{period} CWL）──")
+        for _, alias, _, _ in teams:
+            src = source_map.get(alias, "🚨 失败")
+            icon = "✅" if alias in ok_teams else "🚨"
+            print(f"  {icon} {alias}: [{src}]")
 
         if not ok_teams:
             print(ALERT_LINE)

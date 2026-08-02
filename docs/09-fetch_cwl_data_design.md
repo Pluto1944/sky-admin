@@ -2,9 +2,14 @@
 
 ## 1. 概述
 
-`fetch_cwl_data.py` 是 CWL 联赛数据拉取脚本，负责从 COC API 获取指定月份的所有实战队伍 CWL 战绩，并写入数据库。
+`fetch_cwl_data.py` 是 CWL 联赛数据拉取脚本，负责获取指定月份的所有实战队伍 CWL 战绩，并写入数据库。
 
 **核心原则**：fetch 不依赖 `config/settings.yaml` TEAMS 配置（因为 config 可能已更新为下月信息），队伍信息应从 `league_teams` 表获取。
+
+**三级降级策略**：每队拉取时依次尝试三个数据源：
+1. 🥇 Supercell 官方 API — 首选，数据最权威
+2. 🥈 ClashKing War Log API — 兜底，突破 CWL 窗口期限制
+3. 🥉 本地 JSON 文件 — 最后兜底
 
 ## 2. 数据流
 
@@ -15,9 +20,13 @@ fetch --period 2026-08
   │     └─ 有数据 → 正常流程：得到队伍列表 (team_index, team_alias, clan_tag)
   │     └─ 无数据 → 冷启动流程：读本地 JSON 回退
   │
-  ├─ 2. 逐队调 COC API 拉取战绩
-  │     └─ 不保存 JSON 文件到本地
-  │     └─ 直接写入数据库
+  ├─ 2. 逐队三级降级拉取战绩（正常流程）
+  │     ├─ 通道1 🥇 Supercell 官方 API → 成功则写 DB
+  │     │     └─ 失败/404 → 降级
+  │     ├─ 通道2 🥈 ClashKing War Log → 成功则写 DB
+  │     │     └─ 失败 → 降级
+  │     └─ 通道3 🥉 本地 JSON → 成功则写 DB
+  │           └─ 失败 → 🚨 该队全部失败
   │
   └─ 3. 写入目标
         ├─ league_results 表（主力表）
@@ -41,15 +50,30 @@ fetch --period 2026-08
    ```
    得到列表：`[(team_index, team_alias, team_name, clan_tag), ...]`
 
-2. 逐队调用 COC API 拉取 CWL 战绩
+2. 逐队三级降级拉取 CWL 战绩：
+
+   **通道1 — Supercell 官方 API**（首选）：
    - `client.get_league_group(clan_tag)` 获取联赛组信息
    - 并发拉取所有 war 详情，汇总每个玩家的 `total_stars` 和 `total_attacks`
+   - CWL 窗口期内可用（每月1-10号左右），窗口期外返回 404
+
+   **通道2 — ClashKing War Log API**（兜底）：
+   - 调用 `/war/{clan_tag}/previous` 获取历史战争日志
+   - 通过 `is_cwl_war()` 筛选 CWL 战斗（teamSize=15/30 + 每人1攻特征）
+   - 按 `period` 月份过滤 + 汇总玩家战绩
+   - 突破 CWL 窗口期限制，可查历史数据
+   - 实现位于 `modules/coc_sync/clashking/client.py`
+
+   **通道3 — 本地 JSON 文件**（最后兜底）：
+   - 从 `data/cwl_YYYYMM/` 目录按 `team_alias` 匹配 JSON 文件
+   - 适用于 ClashKing 也不可用的极端情况
 
 3. 直接写入数据库（**不保存 JSON 文件**）
    - 写入 `league_results` 表
    - 双写 `results` 旧表
 
-4. 输出升降级参与情况总结
+4. 输出数据来源汇总报告
+5. 输出升降级参与情况总结
 
 ### 3.2 冷启动流程（league_teams 查不到）
 
@@ -100,15 +124,14 @@ fetch --period 2026-08
 
 **去重策略**：`ON CONFLICT(player_tag, period, league_type) DO UPDATE`
 
-## 5. 与现有代码的改动对照
+## 5. 数据源
 
-| 项目 | 现有代码 | 新方案 |
-|------|---------|--------|
-| 队伍来源 | `_load_teams_to_fetch()` 查 league_teams + 回退 config TEAMS | 仅查 league_teams，查不到进入冷启动 |
-| JSON 缓存 | 拉取后保存 JSON，再读 JSON 导入 DB | 不保存 JSON，直接写 DB |
-| 数据流 | API → JSON → DB（两步） | API → DB（一步） |
-| config 依赖 | `from config import TEAMS` | 删除此依赖 |
-| 冷启动 | 无明确冷启动流程 | 查不到 league_teams 时读本地 JSON 并打印告警 |
+| 通道 | 数据源 | 说明 |
+|------|--------|------|
+| 通道1 🥇 | ClashKing War Log API | 主力数据源，支持按月份筛选历史 CWL 战绩 |
+| 通道2 🥈 | 本地 JSON（`data/cwl_YYYYMM/`） | 兜底，ClashKing 不可用时使用 |
+
+注意：Supercell 官方 API 的 `get_league_group` 只能查当前 CWL，不按月份过滤，已从降级链路移除。ClashKing 封装位于 `modules/coc_sync/clashking/client.py`。
 
 ## 6. 命令行接口（不变）
 
@@ -162,8 +185,35 @@ python scripts/fetch_cwl_data.py --period 2026-08
 
 | 场景 | 处理 |
 |------|------|
-| COC API 未配置 Token | 打印告警，退出 |
-| 单个队伍 API 拉取失败 | 跳过该队伍，继续拉取其他队伍 |
-| 全部队伍 API 拉取失败 | 打印告警，退出 |
+| ClashKing API 不可用/无数据 | 自动降级到本地 JSON |
+| 单队两个通道全部失败 | 打印 🚨 告警，跳过该队，继续其他队伍 |
+| 全部队伍拉取失败 | 打印告警，退出 |
 | 冷启动 JSON 不存在 | 打印告警，退出 |
 | 玩家不在 accounts 表 | 跳过该玩家记录 |
+
+## 10. ClashKing 集成说明
+
+ClashKing 作为主力数据源，封装在 `modules/coc_sync/clashking/` 目录中：
+
+```
+modules/coc_sync/clashking/
+├── __init__.py      # 模块说明
+└── client.py        # API 封装（HTTP + CWL 筛选 + 战绩汇总）
+```
+
+Supercell 官方 API 封装位于 `modules/coc_sync/official/`：
+
+```
+modules/coc_sync/official/
+├── __init__.py      # 模块说明
+├── api_client.py    # CocApiClient HTTP 客户端
+└── mapper.py        # COC dict → player 档案映射
+```
+
+核心函数：
+- `fetch_cwl_players(clan_tag, period)` — 一站式接口，返回格式与 Supercell API 一致
+- `is_cwl_war(war)` — CWL 战斗识别（teamSize=15/30 + 每人1攻）
+- `filter_cwl_wars(clan_tag, period)` — 筛选指定月份 CWL 战斗
+- `aggregate_players(cwl_wars, clan_tag)` — 汇总玩家战绩
+
+HTTP 层使用 `subprocess.curl` 绕过 Cloudflare 防护，数据来源 `https://api.clashk.ing`。

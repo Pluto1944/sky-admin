@@ -78,7 +78,7 @@ class FakeCocApiClient:
 
     def get_clan_members(self, clan_tag: str) -> list[dict]:
         if clan_tag in self._fail:
-            from modules.coc_sync.api_client import CocApiError
+            from modules.coc_sync.official.api_client import CocApiError
 
             raise CocApiError(f"模拟部落 {clan_tag} 抓取失败")
         return copy.deepcopy(self._members.get(clan_tag, []))

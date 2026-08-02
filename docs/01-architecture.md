@@ -283,7 +283,6 @@ sky-admin/
 │   ├── load_env.sh / register_and_arrange.sh / sync_and_export.sh
 │   ├── fetch_cwl_data.py / fetch_cwl_data.sh
 │   ├── publish_to_results.sh
-│   ├── probe_coc_clan.py/.sh / dump_clans_to_xlsx.py/.sh
 ├── docs/                               # 文档
 ├── data/league.db                      # SQLite 数据库
 ├── .env.example

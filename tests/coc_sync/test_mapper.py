@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from modules.coc_sync.mapper import map_member
+from modules.coc_sync.official.mapper import map_member
 from tests.fakes import coc_member
 
 

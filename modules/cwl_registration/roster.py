@@ -40,7 +40,7 @@ from modules.cwl_registration.baseline_rebuilder import build_final_list
 from modules.cwl_registration.team_builder import build_teams
 from modules.cwl_registration.repository import RegistrationRepository
 from modules.cwl_registration.sorter import sort_accounts
-from modules.coc_sync.api_client import CocApiClient, CocApiError
+from modules.coc_sync.official.api_client import CocApiClient, CocApiError
 from modules.player.service import PlayerService
 from modules.war_result.repository import ResultRepository
 from shared.io_adapter.base import ExcelIO

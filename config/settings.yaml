@@ -197,8 +197,9 @@ cwl_registration:
       manager: ""
       category: combat
       reserved_slots: 0
-    - name: 冠二
+    - name: 冠二 #冠一 
       clan_tag: "#2C822CJJC"
+      #clan_tag: "#2JP8PLQLJ"
       leader: "Pluto leader6"
       member_count: 15
       league_level: ""

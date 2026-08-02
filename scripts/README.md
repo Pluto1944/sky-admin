@@ -65,49 +65,15 @@ scripts/publish_to_results.sh 2026-08
 python scripts/fetch_cwl_data.py --period 2026-07
 ```
 
-流程：
+流程（两级降级）：
 1. 查 `league_teams` 表获取当月 combat 队伍信息
-2. COC API 拉取 → 直接写入 `league_results` + `results`（双写）
-3. league_teams 查不到 → 冷启动：读本地 JSON 导入
-4. API 失败 → 自动回退到本地 JSON
+2. ClashKing War Log API 拉取 → 直接写入 `league_results` + `results`（双写）
+3. ClashKing 失败 → 降级本地 JSON（`data/cwl_YYYYMM/`）
+4. league_teams 查不到 → 冷启动：读本地 JSON 导入
+
+注意：Supercell 官方 API 的 `get_league_group` 只能查当前 CWL，不按月份过滤，已从降级链路移除。
 
 升降级参与规则：只有**相邻两支队伍都成功拉到数据**时，该对相邻队伍才参与升降级。
-
----
-
-## 辅助脚本
-
-### `probe_cwl_data.py` — COC API 端点探测
-
-```bash
-python scripts/probe_cwl_data.py '#2QQ'
-python scripts/probe_cwl_data.py '#2GGGGGGG' --warlog-limit 10
-```
-
-测试 warlog / leaguegroup / warDetail 端点，验证数据可用性。
-
----
-
-### `register_and_arrange.sh` — 全流程细节
-
-```
-register_and_arrange.sh 2026-08          ← 用户参数：联赛月份
-  │
-  ├─ REG_PERIOD = 2026-07                ← 自动推算：联赛-1（CWL 月，用于 fetch + sheet 名）
-  │
-  ├─ [1] import-reg --period 2026-08     ← 联赛月份
-  │       registrations.period = 2026-08
-  │       sheet 名按 REG_PERIOD(2026-07) 推算
-  │
-  ├─ [2] fetch_cwl_data.py --period 2026-07 ← CWL 实际发生月
-  │       → COC API 拉 7月 CWL → JSON
-  │       → results.period = 2026-07
-  │
-  └─ [3] arrange --period 2026-08        ← 联赛月份
-          → 读 registrations(2026-08) + league_results(2026-07) + league_teams(2026-07)
-          → build_final_list() 基准重建 + build_teams() 贪心填充
-          → 导出 "名单_2026-08"
-```
 
 ---
 
@@ -117,5 +83,4 @@ register_and_arrange.sh 2026-08          ← 用户参数：联赛月份
 |------|------|
 | `load_env.sh` | 公共环境变量加载器，被其他脚本 source |
 | `sync_and_export.sh` | 长期维护：COC 同步 → 导出玩家档案 |
-| `probe_coc_clan.py` | 探测 COC 部落成员（调试用） |
-| `dump_clans_to_xlsx.py` | 导出 COC 部落数据到本地 xlsx（调试用） |
+| `fetch_cwl_data.sh` | `fetch_cwl_data.py` 的便捷包装 |

@@ -122,15 +122,6 @@ v2.4 新增，合并拉取+导入+回退。
 - 按队伍级缓存（<2h 跳过）
 - `--period` 为 CWL 实际发生月，`--fetch-only` 仅拉 JSON
 
-### 配套脚本
-
-| 脚本 | 说明 |
-|------|------|
-| `fetch_cwl_data.sh` | `fetch_cwl_data.py --fetch-only` 的便捷包装 |
-| `probe_cwl_data.py` | COC API 端点探测：测试 warlog/leaguegroup/warDetail 端点 |
-
----
-
 ## 五、发布脚本
 
 ### publish_to_results.sh（v2.6）
@@ -145,31 +136,19 @@ python cli.py publish-results --period 2026-08
 
 ---
 
-## 六、调试工具脚本
-
-| 脚本 | 说明 |
-|------|------|
-| `probe_coc_clan.py` / `.sh` | 探测指定 COC 部落成员数据 |
-| `dump_clans_to_xlsx.py` / `.sh` | 导出 COC 部落数据到本地 xlsx |
-
----
-
-## 七、数据目录结构
+## 六、数据目录结构
 
 ```
 data/
 ├── league.db                    # SQLite 主数据库
-├── cwl_202607/                  # CWL 战绩 JSON 缓存
+├── cwl_202607/                  # CWL 战绩 JSON 缓存（兜底用）
 │   ├── 0_泰坦二.json
 │   └── ...
-├── scripts/
-│   ├── migrate_results_202607.py   # 旧数据迁移脚本
-│   └── backfill_team_names.py      # team_name 回填脚本
 ```
 
 ---
 
-## 八、公共环境变量加载器 `load_env.sh`
+## 七、公共环境变量加载器 `load_env.sh`
 
 被其它脚本 `source` 引用，从项目根 `.env` 安全读取凭证：
 
