@@ -29,12 +29,14 @@ from __future__ import annotations
 from bisect import bisect_right
 from typing import Any
 
-from modules.cwl_registration.config import (
+from config import (
+    ACCOUNT_TYPE_COMBAT,
+    LEAGUE_COMBAT,
+    LEAGUE_SHELL,
     NEW_COMBAT_INSERT_START,
     NEW_NORMAL_INSERT_START,
     PROMOTION_RELEGATION_CONFIG,
 )
-from shared.config.common import ACCOUNT_TYPE_COMBAT, LEAGUE_COMBAT, LEAGUE_SHELL
 
 
 def _effective_capacity(team: dict) -> int:

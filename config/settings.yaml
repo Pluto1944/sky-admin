@@ -1,0 +1,341 @@
+# ============================================================================
+# 应用全局配置（原 shared/config/common.py）
+# ============================================================================
+app:
+  io_adapter: tencent              # local | tencent
+  db_path: data/league.db
+
+# ============================================================================
+# 账号体系常量（原 shared/config/common.py）
+# ============================================================================
+account:
+  type:
+    combat: combat
+    normal: normal
+  status:
+    active: active
+    missed: missed
+    maybe_left: maybe_left
+    left: left
+  membership:
+    member: member
+    left: left
+
+league:
+  type:
+    combat: combat
+    shell: shell
+
+# ============================================================================
+# 玩家模块 - player（原 modules/player/config.py）
+# ============================================================================
+player:
+  maybe_left_months: 2
+
+  export:
+    columns:
+      player_tag: 玩家Tag
+      account_name: 游戏昵称
+      player_name: 归属人
+      town_hall_level: 大本
+      exp_level: 等级
+      trophies: 奖杯
+      league_name: 段位
+      clan_tag: 部落Tag
+      clan_role: 部落职位
+      membership_status: 部落身份
+      status: 报名状态
+      history_score: 历史分
+      last_reg_period: 最后报名
+      last_synced_at: 最后同步
+      updated_at: 更新时间
+    default_sort: history_score
+    default_desc: true
+    sheet_name: 玩家档案
+
+# ============================================================================
+# 部落同步 - coc_sync（原 modules/coc_sync/config.py）
+# ============================================================================
+coc_sync:
+  clans:
+    - tag: "#2QQ"
+      name: "云深不知处 战营"
+      enabled: true
+    - tag: "#LQR"
+      name: "秋雨不问梧桐意"
+      enabled: true
+    - tag: "#U2L"
+      name: "仙境"
+      enabled: true
+    - tag: "#2COUL898"
+      name: "Avalon"
+      enabled: true
+    - tag: "#YCOC"
+      name: "Minecraft(互刷一营)"
+      enabled: true
+    - tag: "#9V9"
+      name: "清风追明月(互刷二营)"
+      enabled: true
+    - tag: "#U2UL"
+      name: "白马啸西风(互刷三营)"
+      enabled: true
+    - tag: "#R88U8"
+      name: "苍穹(互刷四营)"
+      enabled: true
+    - tag: "#2LRQ88JQR"
+      name: "新手村(互刷五营)"
+      enabled: true
+    - tag: "#U89"
+      name: "执手听风吟(互刷六营)"
+      enabled: true
+    - tag: "#2JU"
+      name: "清夜坠玄天(互刷七营)"
+      enabled: true
+    - tag: "#L0YLR02L"
+      name: "冰风谷wy(互刷八营)"
+      enabled: true
+    # - tag: "#YYYYY"
+    #   name: "苍穹三部"
+    #   enabled: false
+
+  dup_across_clans: warn          # warn | silent
+  fail_fast: false
+
+# ============================================================================
+# 联赛报名 - cwl_registration（原 modules/cwl_registration/config.py）
+# ============================================================================
+cwl_registration:
+  sort_weights:
+    match_value: 0.6
+    history_score: 0.4
+
+  combat_min_match_value: 600
+
+  registration_column_keywords:
+    player_name:
+      include: [主号游戏昵称, 主号]
+      exclude: []
+    account_name:
+      include: [游戏昵称]
+      exclude: [主号]
+    match_value:
+      include: [匹配值]
+      exclude: []
+    join_combat:
+      include: [想实战]
+      exclude: []
+    submit_time:
+      include: [提交时间]
+      exclude: []
+    willing_to_manage:
+      include: [愿意做联赛管理员]
+      exclude: []
+
+  registration_tag_source: account_name
+  registration_dedup: latest_submit
+
+  join_combat_true_texts: [是, yes, y, true, "1", 参加]
+
+  camp_clan_tag: "#2QQ"
+  excluded_camp_names:
+    - Pluto2QQ
+    - 落花归尘
+    - misael
+    - AltriaPendragon
+    - 葉丶
+    - 飞的煎饼
+    - 幻想鄉
+    - "Timo⚡️Z⚔️ephyr™"
+
+  # 已弃用（兼容历史）
+  camp_sheet_name: 战营名单
+  camp_column_keywords:
+    account_name:
+      include: [游戏昵称]
+      exclude: [主号]
+    player_tag:
+      include: [玩家tag, tag]
+      exclude: []
+    camp_group:
+      include: [战营]
+      exclude: [是否]
+    match_value:
+      include: [匹配值]
+      exclude: []
+
+  arrangement_output_headers:
+    - rank_order
+    - league_type
+    - cur_team
+    - prev_team
+    - movement
+    - player_tag
+    - account_name
+    - player_name
+    - team_name
+    - account_type
+    - trophies
+    - match_value
+    - history_score
+
+  # 队伍定义
+  teams:
+    # === 实战队伍 ===
+    - name: 泰坦二
+      clan_tag: "#2QQ"
+      leader: leader2QQ
+      member_count: 15
+      league_level: ""
+      manager: ""
+      category: combat
+      reserved_slots: 0
+    - name: 冠一 一队
+      clan_tag: "#2GGGGGGG"
+      leader: leader5
+      member_count: 15
+      league_level: ""
+      manager: ""
+      category: combat
+      reserved_slots: 0
+    - name: 冠二
+      clan_tag: "#2C822CJJC"
+      leader: "Pluto leader6"
+      member_count: 15
+      league_level: ""
+      manager: ""
+      category: combat
+      reserved_slots: 0
+    - name: 冠三
+      clan_tag: "#2QQQQ2G"
+      leader: leader4
+      member_count: 15
+      league_level: ""
+      manager: ""
+      category: combat
+      reserved_slots: 0
+    - name: 大一
+      clan_tag: "#UUP2"
+      leader: leader
+      member_count: 15
+      league_level: ""
+      manager: ""
+      category: combat
+      reserved_slots: 0
+    - name: 大一
+      clan_tag: "#CYYL"
+      leader: leader2
+      member_count: 30
+      league_level: ""
+      manager: ""
+      category: combat
+      reserved_slots: 0
+    - name: 大一
+      clan_tag: "#2CU9JPYU8"
+      leader: "南门 "
+      member_count: 30
+      league_level: ""
+      manager: ""
+      category: combat
+      reserved_slots: 0
+    # === 壳子队伍 ===
+    - name: 大一
+      clan_tag: "#2R9Y209LY"
+      leader: leader10
+      member_count: 30
+      league_level: ""
+      manager: ""
+      category: shell
+      reserved_slots: 0
+    - name: 大三
+      clan_tag: "#2JQR89P9G"
+      leader: leader6
+      member_count: 30
+      league_level: ""
+      manager: ""
+      category: shell
+      reserved_slots: 0
+    - name: 水一
+      clan_tag: "#2JUJRYVQP"
+      leader: 登悟
+      member_count: 30
+      league_level: ""
+      manager: ""
+      category: shell
+      reserved_slots: 0
+    - name: 水二
+      clan_tag: "#2GR0LPGVQ"
+      leader: leader8
+      member_count: 30
+      league_level: ""
+      manager: ""
+      category: shell
+      reserved_slots: 0
+
+  team_output_headers:
+    - rank_order
+    - account_name
+    - player_name
+    - match_value
+    - league_type
+    - trophies
+    - history_score
+
+  # 升降级配置
+  promotion_relegation:
+    count: 2
+    promotion_min_stars: 21
+    relegation_max_stars: 18
+
+  # 备选管理员（顺序即优先级）
+  manager_candidates:
+    - 鸟不拉不拉
+    - ELIKI
+    - Sunken ship
+    - TT
+    - 星空之翼
+    - QAQ
+    - "星空:宗主"
+    - "Ghost✨Almighty"
+    - 小小龙
+    - 帝都
+    - 武瞾
+    - 武曌
+    - Always
+    - always
+    - ghost
+    - yolo
+    - "Always#3"
+    - 沉舟大大1号
+    - 爱吃贝果小太阳
+    - Snzed
+    - 于我
+    - 如梦
+    - 故浅
+    - 芝士芒果龙利鱼
+    - 苏瞬卿
+    - "虚伪、"
+
+  # 黑白名单
+  black_list: []
+  white_list:
+    - ["10°C✨Godwin 2", "#2QQ"]
+
+  new_combat_insert_start: 30
+  new_normal_insert_start: 45    # 已废弃
+
+# ============================================================================
+# 战绩模块 - war_result（原 modules/war_result/config.py）
+# ============================================================================
+war_result:
+  column_keywords:
+    account_name:
+      include: [游戏昵称, 账号名]
+      exclude: [主号]
+    player_tag:
+      include: [玩家tag, tag]
+      exclude: []
+    league_type:
+      include: [联赛类型, 联赛]
+      exclude: []
+
+  tag_source: account_name

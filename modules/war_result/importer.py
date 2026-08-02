@@ -14,7 +14,7 @@ from __future__ import annotations
 import sys
 
 from modules.player.service import PlayerService
-from modules.war_result.config import RESULT_COLUMN_KEYWORDS, RESULT_TAG_SOURCE
+from config import RESULT_COLUMN_KEYWORDS, RESULT_TAG_SOURCE
 from modules.war_result.history_score import compute_history_score
 from modules.war_result.repository import ResultRepository
 from shared.columns import clean_str, resolve_columns

@@ -21,7 +21,7 @@ from shared.config.env_loader import load_env
 load_env()
 
 from modules.coc_sync.api_client import CocApiClient, CocApiError
-from shared.config.common import DB_PATH
+from config import DB_PATH
 
 
 def backfill(period: str) -> None:

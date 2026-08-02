@@ -1,8 +1,8 @@
 """status_rule 纯函数测试（player 模块）。"""
 from __future__ import annotations
 
+from config import STATUS_ACTIVE, STATUS_MAYBE_LEFT, STATUS_MISSED
 from modules.player.status_rule import infer_status, period_diff
-from shared.config.common import STATUS_ACTIVE, STATUS_MAYBE_LEFT, STATUS_MISSED
 
 
 def test_period_diff_basic():

@@ -27,7 +27,7 @@ from shared.config.env_loader import load_env  # noqa: E402
 load_env()
 
 from modules.coc_sync.api_client import CocApiClient, CocApiError  # noqa: E402
-from shared.config.common import DB_PATH, LEAGUE_COMBAT  # noqa: E402
+from config import DB_PATH, LEAGUE_COMBAT  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_ROOT = ROOT / "data"

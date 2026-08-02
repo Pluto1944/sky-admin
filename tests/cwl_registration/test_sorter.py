@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from modules.cwl_registration.sorter import sort_accounts
-from shared.config.common import LEAGUE_COMBAT, LEAGUE_SHELL
+from config import LEAGUE_COMBAT, LEAGUE_SHELL
 
 
 def test_combat_camp_ranks_before_normal_combat():

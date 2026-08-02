@@ -8,13 +8,8 @@
 """
 from __future__ import annotations
 
-from modules.cwl_registration.config import SORT_WEIGHTS
+from config import ACCOUNT_TYPE_COMBAT, LEAGUE_COMBAT, LEAGUE_SHELL, SORT_WEIGHTS
 from modules.cwl_registration.rank_score import compute_rank_score
-from shared.config.common import (
-    ACCOUNT_TYPE_COMBAT,
-    LEAGUE_COMBAT,
-    LEAGUE_SHELL,
-)
 
 
 def _extents(accounts: list[dict]) -> tuple[float, float, float, float]:

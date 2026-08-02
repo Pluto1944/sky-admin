@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from modules.cwl_registration.config import SORT_WEIGHTS
+from config import SORT_WEIGHTS
 
 
 def _normalize(value: float, lo: float, hi: float) -> float:

@@ -27,7 +27,7 @@ import sys
 # 允许直接 `python scripts/dump_clans_to_xlsx.py` 运行时找到项目根包
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from modules.coc_sync import config as coc_config  # noqa: E402
+from config import CLANS  # noqa: E402
 from modules.coc_sync.api_client import CocApiError  # noqa: E402
 from modules.coc_sync.service import CocSyncService  # noqa: E402
 from shared.io_adapter.local_xlsx import LocalXlsxAdapter  # noqa: E402
@@ -77,7 +77,7 @@ def main(argv: list[str]) -> int:
         print("错误: 未设置环境变量 COC_API_TOKEN，请先 export 后再运行。", file=sys.stderr)
         return 1
 
-    clans = [c for c in coc_config.CLANS if c.get("enabled", True)]
+    clans = [c for c in CLANS if c.get("enabled", True)]
     if not clans:
         print("错误: config.CLANS 中没有 enabled=True 的部落。", file=sys.stderr)
         return 1

@@ -22,10 +22,12 @@ from __future__ import annotations
 
 import sys
 
-from modules.cwl_registration.config import (
+from config import (
     ARRANGEMENT_OUTPUT_HEADERS,
     BLACK_LIST,
     EXCLUDED_CAMP_NAMES,
+    LEAGUE_COMBAT,
+    LEAGUE_SHELL,
     MANAGER_CANDIDATES,
     NEW_COMBAT_INSERT_START,
     NEW_NORMAL_INSERT_START,
@@ -41,7 +43,6 @@ from modules.cwl_registration.sorter import sort_accounts
 from modules.coc_sync.api_client import CocApiClient, CocApiError
 from modules.player.service import PlayerService
 from modules.war_result.repository import ResultRepository
-from shared.config.common import LEAGUE_COMBAT, LEAGUE_SHELL
 from shared.io_adapter.base import ExcelIO
 
 

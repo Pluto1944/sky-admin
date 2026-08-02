@@ -17,7 +17,7 @@ from modules.cwl_registration.promotion import (
     apply_promotion_relegation,
     rebuild_assignment_map,
 )
-from shared.config.common import LEAGUE_COMBAT, LEAGUE_SHELL
+from config import LEAGUE_COMBAT, LEAGUE_SHELL
 
 
 # ---------------------------------------------------------------------------

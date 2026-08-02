@@ -18,7 +18,7 @@
 - **TEAMS_LAST 已删除**：由 `league_teams` 表替代，每月 `arrange()` 幂等写入配置快照
 - **升降级内嵌**：`promotion.py` 从独立调用改为被 `baseline_rebuilder` 阶段 2b 调用（在 prev_slots 上执行配对交换）
 - **registrations.team_name 回写格式**：`"{team_index} {team_alias} {coc_name} {clan_tag}"`
-- **fetch_cwl_data.py**：不依赖 config.py TEAMS，从 `league_teams` 表获取队伍信息
+- **fetch_cwl_data.py**：不依赖 `config/settings.yaml` TEAMS，从 `league_teams` 表获取队伍信息
 
 ---
 

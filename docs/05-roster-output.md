@@ -2,7 +2,7 @@
 
 > 版本：v3.0
 > 日期：2026-08-02
-> 关联代码：`roster.py`、`config.py`、`team_builder.py`、`baseline_rebuilder.py`
+> 关联代码：`roster.py`、`config/settings.yaml`、`team_builder.py`、`baseline_rebuilder.py`
 
 ---
 
@@ -90,7 +90,7 @@ publish_part4_to_doc(period, publish_doc_id)
 
 **数据来源**：`arrange()` 返回的 `ordered` 列表（排序后含升降级标识的完整名单）
 
-**表头**：`ARRANGEMENT_OUTPUT_HEADERS`（13 列，定义于 `config.py`）
+**表头**：`ARRANGEMENT_OUTPUT_HEADERS`（13 列，定义于 `config/settings.yaml`）
 
 ```python
 ARRANGEMENT_OUTPUT_HEADERS = [
@@ -302,7 +302,7 @@ def publish_part4_to_doc(self, period: str, publish_doc_id: str) -> str:
 | `_fetch_clan_info()` | `roster.py` | 批量 COC API 查询部落名称和首领，带缓存 |
 | `publish_part4_to_doc()` | `roster.py` | 将 Part4 网格发布到公示文档 |
 | `_write_publish_sheet()` | `roster.py` | 直接将 2D 数据写入腾讯文档（跳过 dict 转换） |
-| `ARRANGEMENT_OUTPUT_HEADERS` | `config.py` | Part1-3 的 13 列输出表头定义 |
+| `ARRANGEMENT_OUTPUT_HEADERS` | `config/settings.yaml` | Part1-3 的 13 列输出表头定义 |
 | `PUBLISH_FIXED_ROWS` | `roster.py` | 公示文档前 20 行固定公告（类常量） |
 
 ---
@@ -312,7 +312,7 @@ def publish_part4_to_doc(self, period: str, publish_doc_id: str) -> str:
 | 文件 | 变更类型 |
 |------|---------|
 | `roster.py` | `arrange_and_export`、`_build_part4_grid`、`_append_part4_to_sheet`、`publish_part4_to_doc`、`_write_publish_sheet`、`PUBLISH_FIXED_ROWS`、`_fetch_clan_info` |
-| `config.py` | `ARRANGEMENT_OUTPUT_HEADERS`（13 列，含 `team_name`） |
+| `config/settings.yaml` | `ARRANGEMENT_OUTPUT_HEADERS`（13 列，含 `team_name`） |
 | `cli.py` | 新增 `publish-results` 命令 |
 | `scripts/publish_to_results.sh` | 新增发布公示脚本 |
 

@@ -18,10 +18,9 @@ from __future__ import annotations
 import sys
 from typing import Optional
 
-from modules.player.config import MAYBE_LEFT_MONTHS
+from config import MAYBE_LEFT_MONTHS, MEMBERSHIP_LEFT, MEMBERSHIP_MEMBER
 from modules.player.repository import PlayerRepository
 from modules.player.status_rule import infer_status
-from shared.config.common import MEMBERSHIP_LEFT, MEMBERSHIP_MEMBER
 from shared.db.connection import now_iso
 
 

@@ -166,7 +166,7 @@ flowchart TD
 | `team_builder.py` | 阶段 7-9：贪心填充+白名单+管理员（v3.0） |
 | `promotion.py` | 升降级配对交换算法（纯函数） |
 | `repository.py` | registrations 表数据访问 |
-| `config.py` | 全部配置 |
+| `config/settings.yaml` | 全部配置（YAML） |
 
 排序详情见 `03-sorting.md`，升降级详情见 `04-promotion-relegation.md`。
 
@@ -185,7 +185,7 @@ flowchart TD
 |------|------|
 | `api_client.py` | 底层 HTTP（token env-only / SSRF 白名单 / tag URL 编码 / 超时） |
 | `mapper.py` | 纯函数：COC 原始成员 dict → player 档案 COC 组字段 |
-| `config.py` | `CLANS` + `DUP_ACROSS_CLANS` + `FAIL_FAST` + `alliance_clan_tags()` |
+| `config/settings.yaml` | `CLANS` + `DUP_ACROSS_CLANS` + `FAIL_FAST` + `ALLIANCE_CLAN_TAGS` |
 | `service.py` | `CocSyncService`：多部落遍历、失败隔离、按真实 Tag 汇总去重、写库、退部对账 |
 
 **退部对账**：每轮同步后，对本次成功同步的部落中消失的成员调 `get_player` 查新部落——仍属联盟则更新归属，联盟外/无部落则 `membership_status=left`。
@@ -252,8 +252,13 @@ flowchart TD
 ```
 sky-admin/
 ├── cli.py                              # 命令行入口
+├── config/                             # 统一配置（YAML）
+│   ├── settings.yaml                   # 全部业务配置
+│   ├── __init__.py                     # 配置加载入口
+│   └── loader.py                       # YAML 加载 + 校验
 ├── shared/                             # 基础设施
-│   ├── config/common.py                # 公共常量
+│   ├── config/
+│   │   └── env_loader.py               # .env 加载逻辑
 │   ├── columns.py                      # 表头关键词解析
 │   ├── io_adapter/
 │   │   ├── base.py                     # ExcelIO 抽象接口
@@ -262,15 +267,15 @@ sky-admin/
 │   └── db/connection.py                # SQLite 连接 + 建表 + 迁移
 ├── modules/
 │   ├── player/                         # ① 玩家中枢
-│   │   ├── service.py / repository.py / status_rule.py / config.py
+│   │   ├── service.py / repository.py / status_rule.py
 │   ├── cwl_registration/               # ② CWL 报名
 │   │   ├── importer.py / roster.py / sorter.py / rank_score.py
 │   │   ├── promotion.py / baseline_rebuilder.py / team_builder.py
-│   │   ├── repository.py / config.py
+│   │   ├── repository.py
 │   ├── war_result/                     # ③ 战绩
-│   │   ├── importer.py / history_score.py / repository.py / config.py
+│   │   ├── importer.py / history_score.py / repository.py
 │   └── coc_sync/                       # ④ COC 同步
-│       ├── api_client.py / mapper.py / config.py / service.py
+│       ├── api_client.py / mapper.py / service.py
 ├── tests/                              # 按模块归类
 │   ├── conftest.py / fakes.py
 │   ├── shared/ / player/ / cwl_registration/ / war_result/ / coc_sync/
@@ -433,7 +438,7 @@ v2.2 把 `registrations` 升级为**自包含事实源**，从根上消除该复
 |------|------|------|
 | #1 results 无唯一约束、重复导入累积 | 加 `UNIQUE(player_tag, period, league_type)`，`add_result` 改 upsert | `db/connection.py` + `war_result/repository.py` |
 | #2 未知账号导入触发外键硬失败 | 导入前校验，不存在则跳过 + stderr 告警 | `war_result/importer.py` |
-| #3 战绩 tag 体系与报名不一致 | 战绩表改关键词映射 + tag 同用"游戏昵称"来源 | `war_result/config.py` + `importer.py` |
+| #3 战绩 tag 体系与报名不一致 | 战绩表改关键词映射 + tag 同用"游戏昵称"来源 | `config/settings.yaml` + `war_result/importer.py` |
 | #8 孤立报名记录静默降级 | v2.2 起撤销告警——报名与 accounts 解耦后"报名有/COC无"是常态 | `roster.py` |
 | #9 战绩导入零测试 | 新增集成测试 | tests |
 

@@ -9,7 +9,7 @@ from modules.cwl_registration.importer import (
     _fill_player_name_forward,
     parse_registration_row,
 )
-from shared.config.common import (
+from config import (
     ACCOUNT_TYPE_COMBAT,
     ACCOUNT_TYPE_NORMAL,
     STATUS_ACTIVE,
@@ -37,7 +37,7 @@ def _camp_row(nick):
 
 def _seed_camp_members(player_service, names):
     """把给定昵称预置为战营部落 #2QQ 的 COC 成员（战营名单新数据源）。"""
-    from modules.cwl_registration.config import CAMP_CLAN_TAG
+    from config import CAMP_CLAN_TAG
 
     for i, name in enumerate(names, start=1):
         player_service.update_from_coc(

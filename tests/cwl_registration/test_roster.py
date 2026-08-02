@@ -1,9 +1,8 @@
 """集成测试：生成名单（roster，v3.0 基准重建方案）。"""
 from __future__ import annotations
 
-from modules.cwl_registration.config import ARRANGEMENT_OUTPUT_HEADERS, TEAMS
+from config import ARRANGEMENT_OUTPUT_HEADERS, LEAGUE_COMBAT, LEAGUE_SHELL, TEAMS
 from modules.cwl_registration.roster import LeagueArranger
-from shared.config.common import LEAGUE_COMBAT, LEAGUE_SHELL
 from tests.fakes import FakeExcelIO, seed_registrations
 
 

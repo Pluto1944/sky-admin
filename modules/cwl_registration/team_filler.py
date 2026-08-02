@@ -15,7 +15,7 @@
 """
 from __future__ import annotations
 
-from shared.config.common import LEAGUE_COMBAT, LEAGUE_SHELL
+from config import LEAGUE_COMBAT, LEAGUE_SHELL
 
 
 def _effective_capacity(team: dict) -> int:
@@ -49,7 +49,7 @@ def _split_by_threshold(
     - 战营账号（account_type=combat）不受阈值影响，始终留在 combat_pool
     - 返回 (combat_pool, shell_pool)
     """
-    from shared.config.common import ACCOUNT_TYPE_COMBAT
+    from config import ACCOUNT_TYPE_COMBAT
 
     combat_pool: list[dict] = []
     shell_pool: list[dict] = []

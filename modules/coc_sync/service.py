@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import sys
 
-from modules.coc_sync import config as coc_config
+import config
 from modules.coc_sync.api_client import CocApiClient, CocApiError
 from modules.coc_sync.mapper import map_member, normalize_tag
 from modules.player.service import PlayerService
@@ -72,7 +72,7 @@ class CocSyncService:
             except (CocApiError, ValueError) as e:
                 print(f"[warn] 部落 {name or tag} 同步失败：{e}", file=sys.stderr)
                 stats["failed_clans"].append(tag)
-                if coc_config.FAIL_FAST:
+                if config.FAIL_FAST:
                     raise
                 continue
 
@@ -85,7 +85,7 @@ class CocSyncService:
                     continue
                 if real_tag in seen:
                     stats["duplicates"] += 1
-                    if coc_config.DUP_ACROSS_CLANS == "warn":
+                    if config.DUP_ACROSS_CLANS == "warn":
                         print(
                             f"[warn] {fields.get('account_name')}({real_tag}) 同时出现在 "
                             f"{seen[real_tag]} 与 {tag}，已取首个。",
@@ -116,7 +116,7 @@ class CocSyncService:
         """
         if not synced_clan_tags:
             return
-        alliance = {normalize_tag(t) for t in coc_config.alliance_clan_tags()}
+        alliance = {normalize_tag(t) for t in config.ALLIANCE_CLAN_TAGS}
         alliance.discard(None)
 
         for acc in self.player_service.list_members_by_clan(synced_clan_tags):
@@ -157,7 +157,7 @@ class CocSyncService:
         if clans is None:
             return [
                 {"tag": c["tag"], "name": c.get("name")}
-                for c in coc_config.CLANS
+                for c in config.CLANS
                 if c.get("enabled", True)
             ]
         normalized = []

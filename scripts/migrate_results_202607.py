@@ -21,7 +21,7 @@ from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from shared.config.common import DB_PATH, LEAGUE_COMBAT
+from config import DB_PATH, LEAGUE_COMBAT
 
 PERIOD = "2026-07"
 

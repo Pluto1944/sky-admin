@@ -21,7 +21,9 @@ from __future__ import annotations
 
 import sys
 
-from modules.cwl_registration.config import (
+from config import (
+    ACCOUNT_TYPE_COMBAT,
+    ACCOUNT_TYPE_NORMAL,
     CAMP_CLAN_TAG,
     EXCLUDED_CAMP_NAMES,
     JOIN_COMBAT_TRUE_TEXTS,
@@ -30,7 +32,6 @@ from modules.cwl_registration.config import (
 from modules.cwl_registration.repository import RegistrationRepository
 from modules.player.service import PlayerService
 from shared.columns import clean_str, resolve_columns, to_float
-from shared.config.common import ACCOUNT_TYPE_COMBAT, ACCOUNT_TYPE_NORMAL
 from shared.io_adapter.base import ExcelIO
 
 

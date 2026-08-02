@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 
-from modules.coc_sync import config as coc_config
+import config
 from modules.coc_sync.service import CocSyncService
 from tests.fakes import FakeCocApiClient, coc_member
 
@@ -56,7 +56,7 @@ def test_dedup_same_tag_across_clans(player_service, capsys):
 
 
 def test_failed_clan_isolated_when_not_fail_fast(player_service, capsys, monkeypatch):
-    monkeypatch.setattr(coc_config, "FAIL_FAST", False)
+    monkeypatch.setattr(config, "FAIL_FAST", False)
     api = FakeCocApiClient({"#OK": [coc_member("#A", "甲")]}, fail_clans={"#BAD"})
 
     stats = CocSyncService(player_service, api).sync_clans([{"tag": "#BAD"}, {"tag": "#OK"}])
@@ -116,7 +116,8 @@ def test_member_moves_to_external_clan_marked_left(player_service):
 
 def test_member_moves_within_alliance_not_left(player_service, monkeypatch):
     # 联盟含 #C1 与 #C2；本轮只同步 #C1
-    monkeypatch.setattr(coc_config, "CLANS", [{"tag": "#C1"}, {"tag": "#C2"}])
+    monkeypatch.setattr(config, "CLANS", [{"tag": "#C1"}, {"tag": "#C2"}])
+    monkeypatch.setattr(config, "ALLIANCE_CLAN_TAGS", ["#C1", "#C2"])
     CocSyncService(
         player_service, FakeCocApiClient({"#C1": [coc_member("#A", "甲")]})
     ).sync_clans([{"tag": "#C1"}])
@@ -136,7 +137,7 @@ def test_member_moves_within_alliance_not_left(player_service, monkeypatch):
 
 
 def test_failed_clan_does_not_trigger_left(player_service, monkeypatch):
-    monkeypatch.setattr(coc_config, "FAIL_FAST", False)
+    monkeypatch.setattr(config, "FAIL_FAST", False)
     CocSyncService(
         player_service, FakeCocApiClient({"#C1": [coc_member("#A", "甲")]})
     ).sync_clans([{"tag": "#C1"}])

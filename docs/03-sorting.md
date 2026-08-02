@@ -1,7 +1,7 @@
 # 03 — 排序全流程与队伍填充
 
 > 版本：v3.0
-> 关联代码：`sorter.py`、`rank_score.py`、`baseline_rebuilder.py`、`team_builder.py`、`config.py`
+> 关联代码：`sorter.py`、`rank_score.py`、`baseline_rebuilder.py`、`team_builder.py`、`config/settings.yaml`
 
 ---
 
@@ -26,7 +26,7 @@ TEAMS = [
 ```
 
 11 支队伍：7 combat + 4 shell。`team_index` = 列表索引（0~10），**是队伍的唯一身份标识**。
-> 实际 `config.py` 中为 11 支队伍，其中实战 7 支（泰坦二、冠一、冠二、冠三、3 支大一），壳子 4 支（1 支大一、大三、水一、水二）。
+> 实际 `config/settings.yaml` 中为 11 支队伍，其中实战 7 支（泰坦二、冠一、冠二、冠三、3 支大一），壳子 4 支（1 支大一、大三、水一、水二）。
 
 每个 team dict 字段：
 
@@ -535,7 +535,7 @@ registrations.team_name 回写格式：`"{team_index} {team_alias} {coc_name} {c
 | `promotion.py` | 升降级配对交换算法 | 纯函数 |
 | `team_builder.py` | 阶段 7-9：贪心填充+白名单+管理员 | 纯函数 |
 | `roster.py` | 编排主控 + Part4 输出 + 公示发布 | 编排器 |
-| `config.py` | 所有配置项 | 配置 |
+| `config/settings.yaml` | 所有配置项 | 配置 |
 
 ---
 

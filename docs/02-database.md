@@ -312,7 +312,7 @@ flowchart LR
 
 v2.x 的数据库只有 3 张表（accounts / registrations / results），随着升降级系统的引入暴露出几个问题：
 
-1. **队伍配置历史缺失**：`config.py` 中 `TEAMS` 每月变化，旧配置不持久化。上月队伍配置靠 `TEAMS_LAST` 手工维护，容易出错
+1. **队伍配置历史缺失**：`config/settings.yaml` 中 `TEAMS` 每月变化，旧配置不持久化。上月队伍配置靠 `TEAMS_LAST` 手工维护，容易出错
 2. **team 概念混淆**：旧 `registrations.team_name` 只存别名（如"大一"），无法区分 3 支同名"大一"队伍。`cur_team` 展示格式为 `"{team_index} {team_alias}"`，缺少 COC 真实部落名称
 3. **results 表设计问题**：team 信息藏在 `raw_metrics` JSON 中（`team_name`/`team_index` 混在 JSON 里），无法直接 SQL 查询队伍维度的战绩
 4. **信息存储分散**：队伍配置在 config、战绩在 results、队伍归属在 registrations，三处数据不同步

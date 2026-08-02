@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from typing import Optional
 
-from shared.config.common import MEMBERSHIP_MEMBER
+from config import MEMBERSHIP_MEMBER
 
 
 def normalize_tag(tag: Optional[str]) -> Optional[str]:

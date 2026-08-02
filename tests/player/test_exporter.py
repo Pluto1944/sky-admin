@@ -1,9 +1,8 @@
 """PlayerExporter 测试：筛选 / 排序 / 中文表头映射 / 写出参数。"""
 from __future__ import annotations
 
-from modules.player.config import PLAYER_EXPORT_COLUMNS, PLAYER_EXPORT_SHEET
+from config import MEMBERSHIP_LEFT, MEMBERSHIP_MEMBER, PLAYER_EXPORT_COLUMNS, PLAYER_EXPORT_SHEET
 from modules.player.exporter import PlayerExporter
-from shared.config.common import MEMBERSHIP_LEFT, MEMBERSHIP_MEMBER
 from tests.fakes import FakeExcelIO
 
 

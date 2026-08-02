@@ -4,7 +4,7 @@
 
 `fetch_cwl_data.py` 是 CWL 联赛数据拉取脚本，负责从 COC API 获取指定月份的所有实战队伍 CWL 战绩，并写入数据库。
 
-**核心原则**：fetch 不依赖 `config.py TEAMS` 配置（因为 config 可能已更新为下月信息），队伍信息应从 `league_teams` 表获取。
+**核心原则**：fetch 不依赖 `config/settings.yaml` TEAMS 配置（因为 config 可能已更新为下月信息），队伍信息应从 `league_teams` 表获取。
 
 ## 2. 数据流
 
@@ -123,7 +123,7 @@ python scripts/fetch_cwl_data.py --period 2026-08
 
 | 决策 | 理由 |
 |------|------|
-| 不依赖 config.py TEAMS | config 可能已更新为下月信息，且 team list 可能已删除 |
+| 不依赖 `config/settings.yaml` TEAMS | config 可能已更新为下月信息，且 team list 可能已删除 |
 | 不保存 JSON 文件 | JSON 仅用于冷启动，正常流程无需文件缓存 |
 | 查 league_teams 而非 league_clans | league_teams 是 arrange 时写入的队伍配置快照，是准确的当月队伍信息来源 |
 | 保留 results 旧表双写 | 过渡期兼容，编排时有回退逻辑 |

@@ -28,13 +28,12 @@ from modules.coc_sync.service import CocSyncService
 from modules.cwl_registration.importer import RegistrationImporter
 from modules.cwl_registration.repository import RegistrationRepository
 from modules.cwl_registration.roster import LeagueArranger
-from modules.cwl_registration.config import COMBAT_MIN_MATCH_VALUE, TEAMS
+import config
 from modules.player.exporter import PlayerExporter
 from modules.player.repository import PlayerRepository
 from modules.player.service import PlayerService
 from modules.war_result.importer import ResultImporter
 from modules.war_result.repository import ResultRepository
-from shared.config import common as config
 from shared.db.connection import Database
 from shared.io_adapter.base import ExcelIO
 
@@ -135,12 +134,12 @@ def _print_arrange_report(ordered: list[dict], team_results: list[dict],
     print(f"  联赛分类:")
     print(f"    实战 (combat): {combat_count} 人")
     print(f"    壳子 (shell) : {shell_count} 人")
-    print(f"    实战最低匹配值门槛: {COMBAT_MIN_MATCH_VALUE}")
+    print(f"    实战最低匹配值门槛: {config.COMBAT_MIN_MATCH_VALUE}")
     print()
 
     # 队伍配置容量
-    combat_teams = [t for t in TEAMS if t["category"] == config.LEAGUE_COMBAT]
-    shell_teams  = [t for t in TEAMS if t["category"] == config.LEAGUE_SHELL]
+    combat_teams = [t for t in config.TEAMS if t["category"] == config.LEAGUE_COMBAT]
+    shell_teams  = [t for t in config.TEAMS if t["category"] == config.LEAGUE_SHELL]
     combat_cap = sum(t["member_count"] for t in combat_teams)
     shell_cap  = sum(t["member_count"] for t in shell_teams)
     print(f"  队伍容量:")

@@ -12,7 +12,7 @@ ExcelIO 抽象，本地/腾讯适配器靠 config.IO_ADAPTER 切换，本类零�
 """
 from __future__ import annotations
 
-from modules.player.config import (
+from config import (
     PLAYER_EXPORT_COLUMNS,
     PLAYER_EXPORT_DEFAULT_DESC,
     PLAYER_EXPORT_DEFAULT_SORT,

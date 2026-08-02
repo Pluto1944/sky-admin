@@ -18,7 +18,7 @@ from modules.cwl_registration.team_filler import (
     _split_by_threshold,
     fill_teams,
 )
-from shared.config.common import LEAGUE_COMBAT, LEAGUE_SHELL
+from config import LEAGUE_COMBAT, LEAGUE_SHELL
 
 
 # ---------------------------------------------------------------------------

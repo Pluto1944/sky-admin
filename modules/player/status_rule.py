@@ -5,8 +5,8 @@
 """
 from __future__ import annotations
 
-from modules.player.config import MAYBE_LEFT_MONTHS
-from shared.config.common import (
+from config import (
+    MAYBE_LEFT_MONTHS,
     STATUS_ACTIVE,
     STATUS_MAYBE_LEFT,
     STATUS_MISSED,
