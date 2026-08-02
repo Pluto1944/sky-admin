@@ -15,7 +15,7 @@ v3.0 数据流（基准升降级）：
    - 阶段5：插入普通营新增（编号45后二分插入）
    - 阶段6：追加壳子名单
 5. 【队伍填充】build_teams：贪心填充队伍 + 白名单处理
-6. 回写每条报名的 league_type / rank_order / team_info 到 registrations 表。
+6. 最终名单确定后，回写每条报名的 league_type / rank_order / team_info 到 registrations 表。
 7. 通过 ExcelIO 输出名单表（Part1 排序名单 + Part2 队伍明细 + Part3 离队 + Part4 排布）。
 """
 from __future__ import annotations
@@ -168,17 +168,11 @@ class LeagueArranger:
 
         额外注入：
         - trophies : 取自 accounts（COC 同步），战营排序的主排序键（阶段一）。
-        - prev_rank: 该账号上月名单排名（反查上月 registrations.rank_order），供
-          战营排序的微调预留接口使用。
 
         排除名单（EXCLUDED_CAMP_NAMES）在此阶段过滤：这些账号正常入库但不出现在
         最终联赛名单中。过滤在加载阶段完成，保证排序和导出都不含排除名单成员。
         """
         regs = self.reg_repo.get_registrations(period)
-        prev_month = _prev_period(period)
-        prev_rank_map = (
-            self.reg_repo.rank_orders_of_period(prev_month) if prev_month else {}
-        )
         merged = []
         for reg in regs:
             account_name = reg.get("account_name")
@@ -197,9 +191,6 @@ class LeagueArranger:
                     "account_name": account_name,   # 报名表自持
                     "player_name": reg.get("player_name"),     # 报名表自持
                     "account_type": reg.get("account_type"),
-                    # 上月排名：优先反查上月编排结果，回退到报名行缓存的 prev_rank
-                    "prev_rank": prev_rank_map.get(account_name)
-                    or reg.get("prev_rank"),
                     "match_value": reg.get("match_value"),
                     "join_combat": bool(reg.get("join_combat")),
                     "willing_to_manage": bool(reg.get("willing_to_manage")),
@@ -458,13 +449,6 @@ class LeagueArranger:
         accounts = self._load_accounts(period)
         ordered = sort_accounts(accounts, weights or SORT_WEIGHTS)
 
-        # 回写 league_type / rank_order
-        for item in ordered:
-            if item.get("reg_id") is not None:
-                self.reg_repo.update_arrangement(
-                    item["reg_id"], item["league_type"], item["rank_order"]
-                )
-
         # CWL 实际发生月 = 联赛时间 - 1（results.period 语义）
         cwl_period = _prev_period(period)
         if star_data is None and cwl_period:
@@ -616,7 +600,6 @@ class LeagueArranger:
                         "prev_team": None,
                         "rank_order": None,
                         "account_type": None,
-                        "prev_rank": None,
                         "trophies": None,
                         "match_value": None,
                         "history_score": None,
@@ -640,6 +623,17 @@ class LeagueArranger:
                             break
                 for item in reversed(items):
                     ordered_with_team.insert(insert_pos, item)
+
+        # 最终名单顺序已确定，重新生成 rank_order 反映实际位次
+        for idx, item in enumerate(ordered_with_team, start=1):
+            item["rank_order"] = idx
+
+        # 回写最终 rank_order 到 DB（此前 update_arrangement 写入的是初次排序的位次）
+        for item in ordered_with_team:
+            if item.get("reg_id") is not None:
+                self.reg_repo.update_arrangement(
+                    item["reg_id"], item.get("league_type", ""), item["rank_order"]
+                )
 
         # 回写 team_info（格式: "{team_index} {team_alias} {coc_name} {clan_tag}"）
         for item in ordered_with_team:

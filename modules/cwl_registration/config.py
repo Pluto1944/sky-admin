@@ -81,7 +81,6 @@ ARRANGEMENT_OUTPUT_HEADERS = [
     "player_name",
     "team_name",        # COC 真实部落名称（新增）
     "account_type",
-    "prev_rank",
     "trophies",
     "match_value",
     "history_score",

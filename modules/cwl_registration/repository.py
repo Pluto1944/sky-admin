@@ -19,22 +19,20 @@ class RegistrationRepository:
         """新增报名记录。(account_name, period) 唯一，重复导入时覆盖更新。
 
         account_name 为报名昵称（主标识，必填）；player_name 为主号归属（自持）；
-        player_tag 为命中真实账号时缓存的关联（可空）。account_type 为本月账号分类，
-        prev_rank 为该账号上月排名（战营排序微调参考）。重复导入按 excluded 覆盖
-        （player_tag 命中后也随之更新缓存）。
+        player_tag 为命中真实账号时缓存的关联（可空）。account_type 为本月账号分类。
+        重复导入按 excluded 覆盖（player_tag 命中后也随之更新缓存）。
         """
         sql = """
         INSERT INTO registrations
             (account_name, player_name, period, match_value, join_combat,
-             willing_to_manage, account_type, prev_rank, league_type, rank_order, player_tag)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             willing_to_manage, account_type, league_type, rank_order, player_tag)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(account_name, period) DO UPDATE SET
             player_name        = excluded.player_name,
             match_value        = excluded.match_value,
             join_combat        = excluded.join_combat,
             willing_to_manage  = excluded.willing_to_manage,
             account_type       = excluded.account_type,
-            prev_rank          = excluded.prev_rank,
             player_tag         = COALESCE(excluded.player_tag, registrations.player_tag)
         """
         cur = self.conn.execute(
@@ -47,7 +45,6 @@ class RegistrationRepository:
                 1 if reg.get("join_combat") else 0,
                 1 if reg.get("willing_to_manage") else 0,
                 reg.get("account_type"),
-                reg.get("prev_rank"),
                 reg.get("league_type"),
                 reg.get("rank_order"),
                 reg.get("player_tag"),
@@ -62,17 +59,6 @@ class RegistrationRepository:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def rank_orders_of_period(self, period: str) -> dict[str, int]:
-        """返回某月 {account_name: rank_order}（仅取已编排出 rank_order 的行）。
-
-        供下月编排时作为各账号的 prev_rank（上月排名）参考。
-        """
-        rows = self.conn.execute(
-            "SELECT account_name, rank_order FROM registrations "
-            "WHERE period = ? AND rank_order IS NOT NULL",
-            (period,),
-        ).fetchall()
-        return {r["account_name"]: r["rank_order"] for r in rows if r["account_name"]}
 
     def last_period_of(self, account_name: str) -> Optional[str]:
         """该昵称报名过的最后月份（= 其报名记录的最大 period）；从未报名返回 None。

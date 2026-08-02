@@ -122,7 +122,7 @@ SORT_WEIGHTS = {"match_value": 0.6, "history_score": 0.4}
 
 最终在线文档excel展示这些内容
 1）格式和现在一样
-rank_order	league_type	team_name	movement	player_tag	account_name	player_name	account_type	prev_rank	trophies	match_value	history_score
+rank_order	league_type	team_name	movement	player_tag	account_name	player_name	account_type	trophies	match_value	history_score
 2）part1 展示 当月最终联赛成员名单，格式和现在一样
 3）part2 展示 队伍名单，格式和现在一样（movement信息很多，但我们只展示战绩升降级相关的move，还有 新人 标签）
 3）part3 展示 离队情况
@@ -269,7 +269,7 @@ rank_order	league_type	team_name	movement	player_tag	account_name	player_name	ac
 
 > 战营用奖杯排序（更能体现真实水平），普通账号用综合分排序。
 
-排序后全局从 1 递增分配 `rank_order`。
+排序后全局从 1 递增分配 `rank_order`（此为初次位次，最终位次在基准重建后由 `arrange()` 重新编号并回写 DB）。
 
 ---
 
@@ -282,9 +282,10 @@ v3.0 核心思路：以**上月实战名单为锚点**做基准重建，而非�
 ```
 报名数据(registrations) 
   → _load_accounts() 加载 + 注入得分/奖杯
-  → sort_accounts() 分组+排序
+  → sort_accounts() 分组+排序（标注初次 rank_order，仅内存，不写 DB）
   → build_final_list() 基准重建+升降级（阶段0~6）
   → build_teams() 贪心填充队伍（阶段7~9）
+  → 重新编号 rank_order 反映最终位次 + 回写 DB
   → arrange_and_export() 导出 Excel
 ```
 
@@ -486,7 +487,7 @@ EXCLUDED_CAMP_NAMES = {"Pluto2QQ", "落花归尘", ...}     # 双阶段过滤
 ```
 rank_order, league_type, cur_team, prev_team, movement,
 player_tag, account_name, player_name, account_type,
-prev_rank, trophies, match_value, history_score
+trophies, match_value, history_score
 ```
 
 ### movement 标识
@@ -624,7 +625,7 @@ flowchart TD
     E -->|"③b 实战人溢出"| G["溢出实战人 → 注入 shell_pool<br/>按匹配值降序重排 → 填充壳子队伍"]
     E -->|"③c 实战缺口 <5"| H["取最后实战入选人匹配值为 ref<br/>从 shell_pool 找最相近 N 人补入<br/>→ 剩余壳子池填充壳子队伍"]
     E -->|"③d 缺口 ≥5"| I["不协调，队伍不满员<br/>→ 壳子池填充壳子队伍"]
-    F --> J["⑤ 回写 team_name + 输出"]
+    F --> J["⑤ 重新编号 rank_order + 回写 DB + 输出"]
     G --> J
     H --> J
     I --> J

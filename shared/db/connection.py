@@ -64,7 +64,6 @@ CREATE TABLE IF NOT EXISTS {table} (
     join_combat       INTEGER,
     willing_to_manage INTEGER,                 -- 是否愿意做联赛管理员（报名表字段）
     account_type      TEXT,                    -- 本月账号分类 combat / normal
-    prev_rank         INTEGER,                 -- 上月名单排名位次（战营排序微调参考）
     league_type       TEXT,                    -- 编排产物
     rank_order        INTEGER,                 -- 编排产物
     player_tag        TEXT,                    -- 可空：命中的真实账号 tag，作关联缓存（无 FK）
@@ -169,11 +168,9 @@ class Database:
         1) registrations 若还是"依赖 accounts"的旧形态（缺 account_name 列），重建为
            B 方案的自包含表：自持 account_name/player_name、去 FK、唯一键改
            (account_name, period)；account_name 由旧 player_tag（过渡期=昵称）回填，
-           player_name 从 accounts 按旧 player_tag join 回填；旧 camp_order 值迁入 prev_rank；
-        2) registrations 补 account_type；把旧列 camp_order 改名为 prev_rank（语义变为
-           "上月排名"），更老库两者皆无则新增 prev_rank；
-        3) 把旧 accounts 上的 account_type 回填到该账号的报名行；
-        4) accounts 若仍含已废弃列，重建表物理删除（SQLite 老版本无 DROP COLUMN，
+           player_name 从 accounts 按旧 player_tag join 回填；
+        2) 把旧 accounts 上的 account_type 回填到该账号的报名行；
+        3) accounts 若仍含已废弃列，重建表物理删除（SQLite 老版本无 DROP COLUMN，
            且用户要求彻底删净，故走"建新表→拷数据→改名"）。
         新库由 _SCHEMA 直接建全，本方法对其为无害的空操作。
         """
@@ -192,15 +189,6 @@ class Database:
         # account_type 下沉列补齐
         if "account_type" not in reg_cols:
             self.conn.execute("ALTER TABLE registrations ADD COLUMN account_type TEXT")
-
-        # camp_order -> prev_rank：语义由"名单顺序"改为"上月排名"。老库改名，更老库新增。
-        if "prev_rank" not in reg_cols:
-            if "camp_order" in reg_cols:
-                self.conn.execute(
-                    "ALTER TABLE registrations RENAME COLUMN camp_order TO prev_rank"
-                )
-            else:
-                self.conn.execute("ALTER TABLE registrations ADD COLUMN prev_rank INTEGER")
 
         # 队伍分配列
         if "team_info" not in reg_cols:
@@ -251,28 +239,22 @@ class Database:
         须在 foreign_keys=OFF 且 legacy_alter_table=ON 下调用。回填规则：
         - account_name：过渡期旧 player_tag 即昵称，故直接取旧 player_tag；
         - player_name：从 accounts 按旧 player_tag join 取（旧库把归属人存在 accounts）；
-        - prev_rank：由旧 camp_order 迁入（语义改为上月排名，旧名单顺序作占位）；
         - player_tag：保留旧值作为关联缓存（过渡期=昵称，后续 coc-sync 命中可覆盖）。
         同 (account_name, period) 若冲突（理论上不会，过渡期 1:1）以先到者为准。
         """
-        old_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(registrations)")}
-        # 旧库该列名可能是 camp_order（更老）或已是 prev_rank；无则填 NULL
-        prev_src = "r.camp_order" if "camp_order" in old_cols else (
-            "r.prev_rank" if "prev_rank" in old_cols else "NULL"
-        )
         self.conn.execute("DROP TABLE IF EXISTS registrations_new")
         self.conn.execute(_REGISTRATIONS_DDL.format(table="registrations_new"))
         self.conn.execute(
-            f"""
+            """
             INSERT OR IGNORE INTO registrations_new
                 (id, account_name, player_name, period, match_value, join_combat,
-                 willing_to_manage, account_type, prev_rank, league_type, rank_order, player_tag, team_info)
+                 willing_to_manage, account_type, league_type, rank_order, player_tag, team_info)
             SELECT r.id,
                    COALESCE(a.account_name, r.player_tag),
                    a.player_name,
                    r.period, r.match_value, r.join_combat,
                    COALESCE(r.willing_to_manage, 0),
-                   r.account_type, {prev_src}, r.league_type, r.rank_order,
+                   r.account_type, r.league_type, r.rank_order,
                    r.player_tag,
                    r.team_info
             FROM registrations r

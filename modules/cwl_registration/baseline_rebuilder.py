@@ -11,7 +11,7 @@
 
 输入：
   - accounts: sort_accounts() 的输出（含 rank_score / league_type / rank_order）
-  - prev_combat_regs: 上月 registrations 表中 combat 记录（含 team_info / rank_order）
+  - prev_combat_regs: 上月 registrations 表中 combat 记录（含 team_info，rank_order 固定为 None）
   - star_data: {account_name: total_stars}，上月实战星数
   - teams: TEAMS 配置
 
@@ -154,7 +154,6 @@ def build_temp_lists(
             "clan_tag": reg.get("clan_tag"),
             "team_index": reg.get("team_index"),
             "stars": stars if stars is not None else -1,  # 无星数排最后
-            "prev_rank": reg.get("rank_order"),
         }
         # 构建 prev_team："index name" 拼接，用于区分同名队伍
         prev_ti = reg.get("team_index")

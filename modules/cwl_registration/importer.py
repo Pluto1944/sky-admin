@@ -73,7 +73,6 @@ def parse_registration_row(raw: dict, colmap: dict | None = None) -> dict | None
         "willing_to_manage": _parse_willing_to_manage(cell("willing_to_manage")),
         "submit_time": cell("submit_time"),
         "account_type": ACCOUNT_TYPE_NORMAL,
-        "prev_rank": None,
     }
 
 
@@ -212,7 +211,6 @@ class RegistrationImporter:
                 "willing_to_manage": False,
                 "submit_time": None,
                 "account_type": ACCOUNT_TYPE_COMBAT,
-                "prev_rank": None,
             }
         return list(by_name.values())
 
@@ -234,7 +232,6 @@ class RegistrationImporter:
                 "match_value": acc.get("match_value"),
                 "join_combat": acc.get("join_combat"),
                 "account_type": acc.get("account_type"),
-                "prev_rank": acc.get("prev_rank"),
                 "player_tag": tag,
             }
         )

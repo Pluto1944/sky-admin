@@ -108,7 +108,7 @@ def seed_registrations(player_service, reg_repo, period: str, items: list[dict])
     反查 tag、读 history_score / trophies）；报名事实写入 registrations（自持
     account_name/player_name/账号类型等），并把真实 tag 缓存到 player_tag。
 
-    items: [{player_tag, account_name, account_type, prev_rank, match_value,
+    items: [{player_tag, account_name, account_type, match_value,
              join_combat, history_score, trophies, clan_tag, player_name}, ...]
     """
     for it in items:
@@ -129,7 +129,6 @@ def seed_registrations(player_service, reg_repo, period: str, items: list[dict])
                 "match_value": it.get("match_value"),
                 "join_combat": it.get("join_combat", False),
                 "account_type": it.get("account_type"),
-                "prev_rank": it.get("prev_rank"),
                 "player_tag": tag,
             }
         )

@@ -123,10 +123,9 @@ v2.2 B 方案：自成一体的报名事实源。自持 `account_name`/`player_n
 | `match_value` | REAL | | 本月匹配值 |
 | `join_combat` | INTEGER | | 是否实战 (0/1) |
 | `account_type` | TEXT | | 本月分类：combat/normal |
-| `prev_rank` | INTEGER | | 上月排名 |
 | `willing_to_manage` | INTEGER | | 是否愿意做管理员 (0/1)（v2.8） |
 | `league_type` | TEXT | | 编排结果：combat/shell |
-| `rank_order` | INTEGER | | 名单位次 |
+| `rank_order` | INTEGER | | 最终名单位次（编排产物，arrange() 结束时回写） |
 | `player_tag` | TEXT | 可空，无 FK | 真实 Tag 关联缓存 |
 | `team_name` | TEXT | 可空 | 分配到哪个队伍（v2.3） |
 

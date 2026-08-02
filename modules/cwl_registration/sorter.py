@@ -1,8 +1,10 @@
 """名单编排排序（纯函数，无 IO）。
 
-职责：分组（实战/壳子）+ 综合分/奖杯排序 + 战营优先，并回填 league_type、rank_order。
+职责：分组（实战/壳子）+ 综合分/奖杯排序 + 战营优先，并为每个账号标注 league_type 和初次 rank_order。
 综合分算法交给 rank_score.compute_rank_score，本模块不关心其内部实现。
 战营排序键与"按上月排名微调"拆成独立函数，便于后续扩展（如奖杯+战绩联合排序）。
+
+注意：此模块不写数据库。rank_order 的最终值（经过基准重建后）由 roster.py 负责回写到 registrations 表。
 """
 from __future__ import annotations
 
@@ -41,14 +43,6 @@ def camp_sort_key(account: dict) -> tuple:
     return (-(account.get("trophies") or 0), -(account.get("rank_score") or 0.0))
 
 
-def adjust_camp_by_prev_rank(camp_accounts: list[dict]) -> list[dict]:
-    """根据上月排名（prev_rank）对战营排序结果做微调（预留接口，阶段二实现）。
-
-    当前为恒等操作，直接返回原排序。后续可在此依据 account["prev_rank"] 与本月
-    奖杯/战绩做联合微调（例如稳定上月名次、限制单月升降幅度等）。
-    """
-    return camp_accounts
-
 
 def sort_accounts(accounts: list[dict], weights: dict | None = None) -> list[dict]:
     """对本月报名账号编排名单。
@@ -60,8 +54,7 @@ def sort_accounts(accounts: list[dict], weights: dict | None = None) -> list[dic
 
     规则：
       - 实战名单 = 战营账号 + 普通实战账号，战营整体排前。
-        战营内部按奖杯降序（camp_sort_key），再经 adjust_camp_by_prev_rank 微调；
-        普通实战按综合分降序。
+        战营内部按奖杯降序（camp_sort_key），普通实战按综合分降序。
       - 壳子名单 = 普通且未选实战账号，按综合分降序。
     """
     if weights is None:
@@ -91,9 +84,7 @@ def sort_accounts(accounts: list[dict], weights: dict | None = None) -> list[dic
             shell.append(item)
 
     key = lambda x: x["rank_score"]
-    # 战营账号按奖杯降序（阶段一）；后续可在 camp_sort_key / adjust_camp_by_prev_rank 扩展。
     combat_camp.sort(key=camp_sort_key)
-    combat_camp = adjust_camp_by_prev_rank(combat_camp)
     combat_normal.sort(key=key, reverse=True)
     shell.sort(key=key, reverse=True)
 

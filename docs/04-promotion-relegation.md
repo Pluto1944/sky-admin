@@ -42,7 +42,6 @@ arrange("2026-08")                ← 联赛月份
      ├── registrations WHERE period="2026-08"   读报名数据
      ├── cwl_period = "2026-07"                 ← 上月 CWL
      │     └── _load_combat_star_data("2026-07")  读星数数据
-     └── prev_rank 从 "2026-07"
 ```
 
 ---
