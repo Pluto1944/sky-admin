@@ -4,11 +4,11 @@ After=network.target
 
 [Service]
 Type=simple
-User=root
-WorkingDirectory=/opt/sky-admin/sky-admin
-Environment="PATH=/opt/sky-admin/sky-admin/venv/bin:/usr/local/bin:/usr/bin:/bin"
+User=ubuntu
+WorkingDirectory=/home/ubuntu/YANG/sky-admin
+Environment="PATH=/home/ubuntu/YANG/sky-admin/venv/bin:/usr/local/bin:/usr/bin:/bin"
 Environment="SKY_ADMIN_ENV=production"
-ExecStart=/opt/sky-admin/sky-admin/venv/bin/uvicorn api_server.app:app --host 127.0.0.1 --port 8000 --workers 2
+ExecStart=/home/ubuntu/YANG/sky-admin/venv/bin/uvicorn api_server.app:app --host 127.0.0.1 --port 8000 --workers 2
 Restart=always
 RestartSec=5
 StandardOutput=append:/var/log/sky-admin.log

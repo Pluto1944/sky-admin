@@ -8,9 +8,14 @@ echo ""
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+RED='\033[0;31m'
 NC='\033[0m'
 
-PROJECT_DIR="/opt/sky-admin/sky-admin"
+# ---- 配置区域：修改这里适配你的环境 ----
+PROJECT_DIR="/home/ubuntu/YANG/sky-admin"
+DOMAIN="api.skycoc.cc"
+CERT_EMAIL="admin@skycoc.cc"
+# ---------------------------------------
 
 # 检查是否为 root
 if [ "$(id -u)" != "0" ]; then
@@ -18,16 +23,23 @@ if [ "$(id -u)" != "0" ]; then
     exit 1
 fi
 
+# 检查项目目录是否存在
+if [ ! -d "$PROJECT_DIR" ]; then
+    echo -e "${RED}错误：项目目录不存在 $PROJECT_DIR${NC}"
+    echo "请先将代码上传到该目录，或修改脚本中的 PROJECT_DIR"
+    exit 1
+fi
+
 # 1. 更新系统
-echo -e "${GREEN}[1/7] 更新系统包...${NC}"
+echo -e "${GREEN}[1/8] 更新系统包...${NC}"
 apt update && apt upgrade -y
 
 # 2. 安装系统依赖
-echo -e "${GREEN}[2/7] 安装 Python3 + Nginx...${NC}"
-apt install -y python3 python3-pip python3-venv nginx
+echo -e "${GREEN}[2/8] 安装 Python3 + Nginx + Certbot...${NC}"
+apt install -y python3 python3-pip python3-venv nginx certbot python3-certbot-nginx
 
 # 3. 创建虚拟环境并安装 Python 依赖
-echo -e "${GREEN}[3/7] 安装 Python 依赖...${NC}"
+echo -e "${GREEN}[3/8] 安装 Python 依赖...${NC}"
 cd "$PROJECT_DIR"
 python3 -m venv venv
 source venv/bin/activate
@@ -35,28 +47,36 @@ pip install --upgrade pip
 pip install -r requirements.txt
 deactivate
 
-# 4. 配置 Nginx
-echo -e "${GREEN}[4/7] 配置 Nginx...${NC}"
+# 4. 配置 Nginx（先用 HTTP 模板）
+echo -e "${GREEN}[4/8] 配置 Nginx...${NC}"
 cp deploy/nginx.conf /etc/nginx/sites-available/sky-admin
 ln -sf /etc/nginx/sites-available/sky-admin /etc/nginx/sites-enabled/
-# 删除默认站点
 rm -f /etc/nginx/sites-enabled/default
-# 测试配置
 nginx -t && systemctl reload nginx
 
 # 5. 配置 systemd 服务
-echo -e "${GREEN}[5/7] 配置 systemd 守护进程...${NC}"
+echo -e "${GREEN}[5/8] 配置 systemd 守护进程...${NC}"
 cp deploy/sky-admin.service /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable sky-admin
 
 # 6. 启动服务
-echo -e "${GREEN}[6/7] 启动服务...${NC}"
+echo -e "${GREEN}[6/8] 启动 FastAPI 服务...${NC}"
 systemctl restart sky-admin
 sleep 2
 systemctl status sky-admin --no-pager
 
-# 7. 完成
+# 7. 申请 HTTPS 证书（需要域名 DNS 已生效 + 安全组已开放 443）
+echo -e "${GREEN}[7/8] 申请 HTTPS 证书...${NC}"
+if certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --email "$CERT_EMAIL" 2>/dev/null; then
+    echo -e "${GREEN}HTTPS 证书申请成功！${NC}"
+else
+    echo -e "${YELLOW}HTTPS 证书申请失败（可能 DNS 未生效或 443 端口未开放）${NC}"
+    echo -e "${YELLOW}服务仍以 HTTP 模式运行，稍后可手动执行：${NC}"
+    echo "  sudo certbot --nginx -d $DOMAIN"
+fi
+
+# 8. 完成
 SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || echo "服务器IP")
 echo ""
 echo -e "${GREEN}========================================"
@@ -65,16 +85,12 @@ echo "========================================${NC}"
 echo ""
 echo "验证服务："
 echo "  curl http://${SERVER_IP}/api/ping"
+if [ -f /etc/letsencrypt/live/$DOMAIN/fullchain.pem ]; then
+    echo "  curl https://${DOMAIN}/api/ping"
+fi
 echo ""
-echo "常用命令："
-echo "  systemctl status sky-admin    查看服务状态"
-echo "  systemctl restart sky-admin   重启服务"
-echo "  journalctl -u sky-admin -f    查看实时日志"
-echo "  tail -f /var/log/sky-admin.log 查看应用日志"
-echo ""
-echo -e "${YELLOW}域名审核通过后，切换 HTTPS 步骤：${NC}"
-echo "  1. 编辑 nginx 配置: vim /etc/nginx/sites-available/sky-admin"
-echo "  2. 启用 HTTPS 部分，注释 HTTP 部分"
-echo "  3. certbot --nginx -d api.你的域名.com"
-echo "  4. systemctl reload nginx"
+echo "常用运维命令（详见 deploy/README.md）："
+echo "  sudo systemctl status sky-admin    查看服务状态"
+echo "  sudo systemctl restart sky-admin   重启服务"
+echo "  sudo journalctl -u sky-admin -f    查看实时日志"
 echo ""
