@@ -177,20 +177,39 @@ def aggregate_players(cwl_wars: list[dict], clan_tag: str) -> list[dict]:
     ]
 
 
-def fetch_cwl_players(clan_tag: str, period: str) -> list[dict] | None:
+def fetch_cwl_players(clan_tag: str, period: str) -> tuple[list[dict] | None, str]:
     """一站式接口：拉取指定部落指定月份的 CWL 玩家战绩。
 
     Returns:
-        玩家列表（与 Supercell API _fetch_team_players() 格式一致）
-        失败或无数据返回 None
+        (players, reason): players 为玩家列表（None 表示失败），
+        reason 为失败原因描述（成功时为空字符串）
     """
     try:
         cwl_wars = filter_cwl_wars(clan_tag, period)
     except Exception as e:
-        print(f"  [ClashKing] 请求异常: {e}", file=sys.stderr)
-        return None
+        return None, f"ClashKing API 请求异常: {e}"
 
     if not cwl_wars:
-        return None
+        # 进一步诊断：是 API 没返回数据，还是该月份确实没有 CWL
+        try:
+            all_wars = fetch_war_log(clan_tag)
+        except Exception:
+            all_wars = []
+        if not all_wars:
+            return None, f"ClashKing API 未返回任何 war log（部落 {clan_tag} 可能无记录或 API 不可达）"
+        # 检查该部落有哪些月份的 CWL 数据
+        # ClashKing endTime 格式: "20260709T122220.000Z"，取前6位作为 YYYYMM
+        available_periods = sorted(set(
+            w.get("endTime", "")[:6]
+            for w in all_wars
+            if w.get("endTime", "") and is_cwl_war(w)
+        ))
+        if available_periods:
+            return None, (
+                f"war log 中无 {period} 的 CWL 记录"
+                f"（该部落 {clan_tag} 有 CWL 数据的月份: {', '.join(available_periods)}）"
+            )
+        else:
+            return None, f"war log 中有 {len(all_wars)} 条记录，但无任何 CWL 战斗（可能该部落未参加 CWL）"
 
-    return aggregate_players(cwl_wars, clan_tag)
+    return aggregate_players(cwl_wars, clan_tag), ""

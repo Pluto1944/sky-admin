@@ -86,43 +86,49 @@ def _normalize_tag(tag: str) -> str:
 # 通道 1：ClashKing API
 # ═══════════════════════════════════════════════════════════════════════
 
-def _fetch_via_clashking(team_alias: str, clan_tag: str, period: str) -> list[dict] | None:
+def _fetch_via_clashking(team_alias: str, clan_tag: str, period: str) -> tuple[list[dict] | None, str]:
     """通道1：通过 ClashKing War Log 拉取 CWL 历史战绩。
 
     每个玩家: {"tag", "name", "total_stars", "total_attacks"}
-    返回 None 表示该通道不可用。
+    Returns:
+        (players, reason): players 为 None 表示失败，reason 为失败原因
     """
-    players = fetch_cwl_players(clan_tag, period)
+    players, reason = fetch_cwl_players(clan_tag, period)
     if not players:
-        return None
-    return players
+        return None, reason
+    return players, ""
 
 
 # ═══════════════════════════════════════════════════════════════════════
 # 通道 2：本地 JSON
 # ═══════════════════════════════════════════════════════════════════════
 
-def _fetch_via_local_json(team_alias: str, period: str) -> list[dict] | None:
+def _fetch_via_local_json(team_alias: str, period: str) -> tuple[list[dict] | None, str]:
     """通道2：从本地 data/cwl_YYYYMM/X_alias.json 读取队伍战绩。
 
     返回格式与 _fetch_via_clashking() 一致。
-    返回 None 表示该通道不可用。
+    Returns:
+        (players, reason): players 为 None 表示失败，reason 为失败原因
     """
     data_dir = DATA_ROOT / f"cwl_{period.replace('-', '')}"
     if not data_dir.exists():
-        return None
+        return None, f"本地目录不存在: {data_dir}"
 
     # 按 team_alias 匹配 JSON 文件（文件名格式: 1_冠一_一队.json）
-    for f in sorted(data_dir.glob("*.json")):
+    json_files = sorted(data_dir.glob("*.json"))
+    if not json_files:
+        return None, f"本地目录为空: {data_dir}"
+
+    for f in json_files:
         team_data = json.loads(f.read_text(encoding="utf-8"))
         if team_data.get("team_name", "") == team_alias:
             return [
                 {"tag": p["tag"], "name": p["name"],
                  "total_stars": p["total_stars"], "total_attacks": p["total_attacks"]}
                 for p in team_data.get("players", [])
-            ]
+            ], ""
 
-    return None
+    return None, f"本地 JSON 中未匹配到 team_name='{team_alias}'（可用文件: {[f.name for f in json_files]}）"
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -142,23 +148,24 @@ def _fetch_team_players(team_alias: str, clan_tag: str, period: str) -> tuple[li
         (players, source): players 为玩家列表，source 为数据来源标识
     """
     # ── 通道 1：ClashKing API ──
-    players = _fetch_via_clashking(team_alias, clan_tag, period)
+    players, ck_reason = _fetch_via_clashking(team_alias, clan_tag, period)
     if players:
         print(f"  {team_alias}: ✅ [ClashKing] ({len(players)}人)")
         return players, "ClashKing"
-    print(f"  {team_alias}: ⚠️ [ClashKing] 失败 → 降级本地 JSON")
+    print(f"  {team_alias}: ⚠️ [ClashKing] 失败（{ck_reason}）→ 降级本地 JSON")
 
     # ── 通道 2：本地 JSON 文件 ──
-    players = _fetch_via_local_json(team_alias, period)
+    players, local_reason = _fetch_via_local_json(team_alias, period)
     if players:
         print(f"  {team_alias}: ✅ [本地JSON] ({len(players)}人)")
         return players, "本地JSON"
+    print(f"  {team_alias}: ⚠️ [本地JSON] 失败（{local_reason}）")
 
     # ── 全部失败 ──
     print(ALERT_LINE)
     print(f"  🚨 [全部失败] {team_alias}({clan_tag}) 无任何数据源可用！")
-    print(f"      请检查: 1) ClashKing 是否可访问")
-    print(f"              2) data/cwl_{period.replace('-', '')}/ 目录是否存在 JSON 文件")
+    print(f"      [ClashKing] {ck_reason}")
+    print(f"      [本地JSON] {local_reason}")
     print(ALERT_LINE)
     return None, ""
 
