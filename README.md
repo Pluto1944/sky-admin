@@ -12,6 +12,8 @@
 | [`docs/04-promotion-relegation.md`](./docs/04-promotion-relegation.md) | 升降级算法（v3.0 内嵌于基准重建） |
 | [`docs/05-roster-output.md`](./docs/05-roster-output.md) | Part1-Part4 输出 + 公示发布 |
 | [`docs/06-operations.md`](./docs/06-operations.md) | 月度循环、运维脚本、数据目录 |
+| [`docs/10-api-server.md`](./docs/10-api-server.md) | FastAPI 后端 API 服务 |
+| [`docs/11-uni-app.md`](./docs/11-uni-app.md) | 微信小程序前端（编译环境、同步流程、调试） |
 | [`docs/CHANGELOG.md`](./docs/CHANGELOG.md) | 版本更新记录 |
 | [`docs/fetch_cwl_data_design.md`](./docs/fetch_cwl_data_design.md) | CWL 数据拉取设计 |
 | [`scripts/README.md`](./scripts/README.md) | 脚本使用说明 |

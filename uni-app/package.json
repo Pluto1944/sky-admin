@@ -1,0 +1,52 @@
+{
+  "name": "sky-admin-uni",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev:mp-weixin": "cross-env NODE_ENV=development UNI_PLATFORM=mp-weixin UNI_CLI_CONTEXT=./ UNI_INPUT_DIR=./ UNI_OUTPUT_DIR=./dist/dev/mp-weixin vue-cli-service uni-build --watch",
+    "build:mp-weixin": "cross-env NODE_ENV=production UNI_PLATFORM=mp-weixin UNI_CLI_CONTEXT=./ UNI_INPUT_DIR=./ UNI_OUTPUT_DIR=./dist/build/mp-weixin vue-cli-service uni-build"
+  },
+  "dependencies": {
+    "@dcloudio/uni-cli-i18n": "^2.0.2-5020320260806001",
+    "@dcloudio/uni-i18n": "^2.0.2-5020320260806001",
+    "@dcloudio/uni-mp-weixin": "^2.0.2-5020320260806001",
+    "@dcloudio/uni-stat": "^2.0.2-5020320260806001",
+    "@dcloudio/webpack-uni-mp-loader": "^2.0.2-5020320260806001",
+    "@dcloudio/webpack-uni-pages-loader": "^2.0.2-5020320260806001",
+    "@vue/cli-plugin-babel": "^4.5.19",
+    "autoprefixer": "^9.8.8",
+    "copy-webpack-plugin": "^5.1.2",
+    "core-js": "^3.8.0",
+    "css-loader": "^7.1.4",
+    "file-loader": "^6.2.0",
+    "html-webpack-plugin": "^5.6.8",
+    "less-loader": "^13.0.0",
+    "mini-css-extract-plugin": "^2.4.5",
+    "node-sass": "^9.0.0",
+    "optimize-css-assets-webpack-plugin": "^6.0.1",
+    "postcss": "^7.0.39",
+    "postcss-loader": "^8.2.1",
+    "regenerator-runtime": "^0.14.1",
+    "sass-loader": "^17.0.0",
+    "terser-webpack-plugin": "^5.6.1",
+    "url-loader": "^4.1.1",
+    "vue": "^2.6.12",
+    "webpack-merge": "^6.0.1"
+  },
+  "devDependencies": {
+    "@dcloudio/uni-cli-shared": "^2.0.2-5020320260806001",
+    "@dcloudio/uni-migration": "^2.0.2-5020320260806001",
+    "@dcloudio/uni-template-compiler": "^2.0.2-5020320260806001",
+    "@dcloudio/vue-cli-plugin-uni": "^2.0.2-5020320260806001",
+    "@vue/cli-service": "^4.5.0",
+    "cross-env": "^7.0.3",
+    "mini-types": "*",
+    "miniprogram-api-typings": "^3.3.0",
+    "postcss-comment": "^2.0.0",
+    "webpack": "^4.47.0"
+  },
+  "browserslist": [
+    "Android >= 4.4",
+    "ios >= 9"
+  ]
+}

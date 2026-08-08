@@ -120,11 +120,26 @@ CREATE TABLE IF NOT EXISTS league_results (
 );
 """
 
+_WECHAT_USERS_DDL = """
+CREATE TABLE IF NOT EXISTS wechat_users (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    openid        TEXT NOT NULL UNIQUE,
+    nickname      TEXT,
+    avatar_url    TEXT,
+    role          TEXT DEFAULT 'member',
+    account_name  TEXT,
+    player_tag    TEXT,
+    created_at    TEXT,
+    updated_at    TEXT
+);
+"""
+
 _CHILDREN_DDL = (
     _REGISTRATIONS_DDL.format(table="registrations")
     + _RESULTS_DDL
     + _LEAGUE_TEAMS_DDL
     + _LEAGUE_RESULTS_DDL
+    + _WECHAT_USERS_DDL
 )
 
 _SCHEMA = _ACCOUNTS_DDL.format(table="accounts") + _CHILDREN_DDL
@@ -153,7 +168,7 @@ class Database:
             parent = os.path.dirname(db_path)
             if parent:
                 os.makedirs(parent, exist_ok=True)
-        self.conn = sqlite3.connect(db_path)
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
 

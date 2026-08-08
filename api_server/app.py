@@ -8,7 +8,11 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from shared.config.env_loader import load_env
 from .routes import router
+
+# 加载 .env 到 os.environ（必须在 create_app 之前）
+load_env()
 
 
 def create_app() -> FastAPI:

@@ -1,0 +1,46 @@
+{
+  "name": "苍穹联赛助手",
+  "appid": "wx6a46dda85a013a34",
+  "description": "COC 苍穹联赛管理小程序",
+  "versionName": "1.0.0",
+  "versionCode": "100",
+  "transformPx": false,
+  "mp-weixin": {
+    "appid": "wx6a46dda85a013a34",
+    "setting": {
+      "urlCheck": true,
+      "es6": true,
+      "enhance": true,
+      "postcss": true,
+      "preloadBackgroundData": false,
+      "minified": true,
+      "newFeature": true,
+      "coverView": true,
+      "nodeModules": true,
+      "autoAudits": false,
+      "showShadowRootInWxmlPanel": true,
+      "scopeDataCheck": false,
+      "uglifyFileName": false,
+      "checkInvalidKey": true,
+      "checkSiteMap": true,
+      "uploadWithSourceMap": true,
+      "compileHotReLoad": false,
+      "lazyloadPlaceholderEnable": false,
+      "useMultiFrameRuntime": true,
+      "useApiHook": true,
+      "useApiHostProcess": true,
+      "babelSetting": {
+        "ignore": [],
+        "disablePlugins": [],
+        "outputPath": ""
+      },
+      "condition": false
+    },
+    "usingComponents": true,
+    "permission": {},
+    "requiredBackgroundModes": [],
+    "requiredPrivateInfos": [],
+    "plugins": {},
+    "preloadRule": {}
+  }
+}

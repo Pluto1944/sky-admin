@@ -1,0 +1,32 @@
+{
+  "pages": [
+    {
+      "path": "pages/index/index",
+      "style": {
+        "navigationBarTitleText": "苍穹联赛助手"
+      }
+    },
+    {
+      "path": "pages/login/login",
+      "style": {
+        "navigationBarTitleText": "微信登录"
+      }
+    },
+    {
+      "path": "pages/bind/bind",
+      "style": {
+        "navigationBarTitleText": "绑定游戏账号"
+      }
+    }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "white",
+    "navigationBarTitleText": "苍穹联赛助手",
+    "navigationBarBackgroundColor": "#1a1a2e",
+    "backgroundColor": "#0f0f23"
+  },
+  "easycom": {
+    "autoscan": true,
+    "custom": {}
+  }
+}

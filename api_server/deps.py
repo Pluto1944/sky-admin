@@ -10,6 +10,8 @@ from pathlib import Path
 from shared.db.connection import Database
 from modules.player.repository import PlayerRepository
 
+__all__ = ["get_db", "get_repo"]
+
 # 数据库连接（模块级单例，进程内共享）
 _db: Database | None = None
 _repo: PlayerRepository | None = None
