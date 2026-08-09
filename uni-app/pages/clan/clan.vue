@@ -1,7 +1,7 @@
 <template>
   <view class="page-container">
     <!-- 自定义顶部栏 -->
-    <TopBar title="部落" :buttons="topButtons" @onFilter="onFilter" @onSearch="onSearch" />
+    <TopBar title="部落" :buttons="topButtons" @onFilter="onFilter" @onSearch="onSearch" @onRecord="onRecord" />
 
     <!-- 中间展示区域 -->
     <view class="content">
@@ -22,12 +22,16 @@ export default {
   data() {
     return {
       topButtons: [
+        { key: 'record', icon: '⚔️', text: '战绩', action: 'onRecord' },
         { key: 'filter', icon: '⏬', text: '筛选', action: 'onFilter' },
         { key: 'search', icon: '🔍', text: '搜索', action: 'onSearch' }
       ]
     }
   },
   methods: {
+    onRecord() {
+      uni.showToast({ title: '战绩功能开发中', icon: 'none' })
+    },
     onFilter() {
       uni.showToast({ title: '筛选功能开发中', icon: 'none' })
     },
