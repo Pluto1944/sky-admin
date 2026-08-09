@@ -43,8 +43,8 @@ function request(url, method = 'GET', data = {}, needAuth = false) {
           uni.removeStorageSync('token')
           getApp().globalData.isLoggedIn = false
           getApp().globalData.userInfo = null
-          uni.reLaunch({
-            url: '/pages/login/login'
+          uni.switchTab({
+            url: '/pages/settings/settings'
           })
           reject(new Error('登录已过期，请重新登录'))
         } else {

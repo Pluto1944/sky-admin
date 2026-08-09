@@ -72,8 +72,8 @@ export default {
                   // 未绑定，跳转绑定页
                   uni.redirectTo({ url: '/pages/bind/bind' })
                 } else {
-                  // 已绑定，跳转首页
-                  uni.redirectTo({ url: '/pages/index/index' })
+                  // 已绑定，跳转设置页
+                  uni.switchTab({ url: '/pages/settings/settings' })
                 }
               }, 1500)
             })

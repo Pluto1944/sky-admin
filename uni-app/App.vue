@@ -2,7 +2,7 @@
 export default {
   onLaunch() {
     console.log('App Launch')
-    // 检查登录状态
+    // 启动时验证 token 是否有效
     const token = uni.getStorageSync('token')
     if (token) {
       this.checkLoginStatus()
@@ -16,7 +16,6 @@ export default {
   },
   methods: {
     checkLoginStatus() {
-      // 启动时验证 token 是否有效
       uni.request({
         url: this.globalData.apiBase + '/api/wechat/me',
         header: {

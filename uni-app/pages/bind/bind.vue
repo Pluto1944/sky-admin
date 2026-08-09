@@ -106,7 +106,7 @@ export default {
           })
 
           setTimeout(() => {
-            uni.redirectTo({ url: '/pages/index/index' })
+            uni.switchTab({ url: '/pages/settings/settings' })
           }, 1500)
         })
         .catch((err) => {
@@ -120,7 +120,7 @@ export default {
     },
 
     handleSkip() {
-      uni.redirectTo({ url: '/pages/index/index' })
+      uni.switchTab({ url: '/pages/settings/settings' })
     }
   }
 }

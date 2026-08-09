@@ -1,9 +1,31 @@
 {
   "pages": [
     {
-      "path": "pages/index/index",
+      "path": "pages/clan/clan",
       "style": {
-        "navigationBarTitleText": "苍穹联赛助手"
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "部落"
+      }
+    },
+    {
+      "path": "pages/war/war",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "战斗"
+      }
+    },
+    {
+      "path": "pages/account/account",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "账号"
+      }
+    },
+    {
+      "path": "pages/settings/settings",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "设置"
       }
     },
     {
@@ -17,8 +39,45 @@
       "style": {
         "navigationBarTitleText": "绑定游戏账号"
       }
+    },
+    {
+      "path": "pages/clan/detail",
+      "style": {
+        "navigationBarTitleText": "成员详情"
+      }
+    },
+    {
+      "path": "pages/war/detail",
+      "style": {
+        "navigationBarTitleText": "战绩详情"
+      }
     }
   ],
+  "tabBar": {
+    "color": "#8890a0",
+    "selectedColor": "#4a90d9",
+    "backgroundColor": "#1a1a2e",
+    "borderStyle": "black",
+    "fontSize": "14px",
+    "list": [
+      {
+        "pagePath": "pages/clan/clan",
+        "text": "部落"
+      },
+      {
+        "pagePath": "pages/war/war",
+        "text": "战斗"
+      },
+      {
+        "pagePath": "pages/account/account",
+        "text": "账号"
+      },
+      {
+        "pagePath": "pages/settings/settings",
+        "text": "设置"
+      }
+    ]
+  },
   "globalStyle": {
     "navigationBarTextStyle": "white",
     "navigationBarTitleText": "苍穹联赛助手",

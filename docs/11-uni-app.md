@@ -9,6 +9,7 @@
 - **后端 API**: `https://api.skycoc.cc`（备案通过前临时使用 `https://115.159.64.19`）
 - **UI 主题**: 暗色风格
 - **备案状态**: ⏳ 等待 ICP 备案通过
+- **架构状态**: ⚠️ 正在从单页架构迁移到 TabBar 多页架构（4 个主页面：部落/战斗/账号/设置）
 
 ---
 
@@ -17,20 +18,30 @@
 ```
 uni-app/
 ├── manifest.json              # 小程序配置（AppID、权限等）
-├── pages.json                 # 页面路由配置
-├── App.vue                    # 应用入口（全局样式、登录状态检查）
+├── pages.json                 # 页面路由 + TabBar 配置
+├── App.vue                    # 应用入口（全局样式、全局状态）
 ├── main.js                    # Vue 入口
 ├── uni.scss                   # 主题色变量
 ├── package.json               # Node.js 依赖 + 编译脚本
 ├── vue.config.js              # Webpack 构建配置（UNI_INPUT_DIR、输出目录）
 ├── postcss.config.js          # PostCSS 配置
 ├── pages/
+│   ├── clan/
+│   │   ├── clan.vue           # 部落主页（TabBar 页，自定义顶栏）
+│   │   └── detail.vue         # 成员详情（子页，原生导航栏）
+│   ├── war/
+│   │   ├── war.vue            # 战斗主页（TabBar 页，自定义顶栏）
+│   │   └── detail.vue         # 战绩详情（子页，原生导航栏）
+│   ├── account/
+│   │   └── account.vue        # 账号主页（TabBar 页，自定义顶栏）
+│   ├── settings/
+│   │   └── settings.vue       # 设置主页（TabBar 页，自定义顶栏）
 │   ├── login/
-│   │   └── login.vue          # 微信登录页
-│   ├── bind/
-│   │   └── bind.vue           # 游戏账号绑定页
-│   └── index/
-│       └── index.vue          # 首页（用户信息 + 功能入口）
+│   │   └── login.vue          # 微信登录页（已有，整合到设置流程）
+│   └── bind/
+│       └── bind.vue           # 游戏账号绑定页（已有，整合到设置流程）
+├── components/
+│   └── TopBar.vue             # 自定义顶部栏组件（预留 buttons props）
 ├── utils/
 │   └── api.js                 # API 请求封装
 ├── patches/
@@ -43,7 +54,272 @@ uni-app/
 
 ---
 
-## 页面说明
+## 页面架构
+
+### 整体布局模型
+
+采用**三层布局**：
+
+```
+┌──────────────────────────────────┐
+│ 状态栏（系统，微信自动处理）        │
+├──────────────────────────────────┤
+│  上控制区域（自定义顶栏）          │  ← 每个主页面不同
+│  按钮右对齐，后续按页面功能设计    │     主页面无 < 返回
+├──────────────────────────────────┤
+│                                  │
+│       中间展示区域                │  ← 各页面不同，后续设计
+│                                  │
+├──────────────────────────────────┤
+│  下控制区域（原生 tabBar）        │  ← 全局固定 4 按钮
+│  [部落]  [战斗]  [账号]  [设置]   │
+│  (系统自动处理 iPhone 底部安全区)  │
+└──────────────────────────────────┘
+```
+
+### TabBar 设计
+
+使用 uni-app 原生 `tabBar` 实现底部 4 个固定按钮，始终可见（除子页面外）：
+
+| 按钮 | 对应页面 | 职责 |
+|------|---------|------|
+| **部落** | 部落主页 | 部落信息、成员列表、部落动态 |
+| **战斗** | 战斗主页 | 联赛战绩、战斗记录、排名 |
+| **账号** | 账号主页 | 个人信息、绑定管理、我的数据 |
+| **设置** | 设置主页 | 系统设置、关于、退出登录、登录/绑定 |
+
+> **方案选择**：使用 uni-app 原生 `tabBar`（方案 A），而非完全自定义。原因：
+> 1. 原生切换动画流畅，页面状态自动缓存
+> 2. uni-app 自动处理跨平台适配（iOS/Android App、各小程序平台）
+> 3. 开发量少，代码量少
+> 4. 不需要动态隐藏 TabBar 或角标等高级功能
+
+### 页面清单 & 路由
+
+| 路由 | 页面 | 类型 | TabBar | 顶部栏 |
+|------|------|------|--------|--------|
+| `pages/clan/clan` | 部落主页 | Tab 页 | ✅ 部落 | 自定义顶栏（按钮后续设计） |
+| `pages/war/war` | 战斗主页 | Tab 页 | ✅ 战斗 | 自定义顶栏（按钮后续设计） |
+| `pages/account/account` | 账号主页 | Tab 页 | ✅ 账号 | 自定义顶栏（按钮后续设计） |
+| `pages/settings/settings` | 设置主页 | Tab 页 | ✅ 设置 | 自定义顶栏（按钮后续设计） |
+| `pages/clan/detail` | 成员详情 | 子页 | ❌ | 原生导航栏 `< 返回` |
+| `pages/war/detail` | 战绩详情 | 子页 | ❌ | 原生导航栏 `< 返回` |
+| `pages/login/login` | 微信登录 | 子页 | ❌ | 原生导航栏 `< 返回` |
+| `pages/bind/bind` | 绑定账号 | 子页 | ❌ | 原生导航栏 `< 返回` |
+
+### 登录/绑定流程
+
+登录和绑定整合到「设置」页面内：
+
+```
+用户进入小程序
+    │
+    ▼
+TabBar「设置」页
+    │
+    ├── 已登录？──→ 显示用户信息 + 设置项 + 退出按钮
+    │
+    └── 未登录？──→ 显示登录入口（点击进入登录流程）
+                      │
+                      ▼
+                  登录页（子页 navigateTo）
+                      │
+                      ├── 已绑定？──→ 返回设置页（显示用户信息）
+                      └── 未绑定？──→ 绑定页（子页 navigateTo）
+                                        │
+                                        └── 完成 → 返回设置页
+```
+
+### 各页面职责 & 顶部栏预留
+
+#### 1. 部落 `pages/clan/clan`
+
+| 项目 | 内容 |
+|------|------|
+| **职责** | 部落列表、成员列表、搜索筛选 |
+| **顶栏标题** | 部落 |
+| **顶栏按钮（预留）** | 后续根据功能确定，如：筛选、搜索、切换部落 |
+| **中间区域（后续设计）** | 部落信息卡片 + 成员列表 |
+
+#### 2. 战斗 `pages/war/war`
+
+| 项目 | 内容 |
+|------|------|
+| **职责** | 联赛战绩、战斗记录、排名 |
+| **顶栏标题** | 战斗 |
+| **顶栏按钮（预留）** | 后续根据功能确定，如：月份选择、刷新 |
+| **中间区域（后续设计）** | 联赛战绩列表 + 排名 |
+
+#### 3. 账号 `pages/account/account`
+
+| 项目 | 内容 |
+|------|------|
+| **职责** | 个人信息展示、数据统计 |
+| **顶栏标题** | 账号 |
+| **顶栏按钮（预留）** | 后续根据功能确定，如：编辑 |
+| **中间区域（后续设计）** | 用户卡片 + 个人数据 + 历史记录 |
+
+#### 4. 设置 `pages/settings/settings`
+
+| 项目 | 内容 |
+|------|------|
+| **职责** | 登录/绑定、系统设置、关于、退出 |
+| **顶栏标题** | 设置 |
+| **顶栏按钮（预留）** | 可能不需要按钮 |
+| **中间区域（后续设计）** | 登录入口 / 已登录状态 + 设置项列表 + 退出登录 |
+
+### 页面切换关系
+
+```
+                    ┌──────────────┐
+                    │   小程序启动   │
+                    └──────┬───────┘
+                           │
+                    ┌──────▼───────┐
+                    │   TabBar     │
+                    │   [设置] 页   │  ← 默认进入设置（检测登录状态）
+                    └──────────────┘
+                           │
+              ┌────────────┼────────────┐
+              ▼            ▼            ▼
+         未登录         已登录        其他 TabBar 页
+              │            │          可正常使用
+              ▼            ▼
+        login.vue     settings.vue
+              │       （用户信息+设置项+退出）
+              ▼
+         已绑定？──是──→ settings.vue
+              │否
+              ▼
+         bind.vue
+              │
+              ▼
+         settings.vue
+```
+
+### TopBar 组件接口（预留）
+
+```javascript
+// TopBar.vue props
+{
+  title: String,           // 标题文字，如 "部落"
+  buttons: Array           // 右侧按钮列表，后续按页面需求传入
+  // buttons 结构（预留）:
+  // [
+  //   { key: 'filter', icon: '🔍', action: 'onFilter' },
+  //   { key: 'search', icon: '⏬', action: 'onSearch' }
+  // ]
+}
+```
+
+顶部栏通过 `$emit` 向上传递按钮点击事件，各页面自行处理：
+
+```
+┌──────────────────────────────────┐
+│  部落                    🔍  ⏬  │  ← TopBar 组件
+│                                  │     title="部落"
+├──────────────────────────────────┤     buttons=[...]
+│  中间内容（clan.vue）             │
+```
+
+### pages.json 配置草案
+
+```json
+{
+  "pages": [
+    {
+      "path": "pages/clan/clan",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "部落"
+      }
+    },
+    {
+      "path": "pages/war/war",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "战斗"
+      }
+    },
+    {
+      "path": "pages/account/account",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "账号"
+      }
+    },
+    {
+      "path": "pages/settings/settings",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "设置"
+      }
+    },
+    {
+      "path": "pages/login/login",
+      "style": {
+        "navigationBarTitleText": "微信登录"
+      }
+    },
+    {
+      "path": "pages/bind/bind",
+      "style": {
+        "navigationBarTitleText": "绑定游戏账号"
+      }
+    },
+    {
+      "path": "pages/clan/detail",
+      "style": {
+        "navigationBarTitleText": "成员详情"
+      }
+    },
+    {
+      "path": "pages/war/detail",
+      "style": {
+        "navigationBarTitleText": "战绩详情"
+      }
+    }
+  ],
+  "tabBar": {
+    "color": "#8890a0",
+    "selectedColor": "#4a90d9",
+    "backgroundColor": "#1a1a2e",
+    "borderStyle": "black",
+    "list": [
+      {
+        "pagePath": "pages/clan/clan",
+        "text": "部落"
+      },
+      {
+        "pagePath": "pages/war/war",
+        "text": "战斗"
+      },
+      {
+        "pagePath": "pages/account/account",
+        "text": "账号"
+      },
+      {
+        "pagePath": "pages/settings/settings",
+        "text": "设置"
+      }
+    ]
+  },
+  "globalStyle": {
+    "navigationBarTextStyle": "white",
+    "navigationBarTitleText": "苍穹联赛助手",
+    "navigationBarBackgroundColor": "#1a1a2e",
+    "backgroundColor": "#0f0f23"
+  }
+}
+```
+
+> **注意**：4 个 TabBar 页用 `navigationStyle: "custom"` 隐藏原生导航栏，自己画顶栏；子页面（登录/绑定/详情）用原生导航栏，自带 `<` 返回按钮。
+
+---
+
+## 现有页面说明（旧架构，待重构）
+
+以下页面为当前已实现的页面，后续将按上述新架构重构：
 
 ### 1. 登录页 (`pages/login/login`)
 
@@ -96,6 +372,8 @@ uni-app/
   - 🔗 绑定/修改游戏账号
 - 退出登录（清除 token + 跳转登录页）
 - `onShow` 时自动刷新用户信息（`GET /api/wechat/me`）
+
+> ⚠️ 上述 3 个页面为当前已实现页面，将在新架构中：`index.vue` 废弃（功能拆分到 4 个主页面），`login.vue` 和 `bind.vue` 保留为设置流程子页。
 
 ---
 
@@ -481,8 +759,33 @@ sudo nginx -t && sudo systemctl reload nginx
 
 ## 待开发功能
 
-- [ ] 成员列表页（调用 `GET /api/members`）
-- [ ] 成员详情页
-- [ ] 联赛数据展示
-- [ ] 管理员面板（role=admin 可见）
+### 前端重构（架构迁移）
+
+- [ ] 创建 `pages/clan/clan.vue`（部落主页，TabBar 页，自定义顶栏）
+- [ ] 创建 `pages/war/war.vue`（战斗主页，TabBar 页，自定义顶栏）
+- [ ] 创建 `pages/account/account.vue`（账号主页，TabBar 页，自定义顶栏）
+- [ ] 创建 `pages/settings/settings.vue`（设置主页，TabBar 页，自定义顶栏）
+- [ ] 创建 `components/TopBar.vue`（自定义顶部栏组件）
+- [ ] 创建 `pages/clan/detail.vue`（成员详情，子页，空壳）
+- [ ] 创建 `pages/war/detail.vue`（战绩详情，子页，空壳）
+- [ ] 重写 `pages.json`（加入 TabBar + 新页面路由）
+- [ ] 调整 `App.vue`（去掉首页登录检查，改到设置页）
+- [ ] 废弃 `pages/index/index.vue`（功能拆分到 4 个主页面）
+
+### 功能开发（按页面）
+
+- [ ] 部落主页：成员列表展示、搜索筛选
+- [ ] 战斗主页：联赛战绩列表、排名、月份切换
+- [ ] 账号主页：个人数据展示、历史记录
+- [ ] 设置主页：登录/绑定流程、系统设置、退出登录
+- [ ] 成员详情页：完整个人档案
+- [ ] 战绩详情页：联赛战绩明细
 - [ ] 微信用户信息获取（`wx.getUserProfile` 获取昵称和头像）
+
+### 后端 API（配合前端）
+
+- [ ] `GET /api/wechat/me` 增强（join accounts 表，返回游戏数据）
+- [ ] `GET /api/members` 增强（支持 search/clan_tag/status 筛选）
+- [ ] `GET /api/league/teams` 新增（返回某月队伍配置）
+- [ ] `GET /api/league/results` 新增（返回某月联赛战绩）
+- [ ] `GET /api/members/{player_tag}` 新增（成员详情含报名+战绩历史）
