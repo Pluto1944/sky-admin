@@ -4,7 +4,8 @@
  */
 
 // 后端 API 基地址
-const BASE_URL = 'https://api.skycoc.cc'
+// 备案完成前临时用 IP 访问
+const BASE_URL = 'https://115.159.64.19'
 
 /**
  * 通用请求方法

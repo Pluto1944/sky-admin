@@ -37,7 +37,8 @@ export default {
     }
   },
   globalData: {
-    apiBase: 'https://api.skycoc.cc',
+    // 备案完成前临时用 IP 访问
+    apiBase: 'https://115.159.64.19',
     userInfo: null,
     isLoggedIn: false
   }
