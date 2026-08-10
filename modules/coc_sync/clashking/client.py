@@ -137,12 +137,15 @@ def aggregate_players(cwl_wars: list[dict], clan_tag: str) -> list[dict]:
         clan_tag: 目标部落标签
 
     Returns:
-        [{tag, name, total_stars, total_attacks}, ...]
-        格式与 Supercell 官方 API 的 _fetch_team_players() 返回值完全一致
+        [{tag, name, total_stars, total_attacks, offense_3stars, defense_3stars, defense_total}, ...]
     """
     normalized = _normalize_tag(clan_tag)
     player_stats: dict[str, dict] = defaultdict(
-        lambda: {"tag": "", "name": "", "total_stars": 0, "total_attacks": 0},
+        lambda: {
+            "tag": "", "name": "",
+            "total_stars": 0, "total_attacks": 0,
+            "offense_3stars": 0, "defense_3stars": 0, "defense_total": 0,
+        },
     )
 
     for war in cwl_wars:
@@ -152,19 +155,42 @@ def aggregate_players(cwl_wars: list[dict], clan_tag: str) -> list[dict]:
         # 确定哪边是我们的部落
         if _normalize_tag(clan.get("tag", "")) == normalized:
             our_side = clan
+            enemy_side = opponent
         elif _normalize_tag(opponent.get("tag", "")) == normalized:
             our_side = opponent
+            enemy_side = clan
         else:
             continue
 
+        # 我方成员：原始 tag → normalized tag 的映射（用于防守数据匹配）
+        our_tags: dict[str, str] = {}  # normalized_tag → original_tag
+        for m in our_side.get("members", []):
+            our_tags[_normalize_tag(m["tag"])] = m["tag"]
+
+        # ── 进攻数据：遍历我方成员 ──
         for m in our_side.get("members", []):
             ptag = m["tag"]
-            stars = sum(a.get("stars", 0) for a in m.get("attacks", []))
+            attacks = m.get("attacks", [])
+            stars = sum(a.get("stars", 0) for a in attacks)
+            three_stars = sum(1 for a in attacks if a.get("stars", 0) == 3)
+
             rec = player_stats[ptag]
             rec["tag"] = ptag
             rec["name"] = m["name"]
             rec["total_stars"] += stars
-            rec["total_attacks"] += len(m.get("attacks", []))
+            rec["total_attacks"] += len(attacks)
+            rec["offense_3stars"] += three_stars
+
+        # ── 防守数据：遍历对手成员，检查攻击目标是否为我方成员 ──
+        for m in enemy_side.get("members", []):
+            for a in m.get("attacks", []):
+                defender_normalized = _normalize_tag(a.get("defenderTag", ""))
+                if defender_normalized in our_tags:
+                    original_tag = our_tags[defender_normalized]
+                    rec = player_stats[original_tag]
+                    rec["defense_total"] += 1
+                    if a.get("stars", 0) == 3:
+                        rec["defense_3stars"] += 1
 
     return [
         {
@@ -172,6 +198,9 @@ def aggregate_players(cwl_wars: list[dict], clan_tag: str) -> list[dict]:
             "name": rec["name"],
             "total_stars": rec["total_stars"],
             "total_attacks": rec["total_attacks"],
+            "offense_3stars": rec["offense_3stars"],
+            "defense_3stars": rec["defense_3stars"],
+            "defense_total": rec["defense_total"],
         }
         for rec in player_stats.values()
     ]

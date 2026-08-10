@@ -23,6 +23,7 @@ import json
 import os
 import sqlite3
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -107,6 +108,7 @@ def _fetch_via_local_json(team_alias: str, period: str) -> tuple[list[dict] | No
     """通道2：从本地 data/cwl_YYYYMM/X_alias.json 读取队伍战绩。
 
     返回格式与 _fetch_via_clashking() 一致。
+    注意：本地 JSON 没有防守数据，defense_3stars/defense_total 返回 0。
     Returns:
         (players, reason): players 为 None 表示失败，reason 为失败原因
     """
@@ -124,7 +126,8 @@ def _fetch_via_local_json(team_alias: str, period: str) -> tuple[list[dict] | No
         if team_data.get("team_name", "") == team_alias:
             return [
                 {"tag": p["tag"], "name": p["name"],
-                 "total_stars": p["total_stars"], "total_attacks": p["total_attacks"]}
+                 "total_stars": p["total_stars"], "total_attacks": p["total_attacks"],
+                 "offense_3stars": 0, "defense_3stars": 0, "defense_total": 0}
                 for p in team_data.get("players", [])
             ], ""
 
@@ -199,8 +202,13 @@ def _fetch_and_write(period: str, teams: list[TeamInfo]) -> tuple[list[str], int
                 continue
 
             account_name = known_tags[tag]
+            fetched_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
             raw_metrics = {
                 "total_stars": p["total_stars"],
+                "offense_3stars": p.get("offense_3stars", 0),
+                "offense_total": p["total_attacks"],
+                "defense_3stars": p.get("defense_3stars", 0),
+                "defense_total": p.get("defense_total", 0),
                 "team_name": team_alias,
                 "clan_tag": clan_tag,
                 "team_index": team_index,
@@ -210,8 +218,10 @@ def _fetch_and_write(period: str, teams: list[TeamInfo]) -> tuple[list[str], int
             conn.execute(
                 """INSERT INTO league_results
                    (period, team_index, team_alias, team_name, clan_tag, category,
-                    player_tag, account_name, total_stars, attacks, raw_metrics)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    player_tag, account_name, total_stars, attacks,
+                    offense_3stars, defense_3stars, defense_total, fetched_at,
+                    raw_metrics)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(period, team_index, player_tag) DO UPDATE SET
                    team_alias = excluded.team_alias,
                    team_name = excluded.team_name,
@@ -219,11 +229,17 @@ def _fetch_and_write(period: str, teams: list[TeamInfo]) -> tuple[list[str], int
                    account_name = excluded.account_name,
                    total_stars = excluded.total_stars,
                    attacks = excluded.attacks,
+                   offense_3stars = excluded.offense_3stars,
+                   defense_3stars = excluded.defense_3stars,
+                   defense_total = excluded.defense_total,
+                   fetched_at = excluded.fetched_at,
                    raw_metrics = excluded.raw_metrics""",
                 (
                     period, team_index, team_alias, team_name, clan_tag,
                     LEAGUE_COMBAT, tag, account_name,
                     p["total_stars"], p["total_attacks"],
+                    p.get("offense_3stars", 0), p.get("defense_3stars", 0),
+                    p.get("defense_total", 0), fetched_at,
                     json.dumps(raw_metrics, ensure_ascii=False),
                 ),
             )
@@ -307,8 +323,14 @@ def _cold_start_from_json(period: str) -> tuple[list[str], int, int]:
                 continue
 
             account_name = known_tags[tag]
+            # 冷启动数据来源标记为 local_json，区别于 ClashKing API 拉取
+            fetched_at = "local_json"
             raw_metrics = {
                 "total_stars": p["total_stars"],
+                "offense_3stars": 0,
+                "offense_total": p["total_attacks"],
+                "defense_3stars": 0,
+                "defense_total": 0,
                 "team_name": team_alias,
                 "clan_tag": clan_tag,
                 "team_index": team_index,
@@ -317,8 +339,10 @@ def _cold_start_from_json(period: str) -> tuple[list[str], int, int]:
             conn.execute(
                 """INSERT INTO league_results
                    (period, team_index, team_alias, team_name, clan_tag, category,
-                    player_tag, account_name, total_stars, attacks, raw_metrics)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    player_tag, account_name, total_stars, attacks,
+                    offense_3stars, defense_3stars, defense_total, fetched_at,
+                    raw_metrics)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(period, team_index, player_tag) DO UPDATE SET
                    team_alias = excluded.team_alias,
                    team_name = excluded.team_name,
@@ -326,11 +350,16 @@ def _cold_start_from_json(period: str) -> tuple[list[str], int, int]:
                    account_name = excluded.account_name,
                    total_stars = excluded.total_stars,
                    attacks = excluded.attacks,
+                   offense_3stars = excluded.offense_3stars,
+                   defense_3stars = excluded.defense_3stars,
+                   defense_total = excluded.defense_total,
+                   fetched_at = excluded.fetched_at,
                    raw_metrics = excluded.raw_metrics""",
                 (
                     period, team_index, team_alias, coc_team_name, clan_tag,
                     LEAGUE_COMBAT, tag, account_name,
                     p["total_stars"], p["total_attacks"],
+                    0, 0, 0, fetched_at,
                     json.dumps(raw_metrics, ensure_ascii=False),
                 ),
             )

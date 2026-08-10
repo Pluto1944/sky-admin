@@ -51,6 +51,13 @@
       "style": {
         "navigationBarTitleText": "战绩详情"
       }
+    },
+    {
+      "path": "pages/clan/stats",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "联赛战绩"
+      }
     }
   ],
   "tabBar": {
@@ -58,7 +65,6 @@
     "selectedColor": "#4a90d9",
     "backgroundColor": "#1a1a2e",
     "borderStyle": "black",
-    "fontSize": "14px",
     "list": [
       {
         "pagePath": "pages/clan/clan",

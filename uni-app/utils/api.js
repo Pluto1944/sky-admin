@@ -97,9 +97,20 @@ export function getMembers() {
   return request('/api/members')
 }
 
+/**
+ * 获取联赛战绩统计（滚动窗口三星率）
+ * @param {string} period - 基准月份 YYYY-MM，不传则自动取当前 CWL 月份
+ * @returns {Promise} { period, stats: [{ player_tag, account_name, town_hall_level, offense_1m, ... }] }
+ */
+export function getLeagueStats(period) {
+  const query = period ? `?period=${period}` : ''
+  return request(`/api/clan/league-stats${query}`)
+}
+
 export default {
   wechatLogin,
   getMyInfo,
   bindAccount,
-  getMembers
+  getMembers,
+  getLeagueStats
 }

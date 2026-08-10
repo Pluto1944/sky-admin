@@ -114,6 +114,10 @@ CREATE TABLE IF NOT EXISTS league_results (
     account_name    TEXT,
     total_stars     INTEGER,
     attacks         INTEGER,
+    offense_3stars  INTEGER DEFAULT 0,
+    defense_3stars  INTEGER DEFAULT 0,
+    defense_total   INTEGER DEFAULT 0,
+    fetched_at      TEXT,
     raw_metrics     TEXT,
     UNIQUE(period, team_index, player_tag),
     FOREIGN KEY(player_tag) REFERENCES accounts(player_tag)
@@ -225,6 +229,17 @@ class Database:
 
         if any(c in acc_cols for c in _OBSOLETE_ACCOUNT_COLS):
             self._rebuild_accounts(acc_cols)
+
+        # league_results 新增列迁移（league-stats 功能）
+        lr_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(league_results)")}
+        if "offense_3stars" not in lr_cols:
+            self.conn.execute("ALTER TABLE league_results ADD COLUMN offense_3stars INTEGER DEFAULT 0")
+        if "defense_3stars" not in lr_cols:
+            self.conn.execute("ALTER TABLE league_results ADD COLUMN defense_3stars INTEGER DEFAULT 0")
+        if "defense_total" not in lr_cols:
+            self.conn.execute("ALTER TABLE league_results ADD COLUMN defense_total INTEGER DEFAULT 0")
+        if "fetched_at" not in lr_cols:
+            self.conn.execute("ALTER TABLE league_results ADD COLUMN fetched_at TEXT")
 
         self.conn.commit()
         self.conn.execute("PRAGMA foreign_keys = ON")

@@ -30,7 +30,7 @@ export default {
   },
   methods: {
     onRecord() {
-      uni.showToast({ title: '战绩功能开发中', icon: 'none' })
+      uni.navigateTo({ url: '/pages/clan/stats' })
     },
     onFilter() {
       uni.showToast({ title: '筛选功能开发中', icon: 'none' })
