@@ -206,6 +206,124 @@ def aggregate_players(cwl_wars: list[dict], clan_tag: str) -> list[dict]:
     ]
 
 
+def aggregate_regular_war_players(regular_wars: list[dict], clan_tag: str) -> list[dict]:
+    """从普通部落战列表中汇总指定部落的玩家战绩（只统计满星前的数据）。
+
+    与 aggregate_players() 的关键区别：
+    - 按 order 字段全局排序所有攻击，只统计满星前的攻击/防守数据
+    - 进攻与防守独立判断：我方满星后不再计入进攻，对手满星后不再计入防守
+    - 满星 = teamSize * 3
+    - 返回每场每人的独立记录（而非跨场汇总）
+
+    Args:
+        regular_wars: 非 CWL 的战争列表
+        clan_tag: 目标部落标签
+
+    Returns:
+        [{tag, name, total_stars, total_attacks, offense_3stars, defense_3stars, defense_total,
+          end_time, town_hall_level}, ...]
+        每条记录对应一场战争中的一个玩家
+    """
+    normalized = _normalize_tag(clan_tag)
+    all_records: list[dict] = []
+
+    for war in regular_wars:
+        team_size = war.get("teamSize", 0)
+        if team_size == 0:
+            continue
+        max_stars = team_size * 3
+
+        clan = war.get("clan", {})
+        opponent = war.get("opponent", {})
+
+        # 确定哪边是我们的部落
+        if _normalize_tag(clan.get("tag", "")) == normalized:
+            our_side = clan
+            enemy_side = opponent
+        elif _normalize_tag(opponent.get("tag", "")) == normalized:
+            our_side = opponent
+            enemy_side = clan
+        else:
+            continue
+
+        war_end_time = war.get("endTime", "")
+
+        # 我方成员 tag 映射（用于防守数据匹配）
+        our_tags: dict[str, str] = {}
+        for m in our_side.get("members", []):
+            our_tags[_normalize_tag(m["tag"])] = m["tag"]
+
+        # 初始化本场所有我方玩家的统计
+        war_stats: dict[str, dict] = {}
+        for m in our_side.get("members", []):
+            war_stats[m["tag"]] = {
+                "tag": m["tag"],
+                "name": m["name"],
+                "town_hall_level": m.get("townHallLevel", 0),
+                "total_stars": 0,
+                "total_attacks": 0,
+                "offense_3stars": 0,
+                "defense_3stars": 0,
+                "defense_total": 0,
+                "end_time": war_end_time,
+            }
+
+        # ── 收集所有攻击，统一按 order 排序 ──
+        all_attacks: list[dict] = []
+
+        for m in our_side.get("members", []):
+            for a in m.get("attacks", []):
+                all_attacks.append({
+                    "order": a.get("order", 0),
+                    "side": "our",
+                    "player_tag": m["tag"],
+                    "stars": a.get("stars", 0),
+                })
+
+        for m in enemy_side.get("members", []):
+            for a in m.get("attacks", []):
+                all_attacks.append({
+                    "order": a.get("order", 0),
+                    "side": "enemy",
+                    "defender_tag": a.get("defenderTag", ""),
+                    "stars": a.get("stars", 0),
+                })
+
+        all_attacks.sort(key=lambda x: x["order"])
+
+        # ── 按 order 遍历，只统计满星前的数据 ──
+        our_stars = 0
+        enemy_stars = 0
+
+        for atk in all_attacks:
+            if atk["side"] == "our":
+                # 进攻：我方满星前才计入
+                if our_stars < max_stars:
+                    ptag = atk["player_tag"]
+                    if ptag in war_stats:
+                        war_stats[ptag]["total_stars"] += atk["stars"]
+                        war_stats[ptag]["total_attacks"] += 1
+                        if atk["stars"] == 3:
+                            war_stats[ptag]["offense_3stars"] += 1
+                our_stars += atk["stars"]
+            else:
+                # 防守：对手满星前才计入
+                if enemy_stars < max_stars:
+                    defender_normalized = _normalize_tag(atk["defender_tag"])
+                    if defender_normalized in our_tags:
+                        original_tag = our_tags[defender_normalized]
+                        if original_tag in war_stats:
+                            war_stats[original_tag]["defense_total"] += 1
+                            if atk["stars"] == 3:
+                                war_stats[original_tag]["defense_3stars"] += 1
+                enemy_stars += atk["stars"]
+
+        # 本场所有玩家记录加入总列表
+        all_records.extend(war_stats.values())
+
+    return all_records
+
+
 def fetch_cwl_players(clan_tag: str, period: str) -> tuple[list[dict] | None, str]:
     """一站式接口：拉取指定部落指定月份的 CWL 玩家战绩。
 

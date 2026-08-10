@@ -107,10 +107,19 @@ export function getLeagueStats(period) {
   return request(`/api/clan/league-stats${query}`)
 }
 
+/**
+ * 获取部落战战绩统计（按场次滚动窗口三星率）
+ * @returns {Promise} { period, stats: [{ player_tag, account_name, town_hall_level, offense_5, ... }] }
+ */
+export function getWarStats() {
+  return request('/api/clan/war-stats')
+}
+
 export default {
   wechatLogin,
   getMyInfo,
   bindAccount,
   getMembers,
-  getLeagueStats
+  getLeagueStats,
+  getWarStats
 }

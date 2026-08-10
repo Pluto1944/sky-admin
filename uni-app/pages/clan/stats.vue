@@ -1,6 +1,16 @@
 <template>
   <view class="page-container">
-    <TopBar title="联赛战绩" :showBack="true" />
+    <TopBar title="战绩" :showBack="true" />
+
+    <!-- 标签切换栏 -->
+    <view class="tab-bar">
+      <view class="tab-item" :class="{ active: tab === 'war' }" @tap="switchTab('war')">
+        <text>部落战(满星前)</text>
+      </view>
+      <view class="tab-item" :class="{ active: tab === 'league' }" @tap="switchTab('league')">
+        <text>联赛</text>
+      </view>
+    </view>
 
     <view v-if="loading" class="loading-box"><text class="loading-text">加载中...</text></view>
 
@@ -40,7 +50,25 @@
 
 <script>
 import TopBar from '@/components/TopBar.vue'
-import { getLeagueStats } from '@/utils/api.js'
+import { getLeagueStats, getWarStats } from '@/utils/api.js'
+
+const WAR_COLUMNS = [
+  { key: 'offense_5', line1: '进攻', line2: '前5场' },
+  { key: 'offense_15', line1: '进攻', line2: '前15场' },
+  { key: 'offense_45', line1: '进攻', line2: '前45场' },
+  { key: 'defense_5', line1: '防守', line2: '前5场' },
+  { key: 'defense_15', line1: '防守', line2: '前15场' },
+  { key: 'defense_45', line1: '防守', line2: '前45场' }
+]
+
+const LEAGUE_COLUMNS = [
+  { key: 'offense_1m', line1: '进攻', line2: '上月' },
+  { key: 'offense_3m', line1: '进攻', line2: '前3月' },
+  { key: 'offense_6m', line1: '进攻', line2: '前6月' },
+  { key: 'defense_1m', line1: '防守', line2: '上月' },
+  { key: 'defense_3m', line1: '防守', line2: '前3月' },
+  { key: 'defense_6m', line1: '防守', line2: '前6月' }
+]
 
 export default {
   components: { TopBar },
@@ -48,19 +76,15 @@ export default {
     return {
       loading: true,
       stats: [],
-      sortKey: 'offense_6m',
-      sortOrder: 'desc',
-      columns: [
-        { key: 'offense_1m', line1: '进攻', line2: '上月' },
-        { key: 'offense_3m', line1: '进攻', line2: '前3月' },
-        { key: 'offense_6m', line1: '进攻', line2: '前6月' },
-        { key: 'defense_1m', line1: '防守', line2: '上月' },
-        { key: 'defense_3m', line1: '防守', line2: '前3月' },
-        { key: 'defense_6m', line1: '防守', line2: '前6月' }
-      ]
+      tab: 'war',
+      sortKey: 'offense_45',
+      sortOrder: 'desc'
     }
   },
   computed: {
+    columns() {
+      return this.tab === 'war' ? WAR_COLUMNS : LEAGUE_COLUMNS
+    },
     sortedStats() {
       const arr = [...this.stats]
       const key = this.sortKey; const order = this.sortOrder
@@ -75,9 +99,19 @@ export default {
   },
   onLoad() { this.fetchData() },
   methods: {
+    switchTab(t) {
+      if (this.tab === t) return
+      this.tab = t
+      this.sortKey = t === 'war' ? 'offense_45' : 'offense_6m'
+      this.sortOrder = 'desc'
+      this.fetchData()
+    },
     async fetchData() {
       this.loading = true
-      try { const res = await getLeagueStats(); this.stats = res.stats || [] }
+      try {
+        const res = this.tab === 'war' ? await getWarStats() : await getLeagueStats()
+        this.stats = res.stats || []
+      }
       catch (e) { uni.showToast({ title: '加载失败', icon: 'none' }) }
       finally { this.loading = false }
     },
@@ -93,14 +127,14 @@ export default {
       if (val === null || val === undefined) return '#666'
       // 防守：越低越好（≤4场被三星绿色，5~6场黄色，>6场红色）
       if (colKey && colKey.startsWith('defense')) {
-        if (val <= 0.571) return '#00b894'      // ≤ 4/7 ≈ 57.1%
-        if (val <= 0.857) return '#fdcb6e'      // ≤ 6/7 ≈ 85.7%
-        return '#e17055'                          // > 6/7 ≈ 85.7%
+        if (val <= 0.571) return '#00b894'
+        if (val <= 0.857) return '#fdcb6e'
+        return '#e17055'
       }
       // 进攻：越高越好（>6场三星绿色，5~6场黄色，≤4场红色）
-      if (val > 0.857) return '#00b894'          // > 6/7 ≈ 85.7%
-      if (val > 0.571) return '#fdcb6e'          // > 4/7 ≈ 57.1%
-      return '#e17055'                            // ≤ 4/7 ≈ 57.1%
+      if (val > 0.857) return '#00b894'
+      if (val > 0.571) return '#fdcb6e'
+      return '#e17055'
     }
   }
 }
@@ -108,6 +142,11 @@ export default {
 
 <style>
 .page-container { height: 100vh; display: flex; flex-direction: column; background: #0f0f23; }
+
+.tab-bar { display: flex; flex-shrink: 0; height: 72rpx; background: #141428; border-bottom: 1rpx solid #1a1a2e; }
+.tab-item { flex: 1; display: flex; align-items: center; justify-content: center; font-size: 28rpx; color: #666; transition: all 0.2s; }
+.tab-item.active { color: #4a90d9; font-weight: 600; border-bottom: 4rpx solid #4a90d9; }
+
 .loading-box { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
 .empty-box { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
 .loading-text { font-size: 28rpx; color: #888; }

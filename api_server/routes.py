@@ -234,6 +234,107 @@ def league_stats(
     }
 
 
+# ── 部落战战绩统计 ──────────────────────────────────────────────
+
+
+@router.get("/clan/war-stats")
+def war_stats(
+    db: Database = Depends(get_db),
+):
+    """获取部落战战绩统计（按场次滚动窗口三星率）。
+
+    返回每个战营成员的 6 列滚动三星率：
+        offense_5, offense_15, offense_45,
+        defense_5, defense_15, defense_45
+
+    窗口定义：按 end_time 倒序取每个玩家各自最近 N 场的数据。
+    """
+    conn = db.conn
+
+    # 确定基准月份（用于筛选战营成员）
+    period = _get_current_period()
+
+    # ── 1. 查询当月战营成员 ──
+    member_rows = conn.execute(
+        """SELECT a.player_tag, a.account_name, a.town_hall_level
+           FROM registrations r
+           JOIN accounts a ON a.account_name = r.account_name
+           WHERE r.period = ?
+             AND r.account_type = ?
+           ORDER BY a.account_name""",
+        (period, LEAGUE_COMBAT),
+    ).fetchall()
+
+    if not member_rows:
+        return {"stats": [], "period": period}
+
+    member_tags = {r["player_tag"] for r in member_rows}
+
+    # ── 2. 查询 war_results 表，按 end_time 倒序 ──
+    wr_rows = conn.execute(
+        """SELECT wr.player_tag, wr.end_time, wr.attacks, wr.offense_3stars,
+                  wr.defense_3stars, wr.defense_total
+           FROM war_results wr
+           WHERE wr.clan_tag = '#2QQ'
+             AND wr.player_tag IN (
+                 SELECT a.player_tag
+                 FROM registrations r
+                 JOIN accounts a ON a.account_name = r.account_name
+                 WHERE r.period = ? AND r.account_type = ?
+             )
+           ORDER BY wr.end_time DESC""",
+        (period, LEAGUE_COMBAT),
+    ).fetchall()
+
+    # ── 3. 按 player_tag 分组，截取最近 N 场 ──
+    # player_tag → [{end_time, attacks, offense_3stars, defense_3stars, defense_total}, ...]
+    # 已按 end_time DESC 排序，直接按顺序分组即可
+    player_wars: dict[str, list[dict]] = defaultdict(list)
+    for row in wr_rows:
+        player_wars[row["player_tag"]].append({
+            "attacks": row["attacks"] or 0,
+            "offense_3stars": row["offense_3stars"] or 0,
+            "defense_3stars": row["defense_3stars"] or 0,
+            "defense_total": row["defense_total"] or 0,
+        })
+
+    windows = {"5": 5, "15": 15, "45": 45}
+
+    def _aggregate_window(war_list: list[dict], n: int) -> dict[str, int]:
+        """取 war_list 前 n 场，累计战绩数据。"""
+        subset = war_list[:n]
+        return {
+            "offense_3stars": sum(w["offense_3stars"] for w in subset),
+            "attacks": sum(w["attacks"] for w in subset),
+            "defense_3stars": sum(w["defense_3stars"] for w in subset),
+            "defense_total": sum(w["defense_total"] for w in subset),
+        }
+
+    # ── 4. 组装返回结果 ──
+    result = []
+    for member in member_rows:
+        tag = member["player_tag"]
+        wars = player_wars.get(tag, [])
+
+        item = {
+            "player_tag": tag,
+            "account_name": member["account_name"],
+            "town_hall_level": member["town_hall_level"],
+        }
+
+        for wk_key, wk_n in windows.items():
+            agg = _aggregate_window(wars, wk_n)
+            item[f"offense_{wk_key}"] = _calc_rate(agg["offense_3stars"], agg["attacks"])
+            item[f"defense_{wk_key}"] = _calc_rate(agg["defense_3stars"], agg["defense_total"])
+
+        result.append(item)
+
+    return {
+        "period": period,
+        "stats": result,
+    }
+
+
 # ── 微信小程序接口 ──────────────────────────────────────────────
 
 

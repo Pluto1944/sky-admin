@@ -138,12 +138,33 @@ CREATE TABLE IF NOT EXISTS wechat_users (
 );
 """
 
+_WAR_RESULTS_DDL = """
+CREATE TABLE IF NOT EXISTS war_results (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    clan_tag        TEXT NOT NULL,
+    player_tag      TEXT NOT NULL,
+    account_name    TEXT,
+    town_hall_level INTEGER,
+    end_time        TEXT NOT NULL,
+    total_stars     INTEGER DEFAULT 0,
+    attacks         INTEGER DEFAULT 0,
+    offense_3stars  INTEGER DEFAULT 0,
+    defense_3stars  INTEGER DEFAULT 0,
+    defense_total   INTEGER DEFAULT 0,
+    fetched_at      TEXT,
+    raw_metrics     TEXT,
+    UNIQUE(clan_tag, player_tag, end_time),
+    FOREIGN KEY(player_tag) REFERENCES accounts(player_tag)
+);
+"""
+
 _CHILDREN_DDL = (
     _REGISTRATIONS_DDL.format(table="registrations")
     + _RESULTS_DDL
     + _LEAGUE_TEAMS_DDL
     + _LEAGUE_RESULTS_DDL
     + _WECHAT_USERS_DDL
+    + _WAR_RESULTS_DDL
 )
 
 _SCHEMA = _ACCOUNTS_DDL.format(table="accounts") + _CHILDREN_DDL
@@ -241,6 +262,11 @@ class Database:
         if "fetched_at" not in lr_cols:
             self.conn.execute("ALTER TABLE league_results ADD COLUMN fetched_at TEXT")
 
+        # war_results 表迁移（部落战战绩功能）
+        wr_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(war_results)")}
+        if not wr_cols:
+            self.conn.execute(_WAR_RESULTS_DDL)
+
         self.conn.commit()
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.execute("PRAGMA legacy_alter_table = OFF")
@@ -297,7 +323,7 @@ class Database:
     def reset(self) -> None:
         """清空并重建所有业务表（历史数据清零）。"""
         self.conn.execute("PRAGMA foreign_keys = OFF")
-        for table in ("league_results", "league_teams", "results", "registrations", "accounts"):
+        for table in ("war_results", "league_results", "league_teams", "results", "registrations", "accounts"):
             self.conn.execute(f"DROP TABLE IF EXISTS {table}")
         self.conn.commit()
         self.conn.execute("PRAGMA foreign_keys = ON")
