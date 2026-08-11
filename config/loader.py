@@ -45,3 +45,13 @@ def _validate(cfg: dict) -> None:
         cat = team.get("category")
         if cat not in ("combat", "shell"):
             raise ConfigLoadError(f"队伍 {team.get('name')} 的 category 值非法: {cat}")
+
+    # 校验部落 category 值合法
+    VALID_CLAN_CATEGORIES = {"combat", "normal", "farm", "flat"}
+    for clan in cfg.get("coc_sync", {}).get("clans", []):
+        cat = clan.get("category")
+        if cat is not None and cat not in VALID_CLAN_CATEGORIES:
+            raise ConfigLoadError(
+                f"部落 {clan.get('name', clan.get('tag'))} 的 category 值非法: {cat}"
+                f"（合法值: {', '.join(sorted(VALID_CLAN_CATEGORIES))}）"
+            )

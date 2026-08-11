@@ -58,6 +58,13 @@
         "navigationStyle": "custom",
         "navigationBarTitleText": "联赛战绩"
       }
+    },
+    {
+      "path": "pages/clan/farm",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "互刷部落"
+      }
     }
   ],
   "tabBar": {

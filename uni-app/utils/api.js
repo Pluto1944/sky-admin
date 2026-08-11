@@ -115,11 +115,20 @@ export function getWarStats() {
   return request('/api/clan/war-stats')
 }
 
+/**
+ * 获取互刷部落配置（实时 + 去速本后）
+ * @returns {Promise} { clans: [{ clan_tag, clan_name, category, member_count, realtime, despeed }] }
+ */
+export function getFarmConfig() {
+  return request('/api/clan/farm-config')
+}
+
 export default {
   wechatLogin,
   getMyInfo,
   bindAccount,
   getMembers,
   getLeagueStats,
-  getWarStats
+  getWarStats,
+  getFarmConfig
 }

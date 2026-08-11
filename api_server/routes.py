@@ -23,7 +23,7 @@ from modules.player.repository import PlayerRepository
 from .deps import get_repo, get_db
 from .auth import create_token, require_user
 from shared.db.connection import Database
-from config import DB_PATH, LEAGUE_COMBAT
+from config import DB_PATH, LEAGUE_COMBAT, get_farm_clans
 
 router = APIRouter(prefix="/api")
 
@@ -332,6 +332,47 @@ def war_stats(
     return {
         "period": period,
         "stats": result,
+    }
+
+
+# ── 互刷部落配置 ──────────────────────────────────────────────
+
+
+@router.get("/clan/farm-config")
+def farm_config(db: Database = Depends(get_db)):
+    """获取所有互刷部落的实时配置和去速本配置。
+
+    从 farm_stats 缓存表读取（由定时脚本 sync_farm_stats.py 刷新），毫秒级响应。
+    返回每个 farm 类别部落的：
+    - 部落实时配置（从部落成员统计各 TH 分布）
+    - 部落去速本后实时配置（从部落战数据用阶段归类法统计）
+    - updated_at 数据更新时间
+    """
+    conn = db.conn
+    rows = conn.execute(
+        "SELECT clan_tag, clan_name, category, member_count, stats_json, updated_at "
+        "FROM farm_stats"
+    ).fetchall()
+
+    if not rows:
+        return {"clans": [], "updated_at": None}
+
+    # 按配置中的互刷部落顺序排列（一营 → 八营）
+    tag_order = {c["tag"]: i for i, c in enumerate(get_farm_clans())}
+    rows = sorted(rows, key=lambda r: tag_order.get(r["clan_tag"], 999))
+
+    import json
+    clans = []
+    for row in rows:
+        try:
+            stats = json.loads(row["stats_json"])
+        except (json.JSONDecodeError, TypeError):
+            stats = {}
+        clans.append(stats)
+
+    return {
+        "clans": clans,
+        "updated_at": rows[0]["updated_at"] if rows else None,
     }
 
 

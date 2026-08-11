@@ -158,6 +158,17 @@ CREATE TABLE IF NOT EXISTS war_results (
 );
 """
 
+_FARM_STATS_DDL = """
+CREATE TABLE IF NOT EXISTS farm_stats (
+    clan_tag     TEXT PRIMARY KEY,
+    clan_name    TEXT,
+    category     TEXT DEFAULT 'farm',
+    member_count INTEGER DEFAULT 0,
+    stats_json   TEXT NOT NULL,
+    updated_at   TEXT
+);
+"""
+
 _CHILDREN_DDL = (
     _REGISTRATIONS_DDL.format(table="registrations")
     + _RESULTS_DDL
@@ -165,6 +176,7 @@ _CHILDREN_DDL = (
     + _LEAGUE_RESULTS_DDL
     + _WECHAT_USERS_DDL
     + _WAR_RESULTS_DDL
+    + _FARM_STATS_DDL
 )
 
 _SCHEMA = _ACCOUNTS_DDL.format(table="accounts") + _CHILDREN_DDL
@@ -266,6 +278,11 @@ class Database:
         wr_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(war_results)")}
         if not wr_cols:
             self.conn.execute(_WAR_RESULTS_DDL)
+
+        # farm_stats 表迁移（互刷部落缓存）
+        fs_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(farm_stats)")}
+        if not fs_cols:
+            self.conn.execute(_FARM_STATS_DDL)
 
         self.conn.commit()
         self.conn.execute("PRAGMA foreign_keys = ON")

@@ -44,9 +44,26 @@ PLAYER_EXPORT_SHEET: str = _cfg["player"]["export"]["sheet_name"]
 # 部落同步（原 modules/coc_sync/config.py）
 # ============================================================================
 CLANS: list[dict] = _cfg["coc_sync"]["clans"]
+# 确保每个 clan 有默认 category
+for _clan in CLANS:
+    _clan.setdefault("category", "normal")
 ALLIANCE_CLAN_TAGS: list[str] = [c["tag"] for c in CLANS]
 DUP_ACROSS_CLANS: str = _cfg["coc_sync"]["dup_across_clans"]
 FAIL_FAST: bool = _cfg["coc_sync"]["fail_fast"]
+
+
+def get_farm_clans() -> list[dict]:
+    """获取所有 category=farm（互刷）且 enabled 的部落列表。"""
+    return [c for c in CLANS if c.get("category") == "farm" and c.get("enabled", True)]
+
+
+# 部落类别中文映射
+CLAN_CATEGORY_LABELS: dict[str, str] = {
+    "combat": "战营",
+    "normal": "混营实战",
+    "farm": "互刷",
+    "flat": "偷矿",
+}
 
 # ============================================================================
 # 联赛报名（原 modules/cwl_registration/config.py）

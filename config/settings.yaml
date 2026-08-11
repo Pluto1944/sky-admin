@@ -60,42 +60,55 @@ coc_sync:
   clans:
     - tag: "#2QQ"
       name: "云深不知处 战营"
+      category: combat
       enabled: true
     - tag: "#LQR"
       name: "秋雨不问梧桐意"
+      category: normal
       enabled: true
     - tag: "#U2L"
       name: "仙境"
+      category: flat
       enabled: true
     - tag: "#2COUL898"
       name: "Avalon"
+      category: normal
       enabled: true
     - tag: "#YCOC"
       name: "Minecraft(互刷一营)"
+      category: farm
       enabled: true
     - tag: "#9V9"
       name: "清风追明月(互刷二营)"
+      category: farm
       enabled: true
     - tag: "#U2UL"
       name: "白马啸西风(互刷三营)"
+      category: farm
       enabled: true
     - tag: "#R88U8"
       name: "苍穹(互刷四营)"
+      category: farm
       enabled: true
     - tag: "#2LRQ88JQR"
       name: "新手村(互刷五营)"
+      category: farm
       enabled: true
     - tag: "#U89"
       name: "执手听风吟(互刷六营)"
+      category: farm
       enabled: true
     - tag: "#2JU"
       name: "清夜坠玄天(互刷七营)"
+      category: farm
       enabled: true
     - tag: "#L0YLR02L"
       name: "冰风谷wy(互刷八营)"
+      category: farm
       enabled: true
     # - tag: "#YYYYY"
     #   name: "苍穹三部"
+    #   category: farm
     #   enabled: false
 
   dup_across_clans: warn          # warn | silent

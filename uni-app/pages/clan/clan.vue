@@ -1,7 +1,7 @@
 <template>
   <view class="page-container">
     <!-- 自定义顶部栏 -->
-    <TopBar title="部落" :buttons="topButtons" @onFilter="onFilter" @onSearch="onSearch" @onRecord="onRecord" />
+    <TopBar title="部落" :buttons="topButtons" @onFilter="onFilter" @onSearch="onSearch" @onRecord="onRecord" @onFarm="onFarm" />
 
     <!-- 中间展示区域 -->
     <view class="content">
@@ -23,6 +23,7 @@ export default {
     return {
       topButtons: [
         { key: 'record', icon: '⚔️', text: '战绩', action: 'onRecord' },
+        { key: 'farm', icon: '🔄', text: '互刷', action: 'onFarm' },
         { key: 'filter', icon: '⏬', text: '筛选', action: 'onFilter' },
         { key: 'search', icon: '🔍', text: '搜索', action: 'onSearch' }
       ]
@@ -31,6 +32,9 @@ export default {
   methods: {
     onRecord() {
       uni.navigateTo({ url: '/pages/clan/stats' })
+    },
+    onFarm() {
+      uni.navigateTo({ url: '/pages/clan/farm' })
     },
     onFilter() {
       uni.showToast({ title: '筛选功能开发中', icon: 'none' })
