@@ -8,9 +8,12 @@
 
 | 日期 | 操作 | 脚本 |
 |------|------|------|
-| 每天 | COC API 同步成员 | `sync_and_export.sh` |
-| 每月 7 号 | 拉取 CWL 战绩 | `fetch_cwl_data.sh` |
+| 每天 8:00 | COC API 同步成员（自动） | `sky-sync-accounts.timer` |
+| 每天 9:00 | 拉取部落战数据（自动） | `sky-sync-war.timer` |
+| 每 30 分钟 | 同步互刷统计数据（自动） | `sky-sync-farm.timer` |
+| 每月 28 号 | 拉取 CWL 战绩（自动） | `sky-sync-cwl.timer` |
 | 每月底 | 报名导入 → 编排+升降级 → 发布 | `register_and_arrange.sh` |
+| 日常 | 管理定时任务 | `manage-cron.sh` |
 
 ---
 
@@ -90,9 +93,9 @@ python cli.py arrange --period 2026-08 -o 2026-08名单.xlsx
 
 ---
 
-## 三、sync_and_export.sh（长期维护入口）
+## 三、sync_and_export.sh（由 systemd timer 替代）
 
-**场景**：适合放进 cron 定时执行（如每天 08:00），保持 player 数据库与 COC 官方数据同步。
+**当前状态**：`sky-sync-accounts.timer` 每天 8:00 自动执行，对应的 service 只调 `cli.py coc-sync`（步骤 [1]）。如需导出到腾讯文档（步骤 [2]），需单独手动执行。
 
 ### 流程
 
@@ -103,10 +106,12 @@ python cli.py arrange --period 2026-08 -o 2026-08名单.xlsx
 
 ### 对应 CLI 命令
 
-| 步骤 | 命令 | 对应代码 |
-|------|------|---------|
-| [1] | `python cli.py coc-sync` | `coc_sync/service.py` → `player/service.py` |
-| [2] | `python cli.py player-export --to tencent -o <fileId>` | `player/exporter.py` |
+| 步骤 | 命令 | 对应代码 | 是否自动化 |
+|------|------|---------|-----------|
+| [1] | `python cli.py coc-sync` | `coc_sync/service.py` → `player/service.py` | 是（timer 自动） |
+| [2] | `python cli.py player-export --to tencent -o <fileId>` | `player/exporter.py` | 否（手动触发） |
+
+> 定时任务的详细管理方式（状态查看、手动执行、日志查询、重启等）请参见 [periodic-scripts.md](./periodic-scripts.md)。
 
 ---
 
@@ -232,10 +237,11 @@ data/
 
 ### 日常维护
 
-- [ ] 每天 `sync_and_export.sh`（建议 cron 08:00）
+- [ ] 确认定时任务正常运行：`bash scripts/manage-cron.sh status`
 - [ ] 检查退部对账统计（退部人数是否异常）
 - [ ] 腾讯文档 access_token 到期前 3 天续期
 - [ ] 定期备份 `data/league.db`
+- [ ] 修改代码后记得重启对应 timer：`bash scripts/manage-cron.sh restart <任务名>`
 
 ---
 
