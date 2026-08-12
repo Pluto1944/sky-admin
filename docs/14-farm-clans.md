@@ -1,6 +1,6 @@
 # 互刷部落功能设计文档
 
-> 版本: v1.2 | 日期: 2026-08-11
+> 版本: v1.3 | 日期: 2026-08-12
 
 ---
 
@@ -93,25 +93,25 @@ topButtons: [
 #### 3.2.2 表格一：部落实时配置（大本数目）
 
 ```
-平均             18   17   16   15   14   13   12   other
-{avg_th}         x    x    x    x    x    x    x    x
+平均             18   17   16   15   14   13   12   11   other
+{avg_th}         x    x    x    x    x    x    x    x    x
 ```
 
 - 数据来源：COC 官方 API `GET /clans/{clanTag}/members`
 - 统计方法：遍历部落成员列表，统计每个大本等级（townHallLevel）的成员数量
 - 平均大本：`sum(各成员大本等级) / 成员总数`，保留 1 位小数
-- `other`：大本 11、10 及 10 以下的合计
+- `other`：大本 10 及 10 以下的合计（11 本单独列示）
 
 #### 3.2.3 表格二：部落去速本后实时配置（大本数目）
 
 ```
-平均             18   17   16   15   14   13   12   other
-{avg_th}         x    x    x    x    x    x    x    x
+平均             18   17   16   15   14   13   12   11   other
+{avg_th}         x    x    x    x    x    x    x    x    x
 ```
 
 - 数据来源：COC 官方 API `GET /clans/{clanTag}/currentwar`
 - 如果部落当前无进行中的部落战（state 不是 inWar 或 preparation），显示提示文字 **"当前无部落战"**
-- `other`：去速本后大本 11、10 及 10 以下的合计
+- `other`：去速本后大本 10 及 10 以下的合计（11 本单独列示）
 
 ---
 
@@ -159,7 +159,7 @@ topButtons: [
 - `realtime`：部落实时配置（从部落成员数据统计），distribution 包含 18-10 及 `below_10`
 - `despeed`：去速本后配置（从部落战数据统计），仅统计本方成员
   - `has_war: false` 时表示当前无部落战（状态不是 `inWar` 或 `preparation`）
-  - 前端将 11、10、below_10 合并显示为 `other` 列
+  - 前端表格列示 18-11 本，将 10、below_10 合并显示为 `other` 列
 - `updated_at`：数据最后刷新时间，前端展示"数据更新于 MM-DD HH:mm"
 - `clans` 按配置文件中的部落顺序排列（一营 → 八营）
 

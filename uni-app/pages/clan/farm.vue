@@ -14,6 +14,7 @@
     </view>
 
     <scroll-view v-else scroll-y class="content-scroll">
+      <view class="scroll-inner">
       <view v-if="updatedAt" class="update-time">
         <text class="update-text">数据更新于 {{ updatedAt }}</text>
       </view>
@@ -30,15 +31,17 @@
         <!-- 表格一：部落实时配置 -->
         <view class="table-section">
           <view class="table-title">部落实时配置（大本数目）</view>
-          <view class="tr tr-head">
-            <text class="td td-avg">平均</text>
-            <text class="td" v-for="lv in thLevels" :key="lv">{{ lv }}</text>
-            <text class="td">other</text>
-          </view>
-          <view class="tr tr-data">
-            <text class="td td-avg">{{ clan.realtime.avg_th }}</text>
-            <text class="td" v-for="lv in thLevels" :key="lv">{{ clan.realtime.distribution[lv] || 0 }}</text>
-            <text class="td">{{ otherCount(clan.realtime.distribution) }}</text>
+          <view class="table-body">
+            <view class="tr tr-head">
+              <text class="td td-avg">平均</text>
+              <text class="td" v-for="lv in thLevels" :key="lv">{{ lv }}</text>
+              <text class="td">other</text>
+            </view>
+            <view class="tr tr-data">
+              <text class="td td-avg">{{ clan.realtime.avg_th }}</text>
+              <text class="td" v-for="lv in thLevels" :key="lv">{{ clan.realtime.distribution[lv] || 0 }}</text>
+              <text class="td">{{ otherCount(clan.realtime.distribution) }}</text>
+            </view>
           </view>
         </view>
 
@@ -46,15 +49,17 @@
         <view class="table-section">
           <view class="table-title">部落去速本后实时配置（大本数目）</view>
           <view v-if="clan.despeed.has_war">
-            <view class="tr tr-head">
-              <text class="td td-avg">平均</text>
-              <text class="td" v-for="lv in thLevels" :key="lv">{{ lv }}</text>
-              <text class="td">other</text>
-            </view>
-            <view class="tr tr-data">
-              <text class="td td-avg">{{ clan.despeed.avg_th }}</text>
-              <text class="td" v-for="lv in thLevels" :key="lv">{{ clan.despeed.distribution[lv] || 0 }}</text>
-              <text class="td">{{ otherCount(clan.despeed.distribution) }}</text>
+            <view class="table-body">
+              <view class="tr tr-head">
+                <text class="td td-avg">平均</text>
+                <text class="td" v-for="lv in thLevels" :key="lv">{{ lv }}</text>
+                <text class="td">other</text>
+              </view>
+              <view class="tr tr-data">
+                <text class="td td-avg">{{ clan.despeed.avg_th }}</text>
+                <text class="td" v-for="lv in thLevels" :key="lv">{{ clan.despeed.distribution[lv] || 0 }}</text>
+                <text class="td">{{ otherCount(clan.despeed.distribution) }}</text>
+              </view>
             </view>
           </view>
           <view v-else class="no-war">
@@ -64,6 +69,7 @@
       </view>
 
       <view class="bottom-space"></view>
+      </view>
     </scroll-view>
   </view>
 </template>
@@ -80,7 +86,7 @@ export default {
       error: '',
       clans: [],
       updatedAt: '',
-      thLevels: ['18', '17', '16', '15', '14', '13', '12']
+      thLevels: ['18', '17', '16', '15', '14', '13', '12', '11']
     }
   },
   created() {
@@ -112,7 +118,7 @@ export default {
       return `${month}-${day} ${hour}:${min}`
     },
     otherCount(dist) {
-      return (dist['11'] || 0) + (dist['10'] || 0) + (dist['below_10'] || 0)
+      return (dist['10'] || 0) + (dist['below_10'] || 0)
     }
   }
 }
@@ -143,6 +149,8 @@ export default {
 .content-scroll {
   flex: 1;
   height: 0;
+}
+.scroll-inner {
   padding: 20rpx 24rpx 0;
 }
 
@@ -161,8 +169,10 @@ export default {
   background: #1a1a2e;
   border-radius: 16rpx;
   margin-bottom: 30rpx;
-  overflow: hidden;
   border: 1rpx solid #2a2a4a;
+  overflow: visible;
+  box-sizing: border-box;
+  width: 100%;
 }
 
 .clan-header {
@@ -206,22 +216,23 @@ export default {
   font-weight: 500;
 }
 
+/* 表格体容器 */
+.table-body {
+  background: rgba(74, 144, 217, 0.08);
+  border-radius: 8rpx;
+  overflow: hidden;
+}
+
 /* 行 */
 .tr {
   display: flex;
   flex-direction: row;
   align-items: center;
   height: 72rpx;
-}
-.tr-head {
-  background: rgba(74, 144, 217, 0.08);
-  border-radius: 8rpx 8rpx 0 0;
-  flex-shrink: 0;
+  width: 100%;
 }
 .tr-data {
   background: rgba(255, 255, 255, 0.03);
-  border-radius: 0 0 8rpx 8rpx;
-  flex-shrink: 0;
 }
 
 /* 单元格 */
@@ -230,8 +241,8 @@ export default {
   text-align: center;
   font-size: 24rpx;
   color: #c0c0c0;
-  padding: 0 8rpx;
-  width: 56rpx;
+  padding: 0 4rpx;
+  width: 52rpx;
   line-height: 72rpx;
 }
 .td-label {
@@ -241,9 +252,11 @@ export default {
   font-weight: 500;
 }
 .td-avg {
+  flex-shrink: 0;
   width: 64rpx;
   color: #4a90d9;
   font-weight: 600;
+  padding: 0 4rpx;
 }
 
 .tr-head .td {
