@@ -84,3 +84,12 @@ python scripts/fetch_cwl_data.py --period 2026-07
 | `load_env.sh` | 公共环境变量加载器，被其他脚本 source |
 | `sync_and_export.sh` | 长期维护：COC 同步 → 导出玩家档案 |
 | `fetch_cwl_data.sh` | `fetch_cwl_data.py` 的便捷包装 |
+
+---
+
+## `scheduler.py` — 周期数据刷新调度器
+
+统一管理 4 类周期刷新任务，状态存 `sync_jobs` 表。
+
+- **运维命令 / CLI 用法**：见 [`../deploy/README.md`](../deploy/README.md)「四、运维命令速查 → 2. sky-scheduler 服务管理」
+- **设计文档**：见 [`../docs/15-scheduler.md`](../docs/15-scheduler.md)

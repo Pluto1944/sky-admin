@@ -6,8 +6,13 @@
 
 用法：
     python scripts/sync_farm_stats.py          # 单次同步
-    python scripts/sync_farm_stats.py --loop   # 循环模式（每 30 分钟一次）
-    python scripts/sync_farm_stats.py --loop --interval 60  # 自定义间隔（分钟）
+    python scripts/sync_farm_stats.py --loop   # 循环模式（每 30 分钟一次）【已废弃】
+    python scripts/sync_farm_stats.py --loop --interval 60  # 自定义间隔（分钟）【已废弃】
+
+注意：--loop 常驻模式已由 scripts/scheduler.py 统一接管（job_id=farm_stats），
+本脚本保留 --loop 仅为向后兼容，生产环境请用调度器：
+    python scripts/scheduler.py                     # 常驻调度
+    python scripts/scheduler.py --once farm_stats   # 手动触发一次
 """
 from __future__ import annotations
 

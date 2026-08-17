@@ -1,0 +1,18 @@
+[Unit]
+Description=Sky Admin Periodic Sync Scheduler
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/YANG/sky-admin
+Environment="PATH=/home/ubuntu/YANG/sky-admin/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="SKY_ADMIN_ENV=production"
+ExecStart=/home/ubuntu/YANG/sky-admin/venv/bin/python scripts/scheduler.py
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/sky-scheduler.log
+StandardError=append:/var/log/sky-scheduler-error.log
+
+[Install]
+WantedBy=multi-user.target

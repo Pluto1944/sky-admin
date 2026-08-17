@@ -57,14 +57,18 @@ nginx -t && systemctl reload nginx
 # 5. 配置 systemd 服务
 echo -e "${GREEN}[5/8] 配置 systemd 守护进程...${NC}"
 cp deploy/sky-admin.service /etc/systemd/system/
+cp deploy/sky-scheduler.service /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable sky-admin
+systemctl enable sky-scheduler
 
 # 6. 启动服务
-echo -e "${GREEN}[6/8] 启动 FastAPI 服务...${NC}"
+echo -e "${GREEN}[6/8] 启动 FastAPI 服务与调度器...${NC}"
 systemctl restart sky-admin
+systemctl restart sky-scheduler
 sleep 2
 systemctl status sky-admin --no-pager
+systemctl status sky-scheduler --no-pager
 
 # 7. 申请 HTTPS 证书（需要域名 DNS 已生效 + 安全组已开放 443）
 echo -e "${GREEN}[7/8] 申请 HTTPS 证书...${NC}"
@@ -90,7 +94,10 @@ if [ -f /etc/letsencrypt/live/$DOMAIN/fullchain.pem ]; then
 fi
 echo ""
 echo "常用运维命令（详见 deploy/README.md）："
-echo "  sudo systemctl status sky-admin    查看服务状态"
-echo "  sudo systemctl restart sky-admin   重启服务"
-echo "  sudo journalctl -u sky-admin -f    查看实时日志"
+echo "  sudo systemctl status sky-admin      查看 FastAPI 服务状态"
+echo "  sudo systemctl restart sky-admin     重启 FastAPI 服务"
+echo "  sudo journalctl -u sky-admin -f      查看 FastAPI 实时日志"
+echo "  sudo systemctl status sky-scheduler  查看调度器状态"
+echo "  sudo systemctl restart sky-scheduler 重启调度器"
+echo "  sudo journalctl -u sky-scheduler -f  查看调度器实时日志"
 echo ""
