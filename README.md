@@ -91,7 +91,7 @@ modules/
   cwl_registration/          # ② CWL 报名：importer + roster(编排主控+Part4输出+公示发布) + sorter + rank_score + baseline_rebuilder(基准重建阶段0~6) + team_builder(贪心填充阶段7~9) + promotion(升降级纯函数)
   war_result/                # ③ 战绩：importer + history_score + repository
   coc_sync/                  # ④ COC 同步：api_client + mapper + config + service
-scripts/                     # 运维脚本：register_and_arrange.sh / publish_to_results.sh / sync_and_export.sh / load_env.sh
+scripts/                     # 运维脚本：register_and_arrange.sh / publish_to_results.sh / sync_and_export.sh / load_env.sh / scheduler.py（周期调度器）/ fetch_*.py（数据拉取）
 tests/                       # 按模块归类：shared / player / cwl_registration / war_result / coc_sync（15 个测试文件，135 用例全绿）
 ```
 

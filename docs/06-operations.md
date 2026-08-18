@@ -6,14 +6,16 @@
 
 ## 一、月度循环时间线
 
-| 日期 | 操作 | 脚本 |
+| 频率 | 操作 | 任务 |
 |------|------|------|
-| 每天 8:00 | COC API 同步成员（自动） | `sky-sync-accounts.timer` |
-| 每天 9:00 | 拉取部落战数据（自动） | `sky-sync-war.timer` |
-| 每 30 分钟 | 同步互刷统计数据（自动） | `sky-sync-farm.timer` |
-| 每月 28 号 | 拉取 CWL 战绩（自动） | `sky-sync-cwl.timer` |
+| 每 6 小时 | COC API 同步成员（自动） | `scheduler.py` → `coc_sync` |
+| 每天 | 拉取部落战数据（自动） | `scheduler.py` → `war_results` |
+| 每 30 分钟 | 同步互刷统计数据（自动） | `scheduler.py` → `farm_stats` |
+| 每月 12 号 | 拉取 CWL 战绩（自动） | `scheduler.py` → `cwl` |
 | 每月底 | 报名导入 → 编排+升降级 → 发布 | `register_and_arrange.sh` |
-| 日常 | 管理定时任务 | `manage-cron.sh` |
+| 日常 | 查看/管理调度任务 | `scheduler.py --list` 等 |
+
+> 周期任务统一由 `scripts/scheduler.py`（systemd 服务 `sky-scheduler`）接管，详见 [`15-scheduler.md`](./15-scheduler.md) 与 [`deploy/README.md`](../deploy/README.md)。旧的 `sky-sync-*.timer` + `manage-cron.sh` 方案已废弃。
 
 ---
 
@@ -93,9 +95,9 @@ python cli.py arrange --period 2026-08 -o 2026-08名单.xlsx
 
 ---
 
-## 三、sync_and_export.sh（由 systemd timer 替代）
+## 三、sync_and_export.sh（长期维护：COC 同步 → 导出档案）
 
-**当前状态**：`sky-sync-accounts.timer` 每天 8:00 自动执行，对应的 service 只调 `cli.py coc-sync`（步骤 [1]）。如需导出到腾讯文档（步骤 [2]），需单独手动执行。
+**当前状态**：步骤 [1]（COC 同步成员）已由调度器任务 `coc_sync` 自动执行（每 6 小时）。如需导出到腾讯文档（步骤 [2]），需单独手动执行。
 
 ### 流程
 
@@ -108,10 +110,10 @@ python cli.py arrange --period 2026-08 -o 2026-08名单.xlsx
 
 | 步骤 | 命令 | 对应代码 | 是否自动化 |
 |------|------|---------|-----------|
-| [1] | `python cli.py coc-sync` | `coc_sync/service.py` → `player/service.py` | 是（timer 自动） |
+| [1] | `python cli.py coc-sync` | `coc_sync/service.py` → `player/service.py` | 是（调度器 `coc_sync` 任务） |
 | [2] | `python cli.py player-export --to tencent -o <fileId>` | `player/exporter.py` | 否（手动触发） |
 
-> 定时任务的详细管理方式（状态查看、手动执行、日志查询、重启等）请参见 [periodic-scripts.md](./periodic-scripts.md)。
+> 调度任务的详细管理方式（状态查看、手动执行、日志查询、重启等）请参见 [`15-scheduler.md`](./15-scheduler.md) 与 [`deploy/README.md`](../deploy/README.md)。
 
 ---
 
@@ -237,11 +239,12 @@ data/
 
 ### 日常维护
 
-- [ ] 确认定时任务正常运行：`bash scripts/manage-cron.sh status`
+- [ ] 确认调度器正常运行：`sudo systemctl status sky-scheduler`
+- [ ] 确认各任务状态：`venv/bin/python scripts/scheduler.py --list`
 - [ ] 检查退部对账统计（退部人数是否异常）
 - [ ] 腾讯文档 access_token 到期前 3 天续期
 - [ ] 定期备份 `data/league.db`
-- [ ] 修改代码后记得重启对应 timer：`bash scripts/manage-cron.sh restart <任务名>`
+- [ ] 修改调度相关代码后重启：`sudo systemctl restart sky-scheduler`
 
 ---
 

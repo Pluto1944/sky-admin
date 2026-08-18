@@ -27,13 +27,16 @@ api_server/
 ## 启动方式
 
 ```bash
-# 开发环境
+# 开发环境（注意：--reload 手动起进程前，先停掉 systemd 服务，避免端口冲突）
 cd /home/ubuntu/YANG/sky-admin
+sudo systemctl stop sky-admin
 uvicorn api_server.app:app --host 0.0.0.0 --port 8000 --reload
 
 # 生产环境（通过 deploy/ 下的 systemd 服务管理）
-sudo systemctl start sky-admin-api
+sudo systemctl start sky-admin
 ```
+
+> ⚠️ **生产环境禁止手动 `uvicorn --reload` 起进程**。历史曾因手动起的 `0.0.0.0:8000 --reload` 进程占用端口，导致 systemd 的 `sky-admin` 服务崩溃循环（重启 11 万+ 次）。生产环境请始终通过 `systemctl` 管理，详见 [`deploy/README.md`](../deploy/README.md)。
 
 ---
 
@@ -283,20 +286,28 @@ allow_headers=["*"]
 ### Systemd 服务
 
 ```ini
-# /etc/systemd/system/sky-admin-api.service
+# /etc/systemd/system/sky-admin.service
 [Unit]
-Description=Sky Admin API Server
+Description=Sky Admin API Service
 After=network.target
 
 [Service]
+Type=simple
 User=ubuntu
 WorkingDirectory=/home/ubuntu/YANG/sky-admin
-ExecStart=/home/ubuntu/YANG/sky-admin/.venv/bin/uvicorn api_server.app:app --host 0.0.0.0 --port 8000
+Environment="PATH=/home/ubuntu/YANG/sky-admin/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="SKY_ADMIN_ENV=production"
+ExecStart=/home/ubuntu/YANG/sky-admin/venv/bin/uvicorn api_server.app:app --host 127.0.0.1 --port 8000 --workers 2
 Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/sky-admin.log
+StandardError=append:/var/log/sky-admin-error.log
 
 [Install]
 WantedBy=multi-user.target
 ```
+
+> 完整部署流程与运维命令见 [`deploy/README.md`](../deploy/README.md) 与 `deploy/deploy.sh`。
 
 ### Nginx 反向代理
 

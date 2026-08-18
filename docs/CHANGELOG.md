@@ -4,6 +4,16 @@
 
 ---
 
+## v1.4 — 周期调度器 + 双服务对等化（2026-08-17）
+
+- **新增周期调度器**：`scripts/scheduler.py` 统一管理 4 类周期刷新任务（`farm_stats`/`coc_sync`/`war_results`/`cwl`），状态落 `sync_jobs` 表，详见 `docs/15-scheduler.md`
+- **新增 systemd 单元**：`deploy/sky-scheduler.service`，与 `sky-admin` 平级，`deploy/deploy.sh` 一键部署两个服务
+- **服务运维文档对等化**：`deploy/README.md` 中 sky-admin 与 sky-scheduler 的服务管理/日志/测试/故障排查完全对等
+- **备案过渡期方案归档**：`deploy/README.md` 补充「备案前 IP 直连」临时方案说明与切换指引
+- **废弃旧方案**：`docs/periodic-scripts.md` 标注 systemd timer + cron 旧方案已废弃，保留存档
+
+---
+
 ## v1.3 — 互刷页面表格优化（2026-08-12）
 
 - **新增 TH11 列**：互刷部落表格新增"11"列单独列示，`other` 仅统计 10 本及以下
