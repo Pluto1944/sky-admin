@@ -229,6 +229,8 @@ GET /api/clan/league-stats?months=6
 **返回格式**：
 ```json
 {
+  "period": "2026-08",
+  "updated_at": "2026-08-17T11:46:19+00:00",
   "stats": [
     {
       "player_tag": "#2QU99V0QQ",
@@ -244,6 +246,8 @@ GET /api/clan/league-stats?months=6
   ]
 }
 ```
+
+> `updated_at` 为 `league_results` 表相关月份最近一次数据同步时间（`fetched_at` 最大值），供前端展示「数据更新于」。
 
 **成员筛选规则**：
 

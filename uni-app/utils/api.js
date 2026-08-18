@@ -100,7 +100,7 @@ export function getMembers() {
 /**
  * 获取联赛战绩统计（滚动窗口三星率）
  * @param {string} period - 基准月份 YYYY-MM，不传则自动取当前 CWL 月份
- * @returns {Promise} { period, stats: [{ player_tag, account_name, town_hall_level, offense_1m, ... }] }
+ * @returns {Promise} { period, updated_at, stats: [{ player_tag, account_name, town_hall_level, offense_1m, ... }] }
  */
 export function getLeagueStats(period) {
   const query = period ? `?period=${period}` : ''
@@ -109,7 +109,7 @@ export function getLeagueStats(period) {
 
 /**
  * 获取部落战战绩统计（按场次滚动窗口三星率）
- * @returns {Promise} { period, stats: [{ player_tag, account_name, town_hall_level, offense_5, ... }] }
+ * @returns {Promise} { period, updated_at, stats: [{ player_tag, account_name, town_hall_level, offense_5, ... }] }
  */
 export function getWarStats() {
   return request('/api/clan/war-stats')

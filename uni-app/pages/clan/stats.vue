@@ -20,6 +20,11 @@
     </view>
 
     <view v-else class="table-wrap">
+      <!-- 更新时间 -->
+      <view v-if="updatedAt" class="update-time">
+        <text class="update-text">数据更新于 {{ updatedAt }}</text>
+      </view>
+
       <!-- 表头 -->
       <view class="tr tr-head">
         <text class="td w-name">昵称</text>
@@ -76,6 +81,7 @@ export default {
     return {
       loading: true,
       stats: [],
+      updatedAt: '',
       tab: 'war',
       sortKey: 'offense_45',
       sortOrder: 'desc'
@@ -111,9 +117,21 @@ export default {
       try {
         const res = this.tab === 'war' ? await getWarStats() : await getLeagueStats()
         this.stats = res.stats || []
+        this.updatedAt = res.updated_at ? this.formatTime(res.updated_at) : ''
       }
       catch (e) { uni.showToast({ title: '加载失败', icon: 'none' }) }
       finally { this.loading = false }
+    },
+    formatTime(isoStr) {
+      if (!isoStr) return ''
+      // 把 UTC ISO 时间转成北京时间显示
+      const d = new Date(isoStr.replace('+00:00', 'Z'))
+      if (isNaN(d.getTime())) return isoStr
+      const month = (d.getMonth() + 1).toString().padStart(2, '0')
+      const day = d.getDate().toString().padStart(2, '0')
+      const hour = d.getHours().toString().padStart(2, '0')
+      const min = d.getMinutes().toString().padStart(2, '0')
+      return `${month}-${day} ${hour}:${min}`
     },
     onSort(key) {
       if (this.sortKey === key) { this.sortOrder = this.sortOrder === 'desc' ? 'asc' : 'desc' }
@@ -152,6 +170,10 @@ export default {
 .loading-text { font-size: 28rpx; color: #888; }
 .empty-icon { font-size: 80rpx; margin-bottom: 20rpx; }
 .empty-text { font-size: 28rpx; color: #888; }
+
+/* 更新时间 */
+.update-time { text-align: center; padding: 16rpx 0 4rpx; flex-shrink: 0; }
+.update-text { font-size: 24rpx; color: #556; }
 
 .table-wrap { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .tbody { flex: 1; height: 0; }

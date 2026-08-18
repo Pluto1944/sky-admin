@@ -108,6 +108,24 @@ def _calc_rate(numerator: int, denominator: int) -> Optional[float]:
     return round(numerator / denominator, 3)
 
 
+def _max_fetched_at(conn, table: str, column: str, values: list) -> Optional[str]:
+    """查询指定表最近一次数据同步时间（fetched_at 最大值）。
+
+    用于前端展示「数据更新于」信息。
+    fetched_at 可能包含非时间戳标记（如 "local_json"），需过滤掉。
+    """
+    placeholders = ",".join("?" for _ in values)
+    row = conn.execute(
+        f"""SELECT fetched_at FROM {table}
+            WHERE {column} IN ({placeholders})
+              AND fetched_at IS NOT NULL
+              AND fetched_at GLOB '[0-9][0-9][0-9][0-9]-*'
+            ORDER BY fetched_at DESC LIMIT 1""",
+        values,
+    ).fetchone()
+    return row["fetched_at"] if row else None
+
+
 @router.get("/clan/league-stats")
 def league_stats(
     period: Optional[str] = None,
@@ -228,9 +246,13 @@ def league_stats(
         }
         result.append(item)
 
+    # 数据更新时间：取相关月份 league_results 最近一次同步时间
+    updated_at = _max_fetched_at(conn, "league_results", "period", all_months)
+
     return {
         "period": period,
         "stats": result,
+        "updated_at": updated_at,
     }
 
 
@@ -329,9 +351,13 @@ def war_stats(
 
         result.append(item)
 
+    # 数据更新时间：取战营 war_results 最近一次同步时间
+    updated_at = _max_fetched_at(conn, "war_results", "clan_tag", ["#2QQ"])
+
     return {
         "period": period,
         "stats": result,
+        "updated_at": updated_at,
     }
 
 

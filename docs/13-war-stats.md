@@ -278,6 +278,8 @@ GET /api/clan/war-stats
 
 ```json
 {
+    "period": "2026-08",
+    "updated_at": "2026-08-17T12:20:54+00:00",
     "stats": [
         {
             "player_tag": "#2QU99V0QQ",
@@ -293,6 +295,8 @@ GET /api/clan/war-stats
     ]
 }
 ```
+
+> `updated_at` 为战营 `war_results` 表最近一次数据同步时间（`fetched_at` 最大值），供前端展示「数据更新于」。
 
 **实现逻辑**：
 
