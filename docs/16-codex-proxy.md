@@ -110,7 +110,25 @@ curl -sS -o /dev/null \
 
 ## 常见故障
 
-### Codex 持续 reconnecting
+### iOS App 连接后对话无响应
+
+现象：iOS Codex App 通过 SSH 连上服务器、能正常认证，但对话一直无响应或卡住；此时命令行 `codex exec` 通常仍能正常工作（它走独立会话，不经 app-server）。
+
+根因：多个 Codex 实例（VS Code 插件、iOS App，以及残留的孤儿 `app-server` 进程）共享同一套 `~/.codex/` 状态，互相争抢 thread 写锁，导致新连接创建会话失败。表现为 `~/.codex/app-server-control/app-server.log` 中反复出现 `thread-store conflict: thread ... already has an active writer`。
+
+排查：
+
+```bash
+# 查看所有 app-server 进程，重点关注 PPID=1 的孤儿进程和重复实例
+ps -eo pid,ppid,lstart,etime,cmd | grep -i 'app-server'
+
+# 查看 app-server 日志（去除 ANSI 颜色码）
+sed 's/\x1b\[[0-9;]*m//g' ~/.codex/app-server-control/app-server.log | tail -20
+```
+
+恢复：终止冲突的残留 `app-server` 进程（尤其是 PPID=1 的孤儿进程），iOS App 会自动重连并启动干净的 app-server；清理后日志应不再新增 `thread-store conflict` 错误。
+
+注意：`app-server.log` 中出现的 `403 Country, region, or territory not supported` 属于历史登录 token 交换失败的旧记录，需结合时间戳判断是否与本次连接相关，不要仅凭该错误误判为代理问题。清理进程会影响 VS Code 插件与 iOS App 的当前连接，操作前应确认无正在进行的会话。
 
 1. 检查 `codex-mihomo` 是否为 `active`。
 2. 检查 `127.0.0.1:7890` 是否正在监听。
