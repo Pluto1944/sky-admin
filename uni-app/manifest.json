@@ -37,6 +37,7 @@
       "condition": false
     },
     "usingComponents": true,
+    "lazyCodeLoading": "requiredComponents",
     "permission": {},
     "requiredBackgroundModes": [],
     "requiredPrivateInfos": [],
