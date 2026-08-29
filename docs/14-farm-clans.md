@@ -117,6 +117,20 @@ topButtons: [
 
 ## 4. 后端 API 设计
 
+### 4.3 成员速本候选（规划）
+
+互刷页面的“成员”Tab 只展示配置中的 `category=farm` 部落，并按部落分别列出成员。第一阶段仅识别速本，不直接等同于可替换人员。
+
+速本度定义为：
+
+```text
+速本度 = 当前大本等级 - 去速本后大本等级
+```
+
+速本度大于 0 的成员列为速本候选；0 表示正常。去速本等级沿用当前部落战按 `mapPosition` 的阶段归类算法。无有效部落战时不计算个人速本度。后续再结合职位、活跃度、参战情况和部落最低人数决定最终可替换人员。
+
+成员级速本数据与部落级实时/去速本汇总由同一次 `sync_farm_stats.py` 统一获取和计算，写入同一条 `farm_stats.stats_json`。部落 Tab 读取 `realtime`/`despeed`，成员 Tab 读取 `replace_candidates`，两者必须使用同一场战争数据，并通过 `despeed_source`、`despeed_war_time` 标明来源和时间。当前阶段只使用 `currentwar` 的 `preparation`/`inWar` 数据；无有效部落战时 `replace_candidates` 为空，不将全部成员误判为速本。
+
 ### 4.1 `GET /api/clan/farm-config`
 
 获取所有互刷部落的实时配置和去速本配置。**从 `farm_stats` 缓存表读取（毫秒级响应）**，数据由定时脚本 `scripts/sync_farm_stats.py` 定期刷新。
@@ -397,7 +411,7 @@ CREATE TABLE IF NOT EXISTS farm_stats (
 
 4. **错误处理**：
    - 单个部落 API 调用失败时，该部落在返回中标记 `error` 字段，不阻塞其他部落
-   - 部落战数据不可用时（state 不是 `inWar` 或 `preparation`），`despeed.has_war = false`，前端显示"当前无部落战"
+   - 部落战状态为 `preparation` 或 `inWar` 时均计算去速本；状态为其他值时显示"当前无部落战"。若 `currentwar` 请求失败，`despeed.error` 保留错误信息，前端提示重新同步，避免与无战争混淆。
    - 缓存表为空时，API 返回 `{"clans": [], "updated_at": null}`
 
 5. **配置兼容**：`category` 字段为可选，缺失时默认 `"normal"`，确保向后兼容。

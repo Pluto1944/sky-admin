@@ -47,11 +47,8 @@ def fetch_current_war(clan_tag: str) -> dict | None:
     如果 state 不是 inWar 或 preparation，返回 None。
     """
     client = CocApiClient()
-    try:
-        encoded = _encode_tag(clan_tag)
-        data = client._get(f"/clans/%23{encoded}/currentwar")
-    except Exception:
-        return None
+    encoded = _encode_tag(clan_tag)
+    data = client._get(f"/clans/%23{encoded}/currentwar")
     if not isinstance(data, dict):
         return None
     state = data.get("state", "")
@@ -148,6 +145,24 @@ def calc_despeed_config(war_data: dict) -> dict:
     return {"avg_th": avg_th, "distribution": distribution}
 
 
+def calc_member_rushed(war_data: dict) -> list[dict]:
+    """返回本方参战成员的个人去速本等级和速本度。"""
+    all_members = []
+    for side_key in ("clan", "opponent"):
+        side = war_data.get(side_key, {})
+        for m in side.get("members", []):
+            th = m.get("townhallLevel", 0); pos = m.get("mapPosition", 999)
+            if isinstance(th, int) and th > 0:
+                all_members.append((pos, th, side_key == "clan", m))
+    all_members.sort(key=lambda x: x[0])
+    stage = None; result = []
+    for pos, th, is_clan, member in all_members:
+        if stage is None or th < stage: stage = th
+        if is_clan:
+            result.append({"player_tag": member.get("tag"), "account_name": member.get("name"), "town_hall_level": th, "despeed_town_hall": stage, "rushed_degree": max(0, th - stage), "map_position": pos})
+    return result
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # 组合 API
 # ═══════════════════════════════════════════════════════════════════════
@@ -185,18 +200,24 @@ def get_farm_clan_stats(clan_tag: str, clan_name: str) -> dict:
     result["realtime"] = calc_realtime_config(members)
 
     # 2. 拉取部落战数据
+    war_error = ""
     try:
         war_data = fetch_current_war(clan_tag)
-    except Exception:
+    except Exception as exc:
         war_data = None
+        war_error = str(exc)
 
     if war_data is None:
+        if war_error:
+            # 保留同步错误，避免把“请求失败”误显示成“当前无部落战”。
+            result["despeed"]["error"] = war_error
         return result
 
     result["despeed"] = {
         "has_war": True,
         **calc_despeed_config(war_data),
     }
+    result["replace_candidates"] = [{**x, "clan_tag": clan_tag} for x in calc_member_rushed(war_data) if x["rushed_degree"] > 0]
 
     return result
 

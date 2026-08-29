@@ -1,6 +1,7 @@
 <template>
   <view class="page-container">
     <TopBar title="互刷部落" :showBack="true" :buttons="[]" />
+    <view class="tab-bar"><view class="tab-item" :class="{ active: tab === 'clans' }" @tap="tab = 'clans'">部落</view><view class="tab-item" :class="{ active: tab === 'members' }" @tap="switchMembers">成员</view></view>
 
     <view v-if="loading" class="loading-box"><text class="loading-text">加载中...</text></view>
 
@@ -9,11 +10,11 @@
       <text class="retry-btn" @tap="fetchData">点击重试</text>
     </view>
 
-    <view v-else-if="clans.length === 0" class="empty-box">
+    <view v-else-if="tab === 'clans' && clans.length === 0" class="empty-box">
       <text class="empty-text">暂无互刷部落</text>
     </view>
 
-    <scroll-view v-else scroll-y class="content-scroll">
+    <scroll-view v-else-if="tab === 'clans'" scroll-y class="content-scroll">
       <view class="scroll-inner">
       <view v-if="updatedAt" class="update-time">
         <text class="update-text">数据更新于 {{ updatedAt }}</text>
@@ -63,7 +64,7 @@
             </view>
           </view>
           <view v-else class="no-war">
-            <text class="no-war-text">当前无部落战</text>
+            <text class="no-war-text">{{ clan.despeed.error ? '部落战数据获取失败，请重新同步' : '当前无部落战' }}</text>
           </view>
         </view>
       </view>
@@ -71,12 +72,14 @@
       <view class="bottom-space"></view>
       </view>
     </scroll-view>
+    <scroll-view v-else scroll-y class="content-scroll"><view class="scroll-inner"><view v-for="clan in memberClans" :key="clan.tag" class="clan-card"><view class="clan-header"><text class="clan-name">{{ clan.name }}</text><text class="clan-tag">{{ clan.tag }}</text><text class="clan-count">速本:{{ clan.members.length }}</text></view><view class="member-table"><view class="member-tr member-head"><text>昵称</text><text>当前本</text><text>去速本</text><text>速本度</text><text>排名</text></view><view v-for="member in clan.members" :key="member.player_tag" class="member-tr"><text class="member-name">{{ member.account_name }}</text><text>{{ member.town_hall_level || '-' }}</text><text>{{ member.despeed_town_hall || '-' }}</text><text>{{ member.rushed_degree || 0 }}</text><text>{{ member.map_position || '-' }}</text></view></view></view></view></scroll-view>
   </view>
 </template>
 
 <script>
 import TopBar from '@/components/TopBar.vue'
 import { getFarmConfig } from '@/utils/api.js'
+import { getMembers } from '@/utils/api.js'
 
 export default {
   components: { TopBar },
@@ -87,11 +90,13 @@ export default {
       clans: [],
       updatedAt: '',
       thLevels: ['18', '17', '16', '15', '14', '13', '12', '11']
+      ,tab: 'clans', members: []
     }
   },
   created() {
     this.fetchData()
   },
+  computed: { memberClans() { return this.clans.map(c => ({ tag: c.clan_tag, name: c.clan_name || c.clan_tag, members: c.replace_candidates || [] })).filter(c => c.members.length) } },
   methods: {
     async fetchData() {
       this.loading = true
@@ -106,6 +111,8 @@ export default {
         this.loading = false
       }
     },
+    switchMembers() { this.tab = 'members' },
+    formatRole(v) { return ({ leader: '首领', coLeader: '副首领', admin: '长老', member: '成员' }[v] || v || '-') },
     formatTime(isoStr) {
       if (!isoStr) return ''
       // 把 UTC ISO 时间转成北京时间显示
@@ -131,6 +138,10 @@ export default {
   flex-direction: column;
   background: #0f0f23;
 }
+.tab-bar { display: flex; height: 72rpx; background: #141428; border-bottom: 1rpx solid #1a1a2e; }
+.tab-item { flex: 1; text-align: center; line-height: 72rpx; color: #666; font-size: 28rpx; }
+.tab-item.active { color: #4a90d9; font-weight: 600; border-bottom: 4rpx solid #4a90d9; }
+.member-table { margin: 0 24rpx 24rpx; border: 1rpx solid #2a2a4a; border-radius: 8rpx; overflow: hidden; }.member-tr { display: flex; flex-direction: row; min-height: 64rpx; align-items: center; border-bottom: 1rpx solid #2a2a4a; }.member-tr:last-child { border-bottom: 0; }.member-tr text { flex: 1; text-align: center; color: #c8c8d0; font-size: 24rpx; }.member-tr text:first-child { flex: 2; text-align: left; padding-left: 16rpx; }.member-head { background: #20203a; }.member-head text { color: #aab4c8; font-weight: 600; }
 
 /* 加载 / 错误 / 空状态 */
 .loading-box, .error-box, .empty-box {

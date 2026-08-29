@@ -129,6 +129,12 @@ target first; never point tests at production data by assumption.
 
 ## Scheduler, operations, and deployment
 
+- Before manually running synchronization, import, deployment, or other
+  operational scripts, load the repository environment first (for example,
+  `source scripts/load_env.sh` or the project-approved `.env` loader). Do not
+  run scripts with an incomplete environment, and never print or expose `.env`
+  contents while troubleshooting.
+
 - `scripts/scheduler.py` is authoritative, persists state in `sync_jobs`, and is
   supervised by `sky-scheduler.service`.
 - `docs/periodic-scripts.md` and the old timer/cron design are historical. Do not
