@@ -414,11 +414,27 @@ await bindAccount('玩家昵称', '#ABC123')
 
 ## 全局状态管理
 
+## 小程序表格渲染注意事项
+
+微信小程序端的表格页面（如部落战绩、互刷、部落成员列表）需遵循以下约定：
+
+- 表格样式使用非 scoped 的 `<style>`，不要使用 `<style scoped>`。当前 uni-app/微信运行时下，scoped 属性样式在 flex 表格单元格上可能无法可靠命中，表现为数据能加载但列宽、边框和背景样式失效。
+- 行容器必须显式设置 `display: flex` 和 `flex-direction: row`；flex 默认主轴为纵向，遗漏后单元格会逐个竖排。
+- 表格建议采用固定表头 + 独立 `scroll-view scroll-y` 数据体的结构，避免同一个 `scroll-view` 同时承担横向和纵向滚动。
+- 单元格使用固定宽度并设置 `flex-shrink: 0`，必要时配合 `box-sizing: border-box`，防止小屏设备压缩列宽。
+- 修改表格结构或样式后必须重新执行 `npm run build:mp-weixin`，并在微信开发者工具中清除缓存、重新导入 `dist/build/mp-weixin`，否则可能继续运行旧产物。
+
+部落成员主表当前实现位于 `uni-app/pages/clan/clan.vue`，其表格结构和样式应优先参考 `uni-app/pages/clan/stats.vue`，不要另行引入不同的滚动或 scoped 样式方案。
+
+部落成员主表使用单表展示账号档案字段：昵称、归属人、部落、职位、大本营、经验、奖杯、联赛、历史分、报名状态、成员状态、最近报名和最近同步。页面进入时调用一次 `/api/members`，不在前端轮询；后端 `coc_sync` 按调度器周期更新 `accounts`（当前为每 6 小时）。表格外层同时支持横向和纵向滚动，排序在前端完成。
+
+`last_synced_at` 为 UTC ISO 时间，页面必须转换为设备本地时间后显示，避免直接截取字符串造成北京时间少 8 小时。
+
 通过 `App.vue` 的 `globalData` 管理：
 
 ```javascript
 globalData: {
-  apiBase: 'https://api.skycoc.cc',  // 后端 API 地址
+  apiBase: 'https://115.159.64.19',  // 备案通过前 IP 直连；备案后改回域名
   userInfo: null,                      // 当前用户信息
   isLoggedIn: false                    // 登录状态
 }
