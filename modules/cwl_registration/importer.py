@@ -135,6 +135,20 @@ class RegistrationImporter:
         camp_names = self._read_camp()
         accounts = self._merge_camp(deduped, camp_names)
 
+        # 同一 Tag 对应多个报名昵称通常表示改名或错误匹配，不能静默导入。
+        tags: dict[str, set[str]] = {}
+        for acc in accounts:
+            tag = self.player_service.resolve_tag_by_name(acc["account_name"])
+            if tag:
+                tags.setdefault(tag, set()).add(acc["account_name"])
+        conflicts = {tag: names for tag, names in tags.items() if len(names) > 1}
+        if conflicts:
+            details = "; ".join(f"{tag}: {', '.join(sorted(names))}" for tag, names in conflicts.items())
+            print(f"[warn] 报名昵称对应同一 COC Tag，将继续导入请人工核对：{details}", file=sys.stderr)
+
+        # 报名表是目标月份的完整快照：先清理该月旧记录，避免历史账号残留。
+        self.reg_repo.delete_period(period)
+
         for acc in accounts:
             self._save(acc, period)
 

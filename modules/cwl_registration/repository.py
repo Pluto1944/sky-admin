@@ -53,6 +53,12 @@ class RegistrationRepository:
         self.conn.commit()
         return cur.lastrowid
 
+    def delete_period(self, period: str) -> int:
+        """删除指定月份的报名快照，避免完整导入后残留旧账号。"""
+        cur = self.conn.execute("DELETE FROM registrations WHERE period = ?", (period,))
+        self.conn.commit()
+        return cur.rowcount
+
     def get_registrations(self, period: str) -> list[dict]:
         rows = self.conn.execute(
             "SELECT * FROM registrations WHERE period = ?", (period,)
@@ -89,5 +95,4 @@ class RegistrationRepository:
             (team_info, reg_id),
         )
         self.conn.commit()
-
 

@@ -194,19 +194,19 @@ cwl_registration:
   # 队伍定义
   teams:
     # === 实战队伍 ===
-    - name: 泰坦二
+    - name: 泰坦一
       clan_tag: "#2QQ"
-      leader: leader2QQ
+      leader: pluto2QQ
       member_count: 15
-      league_level: ""
+      league_level: "Titan League I"
       manager: ""
       category: combat
       reserved_slots: 0
-    - name: 冠一 一队
+    - name: 泰坦三
       clan_tag: "#2GGGGGGG"
       leader: leader5
       member_count: 15
-      league_level: ""
+      league_level: "Titan League III"
       manager: ""
       category: combat
       reserved_slots: 0
@@ -215,7 +215,7 @@ cwl_registration:
       #clan_tag: "#2JP8PLQLJ"
       leader: "Pluto leader6"
       member_count: 15
-      league_level: ""
+      league_level: "Champion League II"
       manager: ""
       category: combat
       reserved_slots: 0
@@ -223,7 +223,7 @@ cwl_registration:
       clan_tag: "#2QQQQ2G"
       leader: leader4
       member_count: 15
-      league_level: ""
+      league_level: "Champion League III"
       manager: ""
       category: combat
       reserved_slots: 0
@@ -231,7 +231,7 @@ cwl_registration:
       clan_tag: "#UUP2"
       leader: leader
       member_count: 15
-      league_level: ""
+      league_level: "Master League I"
       manager: ""
       category: combat
       reserved_slots: 0
@@ -239,15 +239,15 @@ cwl_registration:
       clan_tag: "#CYYL"
       leader: leader2
       member_count: 30
-      league_level: ""
+      league_level: "Master League I"
       manager: ""
       category: combat
       reserved_slots: 0
-    - name: 大一
-      clan_tag: "#2CU9JPYU8"
-      leader: "南门 "
+    - name: 大一定级
+      clan_tag: "#2JQ8GC2UY"
+      leader: 登悟
       member_count: 30
-      league_level: ""
+      league_level: "Unranked"
       manager: ""
       category: combat
       reserved_slots: 0
@@ -256,7 +256,15 @@ cwl_registration:
       clan_tag: "#2R9Y209LY"
       leader: leader10
       member_count: 30
-      league_level: ""
+      league_level: "Master League I"
+      manager: ""
+      category: shell
+      reserved_slots: 0
+    - name: 大二
+      clan_tag: "#2CU9JPYU8"
+      leader: 南门
+      member_count: 30
+      league_level: "Master League II"
       manager: ""
       category: shell
       reserved_slots: 0
@@ -264,23 +272,15 @@ cwl_registration:
       clan_tag: "#2JQR89P9G"
       leader: leader6
       member_count: 30
-      league_level: ""
+      league_level: "Master League III"
       manager: ""
       category: shell
       reserved_slots: 0
     - name: 水一
       clan_tag: "#2JUJRYVQP"
-      leader: 登悟
-      member_count: 30
-      league_level: ""
-      manager: ""
-      category: shell
-      reserved_slots: 0
-    - name: 水二
-      clan_tag: "#2GR0LPGVQ"
       leader: leader8
       member_count: 30
-      league_level: ""
+      league_level: "Crystal League I"
       manager: ""
       category: shell
       reserved_slots: 0
@@ -330,9 +330,9 @@ cwl_registration:
     - "虚伪、"
 
   # 黑白名单
-  black_list: []
-  white_list:
-    - ["10°C✨Godwin 2", "#2QQ"]
+  black_list:
+    - 花海
+  white_list: []
 
   new_combat_insert_start: 30
   new_normal_insert_start: 45    # 已废弃
