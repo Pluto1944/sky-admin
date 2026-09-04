@@ -1,0 +1,10 @@
+# Runtime image/material output. Production default is outside the repository.
+runtime/
+*.db
+*.sqlite
+*.sqlite3
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.gif

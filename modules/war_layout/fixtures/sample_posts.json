@@ -1,0 +1,14 @@
+[
+  {
+    "post_id": "demo-1",
+    "author": "author_a",
+    "text": "冲杯阵 https://link.clashofclans.com/en?action=OpenLayout&id=demo1",
+    "image_urls": ["https://example.invalid/layout-1.jpg"]
+  },
+  {
+    "post_id": "demo-2",
+    "author": "author_b",
+    "text": "推荐阵 https://link.clashofclans.com/en?action=OpenLayout&id=demo2",
+    "image_urls": ["https://example.invalid/layout-2.jpg"]
+  }
+]
