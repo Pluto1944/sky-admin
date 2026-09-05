@@ -31,6 +31,20 @@ def test_execute_is_idempotent():
     assert len(created) == 1
 
 
+def test_daily_limit_is_five_per_author():
+    db = sqlite3.connect(":memory:")
+    links = " ".join(f"https://link.clashofclans.com/{i}" for i in range(6))
+    images = tuple(f"https://img/{i}" for i in range(6))
+    service = WarLayoutService(
+        XSource(lambda *_: XPage((PostPayload("p", "a", links, images),))),
+        WarLayoutRepository(db),
+        WeChatPublisher(lambda _: "m", lambda _: "draft"),
+    )
+    result = service.run_once(["a"], dry_run=False)
+    assert result.layouts == 1
+    assert db.execute("SELECT COUNT(*) FROM war_layout_items").fetchone()[0] == 1
+
+
 def test_failed_draft_is_retryable():
     db = sqlite3.connect(":memory:")
     source = XSource(lambda *_: XPage((PostPayload("p", "a", "https://link.clashofclans.com/x", ("https://img/x",)),)))

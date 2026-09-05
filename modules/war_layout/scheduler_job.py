@@ -36,7 +36,8 @@ def build_http_service(connection, settings: WarLayoutSettings, *, session: Any 
     """Construct the real HTTP-backed service without opening a DB connection."""
     http = session or requests.Session()
     if settings.source == "socialdata":
-        x_transport = SocialDataSource(settings.socialdata_api_key, session=http, user_ids=settings.socialdata_user_ids)
+        from .socialdata_guard import SocialDataBudgetGuard
+        x_transport = SocialDataSource(settings.socialdata_api_key, session=http, user_ids=settings.socialdata_user_ids, guard=SocialDataBudgetGuard(max_requests=settings.socialdata_max_requests))
     else:
         x_transport = XHttpTransport(settings.x_bearer_token, session=http)
     x_source = XSource(x_transport)

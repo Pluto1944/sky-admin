@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from dataclasses import dataclass
+from html import escape
 
 from .models import LayoutCandidate
 
@@ -23,13 +24,14 @@ class WeChatPublisher:
     def create_layout_draft(self, title: str, layouts: list[LayoutCandidate]) -> WeChatDraft | None:
         if not layouts:
             return None
-        media_ids = [self.upload_image(layout.image_url) for layout in layouts[:5]]
+        media_ids = [[self.upload_image(image) for image in layout.image_urls] for layout in layouts]
         body = "".join(
-            f"<p><img src=\"{media_id}\" /></p><p>{layout.layout_url}</p>"
-            f"<p>来源：{layout.author}</p><p><br /></p>"
-            for media_id, layout in zip(media_ids, layouts[:5])
+            "".join(f"<p><img src=\"{media_id}\" /></p>" for media_id in image_ids)
+            + "".join(f"<p>阵型链接：<a href=\"{escape(url, quote=True)}\">{escape(url)}</a></p>" for url in layout.layout_urls)
+            + f"<p>来源：{layout.author}</p><p><br /></p>"
+            for image_ids, layout in zip(media_ids, layouts)
         )
-        cover_media_id = self.upload_cover(layouts[0].image_url) if self.upload_cover else media_ids[0]
+        cover_media_id = self.upload_cover(layouts[0].image_urls[0]) if self.upload_cover else media_ids[0][0]
         payload = {"title": title, "thumb_media_id": cover_media_id, "content": body}
         draft_id = self.create_draft(payload)
         return WeChatDraft(draft_id, title, cover_media_id, body)

@@ -1,4 +1,5 @@
 from datetime import date
+from html import escape
 
 from .models import LayoutCandidate
 
@@ -10,8 +11,8 @@ def compose_article(layouts: list[LayoutCandidate], published_on: date | None = 
     body_parts: list[str] = []
     for layout in layouts[:5]:
         body_parts.extend((
-            f"<p><img src=\"{layout.image_url}\" /></p>",
-            f"<p>{layout.layout_url}</p>",
+            "".join(f"<p><img src=\"{image}\" /></p>" for image in layout.image_urls),
+            "".join(f"<p>阵型链接：<a href=\"{escape(url, quote=True)}\">{escape(url)}</a></p>" for url in layout.layout_urls),
             f"<p>来源：{layout.author}</p>",
             "<p><br /></p>",
         ))

@@ -11,6 +11,7 @@ from .composer import compose_article
 from .extractor import extract_layouts
 from .settings import WarLayoutSettings
 from .socialdata_source import SocialDataSource
+from .socialdata_guard import SocialDataBudgetGuard
 from .source_x import XSource
 from .x_http import XHttpTransport
 
@@ -24,19 +25,22 @@ def run_live_dry_run(settings: WarLayoutSettings, *, session: Any = None, author
             settings.socialdata_api_key,
             session=http,
             user_ids=settings.socialdata_user_ids,
+            guard=SocialDataBudgetGuard(max_requests=settings.socialdata_max_requests),
         )
     else:
         transport = XHttpTransport(settings.x_bearer_token, session=http)
     selected_authors = authors or settings.authors
     posts = XSource(transport).fetch_posts(list(selected_authors), max_pages=1)
-    layouts = extract_layouts(posts)
+    all_layouts = extract_layouts(posts, limit=max(1, len(posts) * 10))
+    layouts = all_layouts[:5]
     article = compose_article(layouts)
     return {
         "source": settings.source,
         "authors": len(selected_authors),
         "posts": len(posts),
         "posts_with_images": sum(bool(post.image_urls) for post in posts),
-        "layouts": len(layouts),
+        "layouts_found": len(all_layouts),
+        "layouts_selected": len(layouts),
         "article": article,
     }
 

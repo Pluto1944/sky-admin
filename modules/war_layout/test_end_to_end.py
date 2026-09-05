@@ -30,13 +30,14 @@ def test_full_mock_pipeline_multiple_authors_global_five_and_idempotent(tmp_path
     first = service.run_once(["author-a", "author-b"], dry_run=False)
     second = service.run_once(["author-a", "author-b"], dry_run=False)
 
-    assert first.layouts == 5
-    assert first.discovered == 5
-    assert second.skipped == 5
+    assert first.layouts == 2
+    assert first.discovered == 2
+    assert second.layouts == 0
+    assert second.skipped == 2
     assert second.draft is None
-    assert len(uploaded) == 5
+    assert len(uploaded) == 6
     assert len(drafts) == 1
     assert drafts[0]["thumb_media_id"] == "img-1"
-    assert drafts[0]["content"].count("<p><br /></p>") == 5
-    assert db.execute("SELECT COUNT(*) FROM war_layout_items").fetchone()[0] == 5
-    assert db.execute("SELECT COUNT(*) FROM war_layout_items WHERE status = 'draft_created'").fetchone()[0] == 5
+    assert drafts[0]["content"].count("<p><br /></p>") == 2
+    assert db.execute("SELECT COUNT(*) FROM war_layout_items").fetchone()[0] == 2
+    assert db.execute("SELECT COUNT(*) FROM war_layout_items WHERE status = 'draft_created'").fetchone()[0] == 2

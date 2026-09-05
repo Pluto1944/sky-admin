@@ -10,6 +10,7 @@ class WarLayoutSettings:
     socialdata_api_key: str = ""
     source: str = "official"
     socialdata_user_ids: dict[str, str] = None
+    socialdata_max_requests: int = 3
     wechat_app_id: str = ""
     wechat_app_secret: str = ""
     media_dir: Path = Path("/tmp/sky-admin-war-layout")
@@ -35,6 +36,7 @@ class WarLayoutSettings:
             socialdata_api_key=os.getenv("SOCIALDATA_API_KEY", ""),
             source=os.getenv("WAR_LAYOUT_SOURCE", "official").strip().lower(),
             socialdata_user_ids=user_ids,
+            socialdata_max_requests=int(os.getenv("SOCIALDATA_MAX_REQUESTS_PER_RUN", "3")),
             wechat_app_id=os.getenv("WECHAT_APP_ID", ""),
             wechat_app_secret=os.getenv("WECHAT_APP_SECRET", ""),
             media_dir=Path(os.getenv("WAR_LAYOUT_MEDIA_DIR", "/tmp/sky-admin-war-layout")),

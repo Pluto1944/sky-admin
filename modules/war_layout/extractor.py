@@ -18,24 +18,21 @@ def layout_fingerprint(layout_url: str) -> str:
 
 
 def extract_layouts(posts: Iterable[PostPayload], limit: int = MAX_LAYOUTS_PER_POST) -> list[LayoutCandidate]:
-    """Aggregate posts in source order and cap the total number of layouts."""
+    """Return one display candidate per post, grouping all images and links."""
     if limit < 1:
         return []
     layouts: list[LayoutCandidate] = []
     seen: set[str] = set()
     for post in posts:
-        for image_url, raw_url in zip(post.image_urls, LAYOUT_URL_RE.findall(post.text)):
-            url = normalize_layout_url(raw_url)
-            fingerprint = layout_fingerprint(url)
-            if fingerprint in seen:
-                continue
-            seen.add(fingerprint)
-            layouts.append(LayoutCandidate(
-                image_url=image_url,
-                layout_url=url,
-                post_id=post.post_id,
-                author=post.author,
-            ))
-            if len(layouts) >= limit:
-                return layouts
+        links = LAYOUT_URL_RE.findall(post.text)
+        if not links or not post.image_urls:
+            continue
+        urls = tuple(normalize_layout_url(raw) for raw in links)
+        fingerprint = layout_fingerprint("|".join(urls) + "|" + "|".join(post.image_urls))
+        if fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        layouts.append(LayoutCandidate(post.image_urls[0], urls[0], post_id=post.post_id, author=post.author, image_urls=post.image_urls, layout_urls=urls))
+        if len(layouts) >= limit:
+            return layouts
     return layouts

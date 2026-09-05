@@ -22,5 +22,6 @@ def test_live_dry_run_is_read_only_and_builds_preview():
     result = run_live_dry_run(settings, session=Session())
     assert result["posts"] == 1
     assert result["posts_with_images"] == 1
-    assert result["layouts"] == 1
+    assert result["layouts_found"] == 1
+    assert result["layouts_selected"] == 1
     assert result["article"]["cover_image_url"] == "https://img/1"

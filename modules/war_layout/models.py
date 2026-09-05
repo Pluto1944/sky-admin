@@ -10,6 +10,14 @@ class LayoutCandidate:
     caption: str = ""
     post_id: str = ""
     author: str = ""
+    image_urls: tuple[str, ...] = ()
+    layout_urls: tuple[str, ...] = ()
+
+    def __post_init__(self):
+        if not self.image_urls:
+            object.__setattr__(self, "image_urls", (self.image_url,))
+        if not self.layout_urls:
+            object.__setattr__(self, "layout_urls", (self.layout_url,))
 
 
 @dataclass(frozen=True)

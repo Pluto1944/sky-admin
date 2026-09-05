@@ -9,9 +9,9 @@ def test_extract_pairs_images_and_links_and_limits_to_five():
     text = " ".join(f"https://link.clashofclans.com/en?action=OpenLayout&id={i}" for i in range(1, 7))
     post = PostPayload("p1", "author", text, tuple(f"https://img/{i}.jpg" for i in range(1, 7)))
     layouts = extract_layouts([post])
-    assert len(layouts) == 5
+    assert len(layouts) == 1
     assert layouts[0].image_url.endswith("1.jpg")
-    assert layouts[-1].layout_url.endswith("id=5")
+    assert len(layouts[0].layout_urls) == 6
 
 
 def test_limit_is_global_across_posts():
