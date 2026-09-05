@@ -27,7 +27,7 @@ class WeChatPublisher:
         media_ids = [[self.upload_image(image) for image in layout.image_urls] for layout in layouts]
         body = "".join(
             "".join(f"<p><img src=\"{media_id}\" /></p>" for media_id in image_ids)
-            + "".join(f"<p>阵型链接：<a href=\"{escape(url, quote=True)}\">{escape(url)}</a></p>" for url in layout.layout_urls)
+            + "".join(f"<p style=\"text-align:left;\">阵型链接：<a href=\"{escape(url, quote=True)}\">{escape(url)}</a></p>" for url in layout.layout_urls)
             + f"<p>来源：{layout.author}</p><p><br /></p>"
             for image_ids, layout in zip(media_ids, layouts)
         )
