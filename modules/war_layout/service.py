@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import date
+from datetime import datetime, timedelta, timezone
 
 from .composer import compose_article
 from .extractor import extract_layouts, layout_fingerprint
@@ -26,7 +27,21 @@ class WarLayoutService:
     def run_once(self, authors: list[str], *, since_id: str | None = None, dry_run: bool = True, published_on: date | None = None, force: bool = False, publish_limit: int | None = None) -> RunResult:
         if publish_limit is not None and publish_limit < 1:
             raise ValueError("publish_limit must be positive")
+        run_started_at = datetime.now(timezone.utc)
+        if not dry_run:
+            self.repository.initialize()
         posts = self.source.fetch_posts(authors, since_id=since_id)
+        if not dry_run:
+            # Use each author's persisted watermark.  A first run only looks
+            # back 24 hours; subsequent runs are strictly incremental.
+            watermarks = {
+                author: self.repository.get_last_pull_time(author)
+                or (run_started_at - timedelta(hours=24))
+                for author in authors
+            }
+            posts = [post for post in posts if self._in_window(post, watermarks.get(post.author), run_started_at)]
+            # Newest first makes the per-author five-post cap deterministic.
+            posts.sort(key=lambda post: self._post_time(post) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
         # Discover candidates first, then apply the per-author daily quota.
         all_layouts = extract_layouts(posts, limit=max(1, len(posts) * 10))
         # Apply the daily quota independently for each author. Overflow is
@@ -41,7 +56,6 @@ class WarLayoutService:
             author_counts[layout.author] = count + 1
         if dry_run:
             return RunResult(len(posts), len(layouts), 0, 0)
-        self.repository.initialize()
         discovered = skipped = 0
         new_layouts = []
         for layout in layouts:
@@ -69,6 +83,8 @@ class WarLayoutService:
             else:
                 skipped += 1
         if not new_layouts:
+            for author in authors:
+                self.repository.set_last_pull_time(author, run_started_at)
             return RunResult(len(posts), 0, discovered, skipped)
         publish_layouts = new_layouts if publish_limit is None else new_layouts[:publish_limit]
         if self.materializer:
@@ -98,4 +114,25 @@ class WarLayoutService:
         if draft:
             for layout in publish_layouts:
                 self.repository.update_status(layout_fingerprint(layout.layout_url), "draft_created", draft_media_id=draft.media_id)
+        for author in authors:
+            self.repository.set_last_pull_time(author, run_started_at)
         return RunResult(len(posts), len(publish_layouts), discovered, skipped, draft)
+
+    @staticmethod
+    def _post_time(post: PostPayload) -> datetime | None:
+        if not post.created_at:
+            return None
+        try:
+            parsed = datetime.fromisoformat(post.created_at.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    @classmethod
+    def _in_window(cls, post: PostPayload, start: datetime, end: datetime) -> bool:
+        timestamp = cls._post_time(post)
+        # Fixtures and older sources may not provide timestamps; retain them
+        # and let post-id/fingerprint deduplication provide idempotency.
+        return timestamp is None or start <= timestamp <= end

@@ -18,6 +18,12 @@ CREATE TABLE IF NOT EXISTS war_layout_items (
     image_urls_json TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS war_layout_sync_state (
+    author TEXT PRIMARY KEY,
+    last_pull_time TEXT NOT NULL,
+    updated_at TEXT NOT NULL
 )
 """
 
@@ -29,12 +35,37 @@ class WarLayoutRepository:
         self.connection = connection
 
     def initialize(self) -> None:
-        self.connection.execute(SCHEMA)
+        self.connection.executescript(SCHEMA)
         cols = {row[1] for row in self.connection.execute("PRAGMA table_info(war_layout_items)")}
         if "layout_urls_json" not in cols:
             self.connection.execute("ALTER TABLE war_layout_items ADD COLUMN layout_urls_json TEXT")
         if "image_urls_json" not in cols:
             self.connection.execute("ALTER TABLE war_layout_items ADD COLUMN image_urls_json TEXT")
+        self.connection.commit()
+
+    def get_last_pull_time(self, author: str) -> datetime | None:
+        row = self.connection.execute(
+            "SELECT last_pull_time FROM war_layout_sync_state WHERE author = ?",
+            (author,),
+        ).fetchone()
+        if not row:
+            return None
+        value = row[0]
+        try:
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
+    def set_last_pull_time(self, author: str, timestamp: datetime) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        value = timestamp.astimezone(timezone.utc).isoformat()
+        self.connection.execute(
+            """INSERT INTO war_layout_sync_state (author, last_pull_time, updated_at)
+               VALUES (?, ?, ?)
+               ON CONFLICT(author) DO UPDATE SET last_pull_time = excluded.last_pull_time,
+                   updated_at = excluded.updated_at""",
+            (author, value, now),
+        )
         self.connection.commit()
 
     def add_discovered(self, *, post_id: str, author: str, fingerprint: str, layout_url: str, image_url: str, layout_urls: tuple[str, ...] = (), image_urls: tuple[str, ...] = ()) -> bool:

@@ -64,7 +64,7 @@ class SocialDataSource:
             image_urls = tuple(m.get("media_url_https") or m.get("media_url") or m.get("url") for m in media if m.get("type") == "photo" and (m.get("media_url_https") or m.get("media_url") or m.get("url")))
             post_id = str(item.get("id_str") or item.get("id") or "")
             if post_id:
-                posts.append(PostPayload(post_id, username, text, image_urls))
+                posts.append(PostPayload(post_id, username, text, image_urls, item.get("tweet_created_at") or item.get("created_at")))
         return XPage(tuple(posts), None)
 
     def _get(self, path: str) -> dict:

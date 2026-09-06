@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
+from datetime import date
 from pathlib import Path
 
 from .scheduler_job import build_http_service
@@ -16,6 +17,7 @@ def main(argv: list[str] | None = None) -> int:
     group.add_argument("--author", help="one configured author to process")
     group.add_argument("--all", action="store_true", help="process all configured authors in one draft")
     parser.add_argument("--force", action="store_true", help="recreate a draft for already published records")
+    parser.add_argument("--date", help="article title date in YYYY-MM-DD (default: today; does not filter posts)")
     args = parser.parse_args(argv)
     settings = WarLayoutSettings.from_env()
     settings.validate_x()
@@ -27,7 +29,8 @@ def main(argv: list[str] | None = None) -> int:
     connection = sqlite3.connect(str(settings.db_path))
     try:
         service = build_http_service(connection, settings)
-        result = service.run_once(authors, dry_run=False, force=args.force)
+        target_date = date.fromisoformat(args.date) if args.date else date.today()
+        result = service.run_once(authors, dry_run=False, force=args.force, published_on=target_date)
         print(json.dumps({
             "authors": authors,
             "posts": result.posts,

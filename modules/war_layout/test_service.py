@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .models import PostPayload
@@ -84,3 +85,23 @@ def test_execute_materializes_images_outside_git_tree(tmp_path):
     materializer = ImageMaterializer(lambda _: ImageBlob(b"x", "image/jpeg"), tmp_path)
     WarLayoutService(source, WarLayoutRepository(db), publisher, materializer).run_once(["a"], dry_run=False)
     assert Path(uploaded[0]).parent == tmp_path
+
+
+def test_execute_uses_per_author_incremental_watermark():
+    db = sqlite3.connect(":memory:")
+    now = datetime.now(timezone.utc)
+    old = (now - timedelta(days=2)).isoformat()
+    recent = (now - timedelta(minutes=5)).isoformat()
+    posts = (
+        PostPayload("old", "a", "https://link.clashofclans.com/old", ("https://img/old",), old),
+        PostPayload("recent", "a", "https://link.clashofclans.com/recent", ("https://img/recent",), recent),
+    )
+    service = WarLayoutService(
+        XSource(lambda *_: XPage(posts)),
+        WarLayoutRepository(db),
+        WeChatPublisher(lambda _: "m", lambda _: "d"),
+    )
+    result = service.run_once(["a"], dry_run=False)
+    assert result.posts == 1
+    assert result.layouts == 1
+    assert db.execute("SELECT post_id FROM war_layout_items").fetchone()[0] == "recent"

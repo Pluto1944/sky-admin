@@ -39,7 +39,7 @@ class XHttpTransport:
                 for key in keys
                 if key in media and media[key].get("type") == "photo" and (media[key].get("url") or media[key].get("preview_image_url"))
             )
-            posts.append(PostPayload(str(item["id"]), author, item.get("text", ""), image_urls))
+            posts.append(PostPayload(str(item["id"]), author, item.get("text", ""), image_urls, item.get("created_at")))
         return XPage(tuple(posts), payload.get("meta", {}).get("next_token"))
 
     def _resolve_user_id(self, author: str) -> str:

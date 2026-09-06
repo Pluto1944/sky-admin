@@ -28,3 +28,4 @@ class PostPayload:
     author: str
     text: str
     image_urls: tuple[str, ...] = ()
+    created_at: str | None = None

@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import datetime, timezone
 
 from .repository import WarLayoutRepository
 
@@ -18,3 +19,12 @@ def test_duplicate_fingerprint_is_idempotent_and_status_can_retry():
     assert row["status"] == "draft_created"
     assert row["draft_media_id"] == "m1"
     assert row["error_message"] is None
+
+
+def test_sync_watermark_is_persisted_per_author():
+    repo = WarLayoutRepository(sqlite3.connect(":memory:"))
+    repo.initialize()
+    timestamp = datetime(2026, 9, 6, 1, 2, 3, tzinfo=timezone.utc)
+    repo.set_last_pull_time("alice", timestamp)
+    assert repo.get_last_pull_time("alice") == timestamp
+    assert repo.get_last_pull_time("bob") is None
