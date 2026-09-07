@@ -34,12 +34,8 @@ class WarLayoutService:
         if not dry_run:
             # Use each author's persisted watermark.  A first run only looks
             # back 24 hours; subsequent runs are strictly incremental.
-            watermarks = {
-                author: self.repository.get_last_pull_time(author)
-                or (run_started_at - timedelta(hours=24))
-                for author in authors
-            }
-            posts = [post for post in posts if self._in_window(post, watermarks.get(post.author), run_started_at)]
+            watermark = self.repository.get_global_last_pull_time() or (run_started_at - timedelta(hours=24))
+            posts = [post for post in posts if self._in_window(post, watermark, run_started_at)]
             # Newest first makes the per-author five-post cap deterministic.
             posts.sort(key=lambda post: self._post_time(post) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
         # Discover candidates first, then apply the per-author daily quota.
@@ -83,8 +79,7 @@ class WarLayoutService:
             else:
                 skipped += 1
         if not new_layouts:
-            for author in authors:
-                self.repository.set_last_pull_time(author, run_started_at)
+            self.repository.record_global_sync(window_start=watermark, window_end=run_started_at, status="success", posts=len(posts), layouts=0)
             return RunResult(len(posts), 0, discovered, skipped)
         publish_layouts = new_layouts if publish_limit is None else new_layouts[:publish_limit]
         if self.materializer:
@@ -110,12 +105,25 @@ class WarLayoutService:
                     "failed",
                     error_message=type(exc).__name__,
                 )
+            self.repository.record_global_sync(
+                window_start=watermark,
+                window_end=run_started_at,
+                status="failed",
+                posts=len(posts),
+                layouts=len(publish_layouts),
+                error_message=type(exc).__name__,
+            )
             raise
         if draft:
             for layout in publish_layouts:
                 self.repository.update_status(layout_fingerprint(layout.layout_url), "draft_created", draft_media_id=draft.media_id)
-        for author in authors:
-            self.repository.set_last_pull_time(author, run_started_at)
+        self.repository.record_global_sync(
+            window_start=watermark,
+            window_end=run_started_at,
+            status="success",
+            posts=len(posts),
+            layouts=len(publish_layouts),
+        )
         return RunResult(len(posts), len(publish_layouts), discovered, skipped, draft)
 
     @staticmethod

@@ -24,6 +24,24 @@ CREATE TABLE IF NOT EXISTS war_layout_sync_state (
     author TEXT PRIMARY KEY,
     last_pull_time TEXT NOT NULL,
     updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS war_layout_sync_cursor (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    last_pull_time TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS war_layout_sync_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    author TEXT NOT NULL,
+    window_start TEXT NOT NULL,
+    window_end TEXT NOT NULL,
+    status TEXT NOT NULL,
+    posts INTEGER NOT NULL DEFAULT 0,
+    layouts INTEGER NOT NULL DEFAULT 0,
+    error_message TEXT,
+    created_at TEXT NOT NULL
 )
 """
 
@@ -56,6 +74,17 @@ class WarLayoutRepository:
         except ValueError:
             return None
 
+    def get_global_last_pull_time(self) -> datetime | None:
+        row = self.connection.execute(
+            "SELECT last_pull_time FROM war_layout_sync_cursor WHERE id = 1"
+        ).fetchone()
+        if not row:
+            return None
+        try:
+            return datetime.fromisoformat(str(row[0]).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
     def set_last_pull_time(self, author: str, timestamp: datetime) -> None:
         now = datetime.now(timezone.utc).isoformat()
         value = timestamp.astimezone(timezone.utc).isoformat()
@@ -66,6 +95,65 @@ class WarLayoutRepository:
                    updated_at = excluded.updated_at""",
             (author, value, now),
         )
+        self.connection.commit()
+
+    def record_sync(
+        self,
+        author: str,
+        *,
+        window_start: datetime,
+        window_end: datetime,
+        status: str,
+        posts: int = 0,
+        layouts: int = 0,
+        error_message: str | None = None,
+    ) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        start = window_start.astimezone(timezone.utc).isoformat()
+        end = window_end.astimezone(timezone.utc).isoformat()
+        self.connection.execute(
+            """INSERT INTO war_layout_sync_history
+               (author, window_start, window_end, status, posts, layouts, error_message, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (author, start, end, status, posts, layouts, error_message, now),
+        )
+        if status == "success":
+            self.connection.execute(
+                """INSERT INTO war_layout_sync_state (author, last_pull_time, updated_at)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(author) DO UPDATE SET last_pull_time = excluded.last_pull_time,
+                       updated_at = excluded.updated_at""",
+                (author, end, now),
+            )
+        self.connection.commit()
+
+    def record_global_sync(
+        self,
+        *,
+        window_start: datetime,
+        window_end: datetime,
+        status: str,
+        posts: int = 0,
+        layouts: int = 0,
+        error_message: str | None = None,
+    ) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        start = window_start.astimezone(timezone.utc).isoformat()
+        end = window_end.astimezone(timezone.utc).isoformat()
+        self.connection.execute(
+            """INSERT INTO war_layout_sync_history
+               (author, window_start, window_end, status, posts, layouts, error_message, created_at)
+               VALUES ('*', ?, ?, ?, ?, ?, ?, ?)""",
+            (start, end, status, posts, layouts, error_message, now),
+        )
+        if status == "success":
+            self.connection.execute(
+                """INSERT INTO war_layout_sync_cursor (id, last_pull_time, updated_at)
+                   VALUES (1, ?, ?)
+                   ON CONFLICT(id) DO UPDATE SET last_pull_time = excluded.last_pull_time,
+                       updated_at = excluded.updated_at""",
+                (end, now),
+            )
         self.connection.commit()
 
     def add_discovered(self, *, post_id: str, author: str, fingerprint: str, layout_url: str, image_url: str, layout_urls: tuple[str, ...] = (), image_urls: tuple[str, ...] = ()) -> bool:

@@ -28,3 +28,29 @@ def test_sync_watermark_is_persisted_per_author():
     repo.set_last_pull_time("alice", timestamp)
     assert repo.get_last_pull_time("alice") == timestamp
     assert repo.get_last_pull_time("bob") is None
+
+
+def test_sync_history_records_window_and_advances_only_on_success():
+    repo = WarLayoutRepository(sqlite3.connect(":memory:"))
+    repo.initialize()
+    start = datetime(2026, 9, 6, 1, 0, tzinfo=timezone.utc)
+    end = datetime(2026, 9, 6, 2, 0, tzinfo=timezone.utc)
+    repo.record_sync("alice", window_start=start, window_end=end, status="failed", posts=2, error_message="timeout")
+    assert repo.get_last_pull_time("alice") is None
+    repo.record_sync("alice", window_start=start, window_end=end, status="success", posts=2, layouts=1)
+    assert repo.get_last_pull_time("alice") == end
+    row = repo.connection.execute("SELECT status, posts, layouts FROM war_layout_sync_history ORDER BY id DESC LIMIT 1").fetchone()
+    assert tuple(row) == ("success", 2, 1)
+
+
+def test_global_sync_cursor_advances_only_after_success():
+    repo = WarLayoutRepository(sqlite3.connect(":memory:"))
+    repo.initialize()
+    start = datetime(2026, 9, 6, 1, 0, tzinfo=timezone.utc)
+    end = datetime(2026, 9, 6, 2, 0, tzinfo=timezone.utc)
+    repo.record_global_sync(window_start=start, window_end=end, status="failed", posts=3, error_message="timeout")
+    assert repo.get_global_last_pull_time() is None
+    repo.record_global_sync(window_start=start, window_end=end, status="success", posts=3, layouts=2)
+    assert repo.get_global_last_pull_time() == end
+    row = repo.connection.execute("SELECT author, status FROM war_layout_sync_history ORDER BY id DESC LIMIT 1").fetchone()
+    assert tuple(row) == ("*", "success")
