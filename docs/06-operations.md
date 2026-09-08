@@ -45,7 +45,7 @@ register_and_arrange.sh 2026-08
         → 导出腾讯文档 "名单_2026-08"
 ```
 
-### 编排流程（v3.0）
+### 编排流程（v3.1）
 
 ```
 arrange(period)
@@ -56,8 +56,8 @@ arrange(period)
   ├─ _load_combat_star_data() 从 league_results 读星数
   ├─ _load_prev_combat_from_results() 从 league_results 读上月名单
   ├─ _load_prev_teams_config() 从 league_teams 读上月配置
-  ├─ build_final_list() 基准重建+升降级（阶段0~6）
-  ├─ build_teams() 贪心填充+白名单+管理员（阶段7~9）
+  ├─ build_final_list() 基准重建+升降级+稳定重排保护（阶段0~6）
+  ├─ build_teams() 贪心填充+边界校验+白名单+管理员（阶段7~9）
   ├─ 构建 ordered_with_team + 注入 movement 标识
   ├─ 回写 team_name → registrations
   └─ arrange_and_export() 导出 Excel（Part1-4）
@@ -280,8 +280,9 @@ data/
 | 冷启动（无上月数据） | 名单1 为空，全部由当月新人构成 |
 | 无星数数据 | 跳过升降级，名单1 直接展开 |
 | 本月队伍数变化 | 贪心填充自然消化：队多不满员，队少溢出入壳子 |
-| 白名单人员未报名 | 强制插入到指定队伍开头 |
-| 白名单超员 | 连锁后移到下一队 |
+| 白名单人员未报名 | 强制插入到指定队伍开头；白名单优先级最高 |
+| 白名单超员 | 普通成员连锁后移；无法同时满足升降级边界时保留白名单目标并打印告警 |
+| 删除或新增造成升降级边界变化 | 稳定重排；升级成员不得跌破目标，降级成员不得回到原队伍；冲突打印告警 |
 | 黑名单命中 | 阶段0 从所有数据源排除，记录到 Part3 |
 
 ### 脚本运行异常

@@ -1,7 +1,7 @@
 # 01 — 系统架构
 
 > 联赛报名与名单编排管理系统 · 架构设计文档
-> 版本：v3.0（2026-08）
+> 版本：v3.1（2026-09）
 
 ---
 
@@ -149,8 +149,8 @@ flowchart TD
          ↓
   → [A] _load_accounts(period)          — 读报名 + 反查得分 + 过滤排除名单
   → [B] sort_accounts()                 — 纯函数分组排序
-  → [C] build_final_list()              — 基准重建+升降级（v3.0）
-  → [D] build_teams()                   — 贪心填充+白名单+管理员
+  → [C] build_final_list()              — 基准重建+升降级+稳定重排保护（v3.1）
+  → [D] build_teams()                   — 贪心填充+边界校验+白名单+管理员
   → [E] 回写 team_name → registrations
   → [F] 导出 Excel（Part1-4）
 ```
@@ -162,13 +162,14 @@ flowchart TD
 | `roster.py` | 编排主控：串联所有阶段、加载数据、回写 DB、输出 Excel + 公示发布 |
 | `sorter.py` | 分组排序纯函数 |
 | `rank_score.py` | 综合分公式 |
-| `baseline_rebuilder.py` | 阶段 0-6：基准重建+升降级+增删（v3.0） |
-| `team_builder.py` | 阶段 7-9：贪心填充+白名单+管理员（v3.0） |
-| `promotion.py` | 升降级配对交换算法（纯函数） |
+| `baseline_rebuilder.py` | 阶段 0-6：基准重建+升降级+稳定增删（v3.1） |
+| `team_builder.py` | 阶段 7-9：贪心填充+升降级边界校验+白名单+管理员（v3.1） |
 | `repository.py` | registrations 表数据访问 |
 | `config/settings.yaml` | 全部配置（YAML） |
 
 排序详情见 `03-sorting.md`，升降级详情见 `04-promotion-relegation.md`。
+
+名单调整统一采用稳定重排：普通成员可随删除、新增和强制插入上下移动；升级成员不得跌破升级目标，降级成员不得回到原队伍。白名单最后执行但业务优先级最高，若与升降级边界冲突则保留白名单目标并输出告警。队伍配置始终先排列全部实战队伍，再排列壳子队伍；两类队伍数量可按配置变化，但不交错编排。
 
 ### ③ war_result —— 战绩
 
@@ -220,7 +221,6 @@ flowchart TD
 |------|------|---------|
 | `rank_score.py` | 综合分（纯函数） | 纯输入输出断言 |
 | `sorter.py` | 分组排序（纯函数） | 纯输入输出断言 |
-| `promotion.py` | 升降级（纯函数） | 纯输入输出断言 |
 | `baseline_rebuilder.py` | 基准重建（纯函数） | 纯输入输出断言 |
 | `team_builder.py` | 贪心填充+白名单+管理员（纯函数） | 纯输入输出断言 |
 | `history_score.py` | 历史分（占位） | 纯输入输出断言 |
@@ -230,7 +230,7 @@ flowchart TD
 | `cwl_registration/roster.py` | 编排主控 | 注入 Fake IO |
 | `war_result/importer.py` | 战绩导入 | 注入 Fake IO |
 
-总计 **135 个测试全绿通过**。
+当前测试基线为 130 个测试，其中 127 个通过；剩余 3 项为旧测试/测试环境假设（详见测试运行记录），不涉及当前升降级保护断言。
 
 ---
 
@@ -270,7 +270,7 @@ sky-admin/
 │   │   ├── service.py / repository.py / status_rule.py
 │   ├── cwl_registration/               # ② CWL 报名
 │   │   ├── importer.py / roster.py / sorter.py / rank_score.py
-│   │   ├── promotion.py / baseline_rebuilder.py / team_builder.py
+│   │   ├── baseline_rebuilder.py / team_builder.py
 │   │   ├── repository.py
 │   ├── war_result/                     # ③ 战绩
 │   │   ├── importer.py / history_score.py / repository.py

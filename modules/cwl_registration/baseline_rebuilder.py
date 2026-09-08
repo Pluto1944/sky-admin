@@ -1,12 +1,12 @@
 """基准重建器（纯函数，无 IO）。
 
-实现设计文档 v3.0 的阶段 0~6：
+实现设计文档 v3.1 的阶段 0~6：
   阶段 0：前置过滤（黑名单）
   阶段 1：构建 7 个临时名单
   阶段 2：基准重建 + 升降级（仅操作名单1）
-  阶段 3：删除实战缺失人员
-  阶段 4：插入战营实战新增（名单6）
-  阶段 5：插入普通营实战新增（名单7）
+  阶段 3：删除实战缺失人员并稳定向上补位（保护降级边界）
+  阶段 4：插入战营实战新增（名单6）并保护升级边界
+  阶段 5：插入普通营实战新增（名单7）并保护升级边界
   阶段 6：追加壳子名单（名单3）
 
 输入：
@@ -25,9 +25,6 @@ registrations 表的 team_info 字段（由上月 arrange() 回写）。按 team
 （队伍编号）分组，避免重名队伍（如 3 支"大一"）混组。
 """
 from __future__ import annotations
-
-from bisect import bisect_right
-from typing import Any
 
 from config import (
     ACCOUNT_TYPE_COMBAT,
@@ -48,6 +45,158 @@ def _effective_capacity(team: dict) -> int:
     elif reserved < 0:
         return base + abs(reserved)
     return base
+
+
+def _combat_capacities(teams: list[dict]) -> list[int]:
+    """Return effective capacities for combat teams in configuration order."""
+    return [
+        _effective_capacity(team)
+        for team in teams
+        if team.get("category") == LEAGUE_COMBAT
+    ]
+
+
+def _team_ordinal_for_position(position: int, capacities: list[int]) -> int | None:
+    """Return the combat-team ordinal containing a zero-based list position."""
+    remaining = max(position, 0)
+    for team_index, capacity in enumerate(capacities):
+        if remaining < capacity:
+            return team_index
+        remaining -= capacity
+    return None
+
+
+def _allocate_with_team_guards(
+    members: list[dict],
+    capacities: list[int],
+    *,
+    protect_relegation: bool = True,
+    protect_promotion: bool = True,
+    fixed_targets: dict[str, int] | None = None,
+) -> tuple[list[list[dict]], list[dict]]:
+    """Stable-pack members into guarded team slots.
+
+    This is deliberately a pure sequence operation.  Members without guard
+    metadata are consumed in their original order.  A relegation guard cannot
+    be consumed by a stronger team than its target; a promotion guard whose
+    target is the current team is reserved before the team is closed.  Fixed
+    targets (used by the highest-priority white-list placement) are reserved
+    before both movement guards.  Thus ordinary members absorb all shifts
+    while guarded members retain only the business guarantee (team boundary),
+    not a permanent intra-team rank.
+    """
+    remaining = list(members)
+    fixed_targets = fixed_targets or {}
+    groups: list[list[dict]] = []
+
+    for team_index, capacity in enumerate(capacities):
+        assigned: list[dict] = []
+        while len(assigned) < capacity:
+            slots_left = capacity - len(assigned)
+
+            # White-list targets are the highest-priority constraint.  Keep
+            # them in their requested team whenever the configured capacity
+            # permits; ordinary members absorb the displacement.
+            fixed_here = [
+                m for m in remaining
+                if fixed_targets.get(m.get("account_name")) == team_index
+            ]
+            if fixed_here and len(fixed_here) >= slots_left:
+                candidate = fixed_here[0]
+                remaining.remove(candidate)
+                assigned.append(candidate)
+                continue
+
+            # A promotion target must be placed in this team or a stronger
+            # one.  If it is still in the remaining queue when this team is
+            # being closed, reserve it for the final available slots.
+            promotion_targets = [
+                m for m in remaining
+                if protect_promotion
+                and m.get("_promotion_target_team_index") == team_index
+                and (
+                    fixed_targets.get(m.get("account_name")) is None
+                    or fixed_targets.get(m.get("account_name")) == team_index
+                )
+                and (
+                    m.get("_minimum_team_index") is None
+                    or m.get("_minimum_team_index") <= team_index
+                )
+            ]
+            if promotion_targets and len(promotion_targets) >= slots_left:
+                candidate = promotion_targets[0]
+            else:
+                candidate = None
+                for m in remaining:
+                    fixed_target = fixed_targets.get(m.get("account_name"))
+                    if fixed_target is not None and fixed_target != team_index:
+                        continue
+                    minimum_team = m.get("_minimum_team_index")
+                    if minimum_team is not None and team_index < minimum_team:
+                        continue
+                    promotion_target = m.get("_promotion_target_team_index")
+                    if (
+                        protect_promotion
+                        and promotion_target is not None
+                        and team_index > promotion_target
+                    ):
+                        continue
+                    relegation_target = m.get("_relegation_target_team_index")
+                    if (
+                        protect_relegation
+                        and relegation_target is not None
+                        and team_index < relegation_target
+                    ):
+                        continue
+                    candidate = m
+                    break
+
+                if candidate is None and fixed_here:
+                    # There are no ordinary members available for this slot;
+                    # consume the requested white-list member now.
+                    candidate = fixed_here[0]
+
+                # If all remaining members are protected from this stronger
+                # team, leave the slot empty rather than violating a guard.
+                if candidate is None:
+                    break
+
+            remaining.remove(candidate)
+            assigned.append(candidate)
+
+        groups.append(assigned)
+
+    return groups, remaining
+
+
+def _pack_with_team_guards(
+    members: list[dict],
+    capacities: list[int],
+    *,
+    protect_relegation: bool = True,
+    protect_promotion: bool = True,
+    fixed_targets: dict[str, int] | None = None,
+) -> list[dict]:
+    """Return a stable linear view of guarded team allocation.
+
+    The public baseline stages return one compact list and therefore cannot
+    represent an empty slot between two teams.  The team builder uses
+    ``_allocate_with_team_guards`` directly when it needs to preserve such a
+    slot.  Here we retain the historical compact-list contract and append any
+    overflow in order, so existing callers remain compatible.
+    """
+    groups, remaining = _allocate_with_team_guards(
+        members,
+        capacities,
+        protect_relegation=protect_relegation,
+        protect_promotion=protect_promotion,
+        fixed_targets=fixed_targets,
+    )
+    packed: list[dict] = []
+    for group in groups:
+        packed.extend(group)
+    packed.extend(remaining)
+    return packed
 
 
 # ---------------------------------------------------------------------------
@@ -122,7 +271,7 @@ def build_temp_lists(
     # 按 team_index（队伍编号）分组，组内按星数降序
     # team_index 是队伍的唯一身份标识，避免重名队伍（如 3 支"大一"）混组
     # 同时从当月 accounts 合并报名数据（match_value / rank_score 等），
-    # 供后续阶段5二分插入时排序使用
+    # 供后续新增人员按现有规则插入和展示使用
     cfg = prev_teams_config if prev_teams_config is not None else teams
     prev_combat_teams = [t for t in cfg if t["category"] == LEAGUE_COMBAT]
 
@@ -254,8 +403,14 @@ def _split_list1_into_slots(
     team_index 是队伍的唯一身份标识，即使 team_name 重名也能正确分成独立 slot。
     team_index 缺失的旧数据回退到 team_name 分组。
     """
-    # 按 team_index 分组，保持出现顺序
-    groups: list[tuple[int | None, list[dict]]] = []
+    # 按 team_index 分组，并保留空队伍槽位。保留空槽位很重要：
+    # 后续缺失补位必须知道原队伍边界，不能因为某支上月队伍为空而
+    # 把更下面的队伍错误地当成上一支队伍。
+    combat_configs = [
+        t for t in prev_teams_config if t.get("category") == LEAGUE_COMBAT
+    ]
+    team_count = len(combat_configs)
+    slots: list[list[dict]] = [[] for _ in range(team_count)]
     seen: dict[int | None, list[dict]] = {}
     # team_index 为 None 时回退到 team_name
     seen_fallback: dict[str, list[dict]] = {}
@@ -266,7 +421,6 @@ def _split_list1_into_slots(
         if tidx is not None:
             if tidx not in seen:
                 seen[tidx] = []
-                groups.append((tidx, seen[tidx]))
             seen[tidx].append(m)
         else:
             tn = m.get("team_name") or "__unknown__"
@@ -275,8 +429,19 @@ def _split_list1_into_slots(
                 groups_fallback.append((tn, seen_fallback[tn]))
             seen_fallback[tn].append(m)
 
-    # 每个 group 就是一支队伍
-    return [members for _, members in groups] + [members for _, members in groups_fallback]
+    # 正常 team_index 使用 combat 配置中的 0-based 队伍编号；旧数据若
+    # 缺失或越界则继续使用 team_name 回退组。
+    for tidx, members in seen.items():
+        if tidx is not None and 0 <= tidx < team_count:
+            slots[tidx].extend(members)
+        else:
+            tn = members[0].get("team_name") if members else "__unknown__"
+            if tn not in seen_fallback:
+                seen_fallback[tn] = []
+                groups_fallback.append((tn, seen_fallback[tn]))
+            seen_fallback[tn].extend(members)
+
+    return slots + [members for _, members in groups_fallback]
 
 
 def _apply_promotion_relegation_on_slots(
@@ -352,6 +517,11 @@ def _apply_promotion_relegation_on_slots(
             team_high.append(prom_member)        # 升级者追加到上队末尾
             team_low.insert(0, rel_member)        # 降级者插入下队队首
 
+            # 目标队伍边界随成员保存，供后续删除、新增和白名单调整时
+            # 进行稳定重排保护。这里只记录队伍边界，不锁定永久队内名次。
+            rel_member["_relegation_target_team_index"] = k + 1
+            prom_member["_promotion_target_team_index"] = k
+
             moved.add(rel_name)
             moved.add(prom_name)
 
@@ -416,17 +586,32 @@ def rebuild_baseline(
 def remove_missing(
     final_list: list[dict],
     list4: list[dict],
+    teams: list[dict] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """从 final_list 中删除名单4 的成员（实战缺失）。
 
-    不使用占位符，人员前移，名单紧凑。
+    不使用占位符，人员前移，名单紧凑。提供队伍配置时，按上月实战
+    队伍容量稳定重排，并避免降级成员被补回更强的原队伍。
 
     返回 (清理后的 final_list, removed_list)
     """
     removed_names = {m["account_name"] for m in list4}
     removed_list = [m for m in final_list if m["account_name"] in removed_names]
-    final_list = [m for m in final_list if m["account_name"] not in removed_names]
-    return final_list, removed_list
+    remaining = [
+        m for m in final_list if m["account_name"] not in removed_names
+    ]
+    if not teams:
+        return remaining, removed_list
+
+    capacities = _combat_capacities(teams)
+    if capacities:
+        remaining = _pack_with_team_guards(
+            remaining,
+            capacities,
+            protect_relegation=True,
+            protect_promotion=False,
+        )
+    return remaining, removed_list
 
 
 # ---------------------------------------------------------------------------
@@ -437,6 +622,7 @@ def insert_combat_new(
     final_list: list[dict],
     list6: list[dict],
     insert_start: int = NEW_COMBAT_INSERT_START,
+    teams: list[dict] | None = None,
 ) -> list[dict]:
     """在 final_list 编号 insert_start 处连续插入名单6 的成员。
 
@@ -450,7 +636,21 @@ def insert_combat_new(
     # 标记为新人
     for m in new_members:
         m["movement"] = "新"
-    return final_list[:pos] + new_members + final_list[pos:]
+    result = final_list[:pos] + new_members + final_list[pos:]
+    if teams:
+        capacities = _combat_capacities(teams)
+        if capacities:
+            minimum_team = _team_ordinal_for_position(pos, capacities)
+            if minimum_team is not None:
+                for member in new_members:
+                    member["_minimum_team_index"] = minimum_team
+            result = _pack_with_team_guards(
+                result,
+                capacities,
+                protect_relegation=True,
+                protect_promotion=True,
+            )
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -473,6 +673,7 @@ def insert_normal_new(
     final_list: list[dict],
     list7: list[dict],
     insert_start: int = NEW_NORMAL_INSERT_START,  # deprecated，当前逻辑中不再生效
+    teams: list[dict] | None = None,
 ) -> list[dict]:
     """名单7 全部追加到实战区末尾（壳子区之前）。
 
@@ -488,7 +689,17 @@ def insert_normal_new(
     new_members = [dict(a) for a in list7]
     for m in new_members:
         m["movement"] = "新"
-    return final_list + new_members
+    result = final_list + new_members
+    if teams:
+        capacities = _combat_capacities(teams)
+        if capacities:
+            result = _pack_with_team_guards(
+                result,
+                capacities,
+                protect_relegation=True,
+                protect_promotion=True,
+            )
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -523,6 +734,9 @@ def build_final_list(
     new_normal_insert_start: int | None = None,
 ) -> tuple[list[dict], list[dict], list[dict], list[str]]:
     """执行阶段 0~6，构建最终线性名单。
+
+    删除、新增阶段采用稳定重排；升降级目标通过内部元数据传递到
+    ``team_builder``，以便最终队伍切分和白名单强制插入继续校验边界。
 
     参数:
         accounts: sort_accounts() 输出的当月排序账号
@@ -562,15 +776,23 @@ def build_final_list(
     )
 
     # 阶段 3：删除实战缺失
-    final_list, removed_list = remove_missing(final_list, lists["list4"])
+    final_list, removed_list = remove_missing(
+        final_list,
+        lists["list4"],
+        prev_teams_config if prev_teams_config is not None else teams,
+    )
 
     # 阶段 4：插入战营新增
     combat_start = new_combat_insert_start if new_combat_insert_start is not None else NEW_COMBAT_INSERT_START
-    final_list = insert_combat_new(final_list, lists["list6"], combat_start)
+    final_list = insert_combat_new(
+        final_list, lists["list6"], combat_start, teams
+    )
 
     # 阶段 5：插入普通营新增
     normal_start = new_normal_insert_start if new_normal_insert_start is not None else NEW_NORMAL_INSERT_START
-    final_list = insert_normal_new(final_list, lists["list7"], normal_start)
+    final_list = insert_normal_new(
+        final_list, lists["list7"], normal_start, teams
+    )
 
     # 阶段 6：追加壳子
     final_list = append_shell(final_list, lists["list3"])

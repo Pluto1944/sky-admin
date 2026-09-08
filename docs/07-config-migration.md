@@ -627,7 +627,7 @@ def _validate(cfg: dict) -> None:
 | 31 | `tests/cwl_registration/test_roster.py` | `from shared.config.common import LEAGUE_COMBAT, LEAGUE_SHELL` | `from config import LEAGUE_COMBAT, LEAGUE_SHELL` |
 | 32 | `tests/cwl_registration/test_importer.py` | `from modules.cwl_registration.config import CAMP_CLAN_TAG` | `from config import CAMP_CLAN_TAG` |
 | 33 | `tests/cwl_registration/test_importer.py` | `from shared.config.common import (...)` | `from config import (...)` |
-| 34 | `tests/cwl_registration/test_promotion.py` | `from shared.config.common import LEAGUE_COMBAT, LEAGUE_SHELL` | `from config import LEAGUE_COMBAT, LEAGUE_SHELL` |
+| 34 | `tests/cwl_registration/test_promotion.py`（历史测试，v3.2 已删除） | `from shared.config.common import LEAGUE_COMBAT, LEAGUE_SHELL` | `from config import LEAGUE_COMBAT, LEAGUE_SHELL` |
 | 35 | `tests/cwl_registration/test_sorter.py` | `from shared.config.common import LEAGUE_COMBAT, LEAGUE_SHELL` | `from config import LEAGUE_COMBAT, LEAGUE_SHELL` |
 | 36 | `tests/cwl_registration/test_team_filler.py` | `from shared.config.common import LEAGUE_COMBAT, LEAGUE_SHELL` | `from config import LEAGUE_COMBAT, LEAGUE_SHELL` |
 

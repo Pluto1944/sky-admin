@@ -1,9 +1,9 @@
 # 04 — 实战队伍升降级系统
 
-> 版本：v3.0（基准重建内嵌升降级）
-> 日期：2026-08-02
-> 状态：已实现，135 测试全绿
-> 关联代码：`promotion.py`、`baseline_rebuilder.py`、`roster.py`
+> 版本：v3.1（基准重建内嵌升降级 + 稳定重排保护）
+> 日期：2026-09-08
+> 状态：已实现
+> 关联代码：`baseline_rebuilder.py`、`roster.py`
 
 ---
 
@@ -56,7 +56,7 @@ arrange("2026-08")                ← 联赛月份
 | `star_data` | `dict[str, int]` | `{account_name: total_stars}` |
 | `config` | `dict` | `PROMOTION_RELEGATION_CONFIG` |
 
-### 步骤（v3.0 基准重建阶段 2b）
+### 步骤（v3.1 基准重建阶段 2b）
 
 ```
 在 baseline_rebuilder.py 的阶段 2b 中，对每对相邻实战队伍执行配对交换：
@@ -78,10 +78,31 @@ arrange("2026-08")                ← 联赛月份
   已移动的人加入 moved 集合
 ```
 
+这里的“上队队尾/下队队首”沿用现有实现的含义：分别在上队、下队中按星数筛选最弱/最强的合格成员，而不是无条件取数组的最后/第一个元素；候选数量、门槛和 `moved` 规则均不变。
+
+升降级日志同时把目标队伍写入成员内部元数据，供后续删除、新增和白名单阶段校验。该元数据不改变 Excel 展示格式。
+
+### 后续名单调整的统一保护规则
+
+升降级完成后，名单仍会发生缺失删除、新增插入、壳子补位和白名单强制插入。所有这些操作都采用稳定重排：普通成员保持相对顺序并吸收前移/后移。
+
+约束如下：
+
+```text
+升级成员：最终不能低于升级目标队伍；可以继续进入更强队伍。
+降级成员：最终不能回到原来的更强队伍；可以继续进入更弱队伍。
+```
+
+- 删除缺失时，升级成员不保护，可以随整体向上；降级成员不得被补回原队。
+- 战营新增（位置 30）和普通营新增（实战区末尾）时，若升级成员被推到目标以下，执行局部稳定修复；降级成员不保护，可以继续下移。
+- 白名单最后执行但业务优先级最高。先尽量通过普通成员级联同时满足白名单和升降级约束；确实无法同时满足时，以白名单目标为准并打印告警日志。
+- 队伍总容量不足时沿用现有策略，由最后配置队伍吸收超员，并打印容量告警；若受保护边界仍无法满足，额外打印边界冲突告警。
+- 最终展示仍使用原有的 `↑升级` / `↓降级`、`新` 等标识，不展示内部补位或兜底移动。
+
 ### 函数签名
 
 ```python
-# promotion.py（纯函数，被 baseline_rebuilder 阶段 2b 调用）
+# baseline_rebuilder.py（主流程阶段 2b 的纯函数）
 def _apply_promotion_relegation_on_slots(
     prev_slots: list[list[dict]],
     star_data: dict[str, int],
@@ -118,11 +139,11 @@ PROMOTION_RELEGATION_CONFIG = {
 4. **低于门槛才降**：≤ 18/21 才降级，19-20 星安全区
 5. **每人每月最多跳 1 级**：`moved` 集合阻止同轮重复移动
 6. **配置驱动**：所有阈值在 `config/settings.yaml` 中可调
-7. **纯函数设计**：`promotion.py` 无 IO，便于测试
+7. **纯函数设计**：`baseline_rebuilder.py` 的升降级阶段无 IO，便于测试
 
 ---
 
-## 六、数据流与架构（v3.0 基准重建内嵌）
+## 六、数据流与架构（v3.1 基准重建内嵌）
 
 ```mermaid
 flowchart TD
@@ -136,7 +157,7 @@ flowchart TD
     H --> I["build_teams()<br/>贪心填充 阶段7~9"]
 ```
 
-### roster.py 集成（v3.0）
+### roster.py 集成（v3.1）
 
 ```python
 def arrange(self, period, ...):
@@ -155,6 +176,7 @@ def arrange(self, period, ...):
     
     # 贪心填充（阶段7~9）
     team_results = build_teams(final_list, teams, ...)
+    # 队伍切分和白名单后再次校验/修复升降级边界；冲突打印告警
     ...
 ```
 
@@ -185,7 +207,7 @@ python scripts/cold_start_arrange.py --period 2026-08 -o 2026-08名单.xlsx
 
 ## 八、测试覆盖
 
-测试文件：`tests/cwl_registration/test_promotion.py`（12 个用例）
+测试文件：`tests/cwl_registration/test_baseline_guards.py`（稳定重排与升降级保护用例）
 
 | # | 场景 | 预期 |
 |---|------|------|
@@ -202,7 +224,7 @@ python scripts/cold_start_arrange.py --period 2026-08 -o 2026-08名单.xlsx
 | 11 | 自定义配置 | 阈值可覆盖 |
 | 12 | 升降级后映射重建 | 数据正确回写 |
 
-完整测试套件：**135 passed**（含 promotion 12 个 + baseline_rebuilder + team_builder 等）
+现有升降级测试覆盖候选不足、安全区、无星数、级联和配置覆盖；新增稳定重排测试覆盖缺失补位、战营/普通营新增升级兜底、强队空槽降级保护，以及白名单冲突告警。
 
 ---
 

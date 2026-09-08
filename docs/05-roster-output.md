@@ -1,7 +1,7 @@
 # 05 — 在线 Excel 输出（Part1-Part4 + 公示发布）
 
-> 版本：v3.0
-> 日期：2026-08-02
+> 版本：v3.1
+> 日期：2026-09-08
 > 关联代码：`roster.py`、`config/settings.yaml`、`team_builder.py`、`baseline_rebuilder.py`
 
 ---
@@ -89,6 +89,8 @@ publish_part4_to_doc(period, publish_doc_id)
 ## 四、Part 1：完整排序名单
 
 **数据来源**：`arrange()` 返回的 `ordered` 列表（排序后含升降级标识的完整名单）
+
+删除、新增和白名单阶段产生的内部补位/兜底移动不新增展示字段；最终继续使用原有的 `↑升级` / `↓降级`、`新` 等标识。缺席的升降级成员按 Part 3 的缺失规则展示。
 
 **表头**：`ARRANGEMENT_OUTPUT_HEADERS`（13 列，定义于 `config/settings.yaml`）
 

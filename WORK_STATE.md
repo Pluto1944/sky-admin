@@ -1,13 +1,13 @@
-# 工作状态（2026-08-02）
+# 工作状态（2026-09-08）
 
 ## 当前进度
 
 - [x] COC API 探测 + 6 队 CWL 数据拉取 + #2QQ 手工补录
-- [x] 升降级算法实现（promotion.py，12 单测）
+- [x] 升降级算法实现（baseline_rebuilder.py，稳定重排保护测试）
 - [x] roster 集成 + 月份语义梳理
 - [x] fetch_cwl_data.py 合并拉取+导入+回退+升降级参与总结
 - [x] api_client.py 正式添加 get_clan_warlog / get_cwl_war / get_league_group
-- [x] 135 测试全绿（15 个测试文件）
+- [ ] 测试基线 130 个：127 个通过，3 项旧测试/环境假设待更新
 - [x] register_and_arrange.sh 一键全流程
 - [x] Part4 网格发布：publish-results 命令 + publish_to_results.sh
 - [x] **v3.0 基准重建**：baseline_rebuilder.py（阶段0~6）+ team_builder.py（阶段7~9），team_filler.py 已删除
@@ -100,8 +100,8 @@ PROMOTION_RELEGATION_CONFIG = {
 - modules/cwl_registration/team_filler.py（已由 team_builder.py 替代）
 - TEAMS_LAST 配置（已由 league_teams 表替代）
 
-### v2.x 新增（历史记录）
-- modules/cwl_registration/promotion.py
-- tests/cwl_registration/test_promotion.py
+### v2.x 新增（历史记录，已移除）
+- modules/cwl_registration/promotion.py（v3.2 已删除，升降级已内嵌 baseline_rebuilder.py）
+- tests/cwl_registration/test_promotion.py（v3.2 已删除）
 - scripts/fetch_cwl_data.py
 - scripts/README.md
