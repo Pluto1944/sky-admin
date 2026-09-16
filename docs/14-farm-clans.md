@@ -127,7 +127,7 @@ topButtons: [
 速本度 = 当前大本等级 - 去速本后大本等级
 ```
 
-速本度大于 0 的成员列为速本候选；0 表示正常。去速本等级沿用当前部落战按 `mapPosition` 的阶段归类算法。无有效部落战时不计算个人速本度。后续再结合职位、活跃度、参战情况和部落最低人数决定最终可替换人员。
+速本度大于 0 的成员列为接口候选；0 表示正常。“成员”Tab 的当前展示阈值为 1，仅显示速本度大于 1 的成员，并在页面标示该阈值。去速本等级沿用当前部落战按 `mapPosition` 的阶段归类算法。无有效部落战时不计算个人速本度。后续再结合职位、活跃度、参战情况和部落最低人数决定最终可替换人员。
 
 成员级速本数据与部落级实时/去速本汇总由同一次 `sync_farm_stats.py` 统一获取和计算，写入同一条 `farm_stats.stats_json`。部落 Tab 读取 `realtime`/`despeed`，成员 Tab 读取 `replace_candidates`，两者必须使用同一场战争数据，并通过 `despeed_source`、`despeed_war_time` 标明来源和时间。当前阶段只使用 `currentwar` 的 `preparation`/`inWar` 数据；无有效部落战时 `replace_candidates` 为空，不将全部成员误判为速本。
 

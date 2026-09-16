@@ -72,14 +72,33 @@
       <view class="bottom-space"></view>
       </view>
     </scroll-view>
-    <scroll-view v-else scroll-y class="content-scroll"><view class="scroll-inner"><view v-if="updatedAt" class="update-time"><text class="update-text">数据更新于 {{ updatedAt }}</text></view><view v-for="clan in memberClans" :key="clan.tag" class="clan-card"><view class="clan-header"><text class="clan-name">{{ clan.name }}</text><text class="clan-tag">{{ clan.tag }}</text><text class="clan-count">速本:{{ clan.members.length }}</text></view><view class="member-table"><view class="member-tr member-head"><text>昵称</text><text>当前本</text><text>去速本</text><text>速本度</text><text>排名</text></view><view v-for="member in clan.members" :key="member.player_tag" class="member-tr"><text class="member-name">{{ member.account_name }}</text><text>{{ member.town_hall_level || '-' }}</text><text>{{ member.despeed_town_hall || '-' }}</text><text>{{ member.rushed_degree || 0 }}</text><text>{{ member.map_position || '-' }}</text></view></view></view></view></scroll-view>
+    <scroll-view v-else scroll-y class="content-scroll">
+      <view class="scroll-inner">
+        <view class="update-time">
+          <text v-if="updatedAt" class="update-text">数据更新于 {{ updatedAt }}</text>
+          <text class="threshold-text">速本阈值：&gt; {{ rushedDegreeThreshold }}</text>
+        </view>
+        <view v-for="clan in memberClans" :key="clan.tag" class="clan-card">
+          <view class="clan-header">
+            <text class="clan-name">{{ clan.name }}</text>
+            <text class="clan-tag">{{ clan.tag }}</text>
+            <text class="clan-count">速本:{{ clan.members.length }}</text>
+          </view>
+          <view class="member-table">
+            <view class="member-tr member-head"><text>昵称</text><text>当前本</text><text>去速本</text><text>速本度</text><text>排名</text></view>
+            <view v-for="member in clan.members" :key="member.player_tag" class="member-tr"><text class="member-name">{{ member.account_name }}</text><text>{{ member.town_hall_level || '-' }}</text><text>{{ member.despeed_town_hall || '-' }}</text><text>{{ member.rushed_degree || 0 }}</text><text>{{ member.map_position || '-' }}</text></view>
+          </view>
+        </view>
+      </view>
+    </scroll-view>
   </view>
 </template>
 
 <script>
 import TopBar from '@/components/TopBar.vue'
 import { getFarmConfig } from '@/utils/api.js'
-import { getMembers } from '@/utils/api.js'
+
+const RUSHED_DEGREE_THRESHOLD = 1
 
 export default {
   components: { TopBar },
@@ -89,14 +108,27 @@ export default {
       error: '',
       clans: [],
       updatedAt: '',
-      thLevels: ['18', '17', '16', '15', '14', '13', '12', '11']
-      ,tab: 'clans', members: []
+      thLevels: ['18', '17', '16', '15', '14', '13', '12', '11'],
+      tab: 'clans',
+      rushedDegreeThreshold: RUSHED_DEGREE_THRESHOLD
     }
   },
   created() {
     this.fetchData()
   },
-  computed: { memberClans() { return this.clans.map(c => ({ tag: c.clan_tag, name: c.clan_name || c.clan_tag, members: c.replace_candidates || [] })).filter(c => c.members.length) } },
+  computed: {
+    memberClans() {
+      return this.clans
+        .map(clan => ({
+          tag: clan.clan_tag,
+          name: clan.clan_name || clan.clan_tag,
+          members: (clan.replace_candidates || []).filter(
+            member => Number(member.rushed_degree) > this.rushedDegreeThreshold
+          )
+        }))
+        .filter(clan => clan.members.length)
+    }
+  },
   methods: {
     async fetchData() {
       this.loading = true
@@ -173,6 +205,12 @@ export default {
 .update-text {
   font-size: 24rpx;
   color: #556;
+}
+.threshold-text {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 24rpx;
+  color: #aab4c8;
 }
 
 /* 部落卡片 */
