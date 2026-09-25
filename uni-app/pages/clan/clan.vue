@@ -6,7 +6,7 @@
     <scroll-view v-else scroll-x scroll-y class="table-scroll-x">
     <view class="table-wrap">
       <view v-if="updatedAt" class="update-time"><text class="update-text">数据更新于 {{ updatedAt }}</text></view>
-      <view v-if="searchText || memberFilter !== 'all'" class="filter-summary">
+      <view v-if="searchText || memberFilter !== 'all' || clanFilters.length" class="filter-summary">
         <text>当前：{{ filterLabel }}{{ searchText ? ' · “' + searchText + '”' : '' }} · {{ sortedMembers.length }} 人</text>
         <text class="clear-filter" @tap="clearFilters">清除</text>
       </view>
@@ -19,8 +19,33 @@
           <view class="td w-name name-text">{{ item.account_name || '-' }}</view><view class="td w-owner">{{ item.player_name || '-' }}</view><view class="td w-clan">{{ item.clan_tag || '-' }}</view><view class="td w-role">{{ formatRole(item.clan_role) }}</view><view class="td w-th">{{ item.town_hall_level || '-' }}</view><view class="td w-exp">{{ item.exp_level || '-' }}</view><view class="td w-trophy">{{ item.trophies || 0 }}</view><view class="td w-league">{{ item.league_name || '-' }}</view><view class="td w-score">{{ item.history_score || 0 }}</view><view class="td w-status">{{ formatStatus(item.status) }}</view><view class="td w-member">{{ formatStatus(item.membership_status) }}</view><view class="td w-reg">{{ item.last_reg_period || '-' }}</view><view class="td w-sync">{{ formatTime(item.last_synced_at) }}</view>
         </view>
       </view>
-    </view>
+      </view>
     </scroll-view>
+    <view v-if="filterPanelVisible" class="filter-mask" @tap="closeFilterPanel">
+      <view class="filter-panel" @tap.stop>
+        <view class="filter-panel-title">筛选成员</view>
+        <text class="filter-group-title">成员状态</text>
+        <view class="filter-options status-options">
+          <view v-for="option in memberFilterOptions" :key="option.key" class="filter-option" @tap="draftMemberFilter = option.key">
+            <text class="filter-check" :class="{ checked: draftMemberFilter === option.key }">{{ draftMemberFilter === option.key ? '✓' : '' }}</text>
+            <text>{{ option.label }}</text>
+          </view>
+        </view>
+        <text class="filter-group-title">部落（可多选）</text>
+        <scroll-view scroll-y class="clan-filter-options">
+          <view v-for="clan in clanOptions" :key="clan.tag" class="filter-option" @tap="toggleClanFilter(clan.tag)">
+            <text class="filter-check" :class="{ checked: draftClanFilters.indexOf(clan.tag) >= 0 }">{{ draftClanFilters.indexOf(clan.tag) >= 0 ? '✓' : '' }}</text>
+            <text>{{ clan.name }}（{{ clan.tag }}）</text>
+          </view>
+          <text v-if="!clanOptions.length" class="filter-empty">暂无部落数据</text>
+        </scroll-view>
+        <view class="filter-actions">
+          <text class="filter-action clear-action" @tap="clearFilters">清除</text>
+          <text class="filter-action cancel-action" @tap="closeFilterPanel">取消</text>
+          <text class="filter-action confirm-action" @tap="applyFilters">确定</text>
+        </view>
+      </view>
+    </view>
   </view>
 </template>
 <script>
@@ -28,13 +53,23 @@ import TopBar from '@/components/TopBar.vue'
 import { getMembers } from '@/utils/api.js'
 export default {
   components: { TopBar },
-  data() { return { topButtons: [{ key: 'record', icon: '⚔️', text: '战营', action: 'onRecord' }, { key: 'farm', icon: '🔄', text: '互刷', action: 'onFarm' }, { key: 'filter', icon: '⏬', text: '筛选', action: 'onFilter' }, { key: 'search', icon: '🔍', text: '搜索', action: 'onSearch' }], members: [], loading: true, updatedAt: '', sortKey: 'town_hall_level', sortOrder: 'desc', searchText: '', memberFilter: 'all' } },
+  data() { return { topButtons: [{ key: 'record', icon: '⚔️', text: '战营', action: 'onRecord' }, { key: 'farm', icon: '🔄', text: '互刷', action: 'onFarm' }, { key: 'filter', icon: '⏬', text: '筛选', action: 'onFilter' }, { key: 'search', icon: '🔍', text: '搜索', action: 'onSearch' }], members: [], allowedClans: [], loading: true, updatedAt: '', sortKey: 'town_hall_level', sortOrder: 'desc', searchText: '', memberFilter: 'all', clanFilters: [], filterPanelVisible: false, draftMemberFilter: 'all', draftClanFilters: [] } },
   computed: {
-    filterLabel() { return ({ all: '全部成员', member: '仅在部落', left: '已离开' }[this.memberFilter] || '全部成员') },
+    memberFilterOptions() { return [{ key: 'all', label: '全部成员' }, { key: 'member', label: '仅在部落' }, { key: 'left', label: '已离开' }] },
+    clanOptions() {
+      return this.allowedClans
+    },
+    filterLabel() {
+      const labels = []
+      if (this.memberFilter !== 'all') labels.push(({ member: '仅在部落', left: '已离开' }[this.memberFilter] || '全部成员'))
+      if (this.clanFilters.length) labels.push(`部落 ${this.clanFilters.length}个`)
+      return labels.length ? labels.join(' · ') : '全部成员'
+    },
     sortedMembers() {
       const keyword = this.searchText.trim().toLowerCase()
       const a = this.members.filter((item) => {
         if (this.memberFilter !== 'all' && (item.membership_status || item.status) !== this.memberFilter) return false
+        if (this.clanFilters.length && !this.clanFilters.includes(item.clan_tag)) return false
         if (!keyword) return true
         return [item.account_name, item.player_name, item.player_tag, item.clan_tag, item.league_name]
           .filter(Boolean).some(value => String(value).toLowerCase().includes(keyword))
@@ -57,7 +92,7 @@ export default {
     }
   },
   methods: {
-    async fetchMembers() { try { const res = await getMembers(); this.members = res.members || []; const times = this.members.map(x => x.last_synced_at).filter(Boolean).sort(); this.updatedAt = times.length ? this.formatTime(times[times.length - 1]) : '' } catch (e) { uni.showToast({ title: '加载成员失败', icon: 'none' }) } finally { this.loading = false } },
+    async fetchMembers() { try { const res = await getMembers(); this.members = res.members || []; this.allowedClans = res.clans || []; const times = this.members.map(x => x.last_synced_at).filter(Boolean).sort(); this.updatedAt = times.length ? this.formatTime(times[times.length - 1]) : '' } catch (e) { uni.showToast({ title: '加载成员失败', icon: 'none' }) } finally { this.loading = false } },
     formatRole(v) { return ({ leader: '首领', coLeader: '副首领', admin: '长老', member: '成员' }[v] || v || '-') },
     formatStatus(v) { return v === 'member' ? '在部落' : v === 'left' ? '已离开' : '-' },
     formatTime(v) {
@@ -75,10 +110,20 @@ export default {
     onRecord() { uni.navigateTo({ url: '/pages/clan/stats' }) },
     onFarm() { uni.navigateTo({ url: '/pages/clan/farm' }) },
     onFilter() {
-      uni.showActionSheet({
-        itemList: ['全部成员', '仅在部落', '已离开'],
-        success: ({ tapIndex }) => { this.memberFilter = ['all', 'member', 'left'][tapIndex] }
-      })
+      this.draftMemberFilter = this.memberFilter
+      this.draftClanFilters = this.clanFilters.slice()
+      this.filterPanelVisible = true
+    },
+    closeFilterPanel() { this.filterPanelVisible = false },
+    toggleClanFilter(tag) {
+      const index = this.draftClanFilters.indexOf(tag)
+      if (index >= 0) this.draftClanFilters.splice(index, 1)
+      else this.draftClanFilters.push(tag)
+    },
+    applyFilters() {
+      this.memberFilter = this.draftMemberFilter
+      this.clanFilters = this.draftClanFilters.slice()
+      this.filterPanelVisible = false
     },
     onSearch() {
       uni.showModal({
@@ -89,7 +134,14 @@ export default {
         success: (res) => { if (res.confirm) this.searchText = (res.content || '').trim() }
       })
     },
-    clearFilters() { this.searchText = ''; this.memberFilter = 'all' }
+    clearFilters() {
+      this.searchText = ''
+      this.memberFilter = 'all'
+      this.clanFilters = []
+      this.draftMemberFilter = 'all'
+      this.draftClanFilters = []
+      this.filterPanelVisible = false
+    }
   }
 }
 </script>
@@ -100,6 +152,20 @@ export default {
 .update-time { text-align: center; padding: 12rpx 0 8rpx; }.update-text { color: #667; font-size: 22rpx; }
 .filter-summary { height: 56rpx; box-sizing: border-box; display: flex; align-items: center; justify-content: center; color: #9aa0b0; font-size: 22rpx; background: #15152a; }
 .clear-filter { color: #5fa8ff; margin-left: 18rpx; padding: 8rpx; }
+.filter-mask { position: fixed; left: 0; right: 0; top: 0; bottom: 0; z-index: 1000; display: flex; align-items: flex-end; background: rgba(0, 0, 0, 0.58); }
+.filter-panel { width: 100%; max-height: 78vh; box-sizing: border-box; padding: 28rpx 32rpx 36rpx; background: #1a1a2e; border-radius: 24rpx 24rpx 0 0; }
+.filter-panel-title { margin-bottom: 24rpx; color: #fff; font-size: 32rpx; font-weight: 600; text-align: center; }
+.filter-group-title { display: block; margin: 18rpx 0 12rpx; color: #8890a0; font-size: 24rpx; }
+.filter-options { display: flex; flex-direction: row; flex-wrap: wrap; }
+.filter-option { display: flex; flex-direction: row; align-items: center; min-height: 72rpx; margin-right: 28rpx; color: #d0d0dc; font-size: 26rpx; }
+.filter-check { display: flex; width: 36rpx; height: 36rpx; box-sizing: border-box; align-items: center; justify-content: center; margin-right: 10rpx; border: 2rpx solid #66708a; border-radius: 6rpx; color: #fff; font-size: 26rpx; }
+.filter-check.checked { border-color: #4a90d9; background: #4a90d9; }
+.clan-filter-options { max-height: 360rpx; border-top: 1rpx solid #2a2a4a; border-bottom: 1rpx solid #2a2a4a; }
+.clan-filter-options .filter-option { margin-right: 0; padding: 0 8rpx; border-bottom: 1rpx solid #252540; }
+.filter-empty { display: block; padding: 28rpx 0; color: #66708a; font-size: 24rpx; text-align: center; }
+.filter-actions { display: flex; flex-direction: row; justify-content: flex-end; margin-top: 24rpx; }
+.filter-action { min-width: 120rpx; margin-left: 16rpx; padding: 16rpx 24rpx; border-radius: 8rpx; text-align: center; font-size: 26rpx; }
+.clear-action { color: #e06060; }.cancel-action { color: #aab4c8; background: #252540; }.confirm-action { color: #fff; background: #4a90d9; }
 .no-result { width: 750rpx; padding: 80rpx 0; color: #777f96; font-size: 26rpx; text-align: center; }
 .table-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; padding-bottom: 100rpx; overflow: hidden; }
 .table-scroll-x { flex: 1; min-height: 0; width: 100%; }

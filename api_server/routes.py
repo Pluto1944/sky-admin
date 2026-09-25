@@ -23,7 +23,7 @@ from modules.player.repository import PlayerRepository
 from .deps import get_repo, get_db
 from .auth import create_token, require_user
 from shared.db.connection import Database
-from config import DB_PATH, LEAGUE_COMBAT, get_farm_clans
+from config import CLANS, DB_PATH, LEAGUE_COMBAT, get_farm_clans
 
 router = APIRouter(prefix="/api")
 
@@ -54,6 +54,11 @@ def list_members(repo: PlayerRepository = Depends(get_repo)):
         return {
             "count": len(members),
             "members": members,
+            "clans": [
+                {"tag": clan["tag"], "name": clan.get("name") or clan["tag"]}
+                for clan in CLANS
+                if clan.get("enabled", True)
+            ],
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"数据库查询失败: {e}")

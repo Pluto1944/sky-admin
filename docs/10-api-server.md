@@ -86,6 +86,9 @@ GET /api/members
 ```json
 {
   "count": 50,
+  "clans": [
+    { "tag": "#2QQ", "name": "云深不知处 战营" }
+  ],
   "members": [
     {
       "player_tag": "#ABC123",

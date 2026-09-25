@@ -91,7 +91,7 @@ export function bindAccount(accountName, playerTag) {
 
 /**
  * 获取成员列表
- * @returns {Promise} { count, members }
+ * @returns {Promise} { count, members, clans: [{ tag, name }] }
  */
 export function getMembers() {
   return request('/api/members')
