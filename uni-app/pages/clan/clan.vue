@@ -23,9 +23,20 @@ import TopBar from '@/components/TopBar.vue'
 import { getMembers } from '@/utils/api.js'
 export default {
   components: { TopBar },
-  data() { return { topButtons: [{ key: 'record', icon: '⚔️', text: '战绩', action: 'onRecord' }, { key: 'farm', icon: '🔄', text: '互刷', action: 'onFarm' }, { key: 'filter', icon: '⏬', text: '筛选', action: 'onFilter' }, { key: 'search', icon: '🔍', text: '搜索', action: 'onSearch' }], members: [], loading: true, updatedAt: '', sortKey: 'town_hall_level', sortOrder: 'desc' } },
+  data() { return { topButtons: [{ key: 'record', icon: '⚔️', text: '战营', action: 'onRecord' }, { key: 'farm', icon: '🔄', text: '互刷', action: 'onFarm' }, { key: 'filter', icon: '⏬', text: '筛选', action: 'onFilter' }, { key: 'search', icon: '🔍', text: '搜索', action: 'onSearch' }], members: [], loading: true, updatedAt: '', sortKey: 'town_hall_level', sortOrder: 'desc' } },
   computed: { sortedMembers() { const a = [...this.members]; const k = this.sortKey; a.sort((x, y) => { const xv = x[k]; const yv = y[k]; if (xv == null) return 1; if (yv == null) return -1; const n = typeof xv === 'number' && typeof yv === 'number' ? xv - yv : String(xv).localeCompare(String(yv), 'zh-CN'); return this.sortOrder === 'desc' ? -n : n }); return a } },
   onLoad() { this.fetchMembers() },
+  onShareAppMessage() {
+    return {
+      title: '苍穹联赛助手｜部落成员',
+      path: '/pages/clan/clan'
+    }
+  },
+  onShareTimeline() {
+    return {
+      title: '苍穹联赛助手｜部落成员'
+    }
+  },
   methods: {
     async fetchMembers() { try { const res = await getMembers(); this.members = res.members || []; const times = this.members.map(x => x.last_synced_at).filter(Boolean).sort(); this.updatedAt = times.length ? this.formatTime(times[times.length - 1]) : '' } catch (e) { uni.showToast({ title: '加载成员失败', icon: 'none' }) } finally { this.loading = false } },
     formatRole(v) { return ({ leader: '首领', coLeader: '副首领', admin: '长老', member: '成员' }[v] || v || '-') },

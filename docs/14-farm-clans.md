@@ -65,7 +65,7 @@ coc_sync:
 
 ```javascript
 topButtons: [
-  { key: 'record', icon: '⚔️', text: '战绩', action: 'onRecord' },
+  { key: 'record', icon: '⚔️', text: '战营', action: 'onRecord' },
   { key: 'farm', icon: '🔄', text: '互刷', action: 'onFarm' },
   { key: 'filter', icon: '⏬', text: '筛选', action: 'onFilter' },
   { key: 'search', icon: '🔍', text: '搜索', action: 'onSearch' }

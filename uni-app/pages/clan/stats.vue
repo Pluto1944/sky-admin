@@ -1,6 +1,6 @@
 <template>
   <view class="page-container">
-    <TopBar title="战绩" :showBack="true" />
+    <TopBar title="战营" :showBack="true" />
 
     <!-- 标签切换栏 -->
     <view class="tab-bar">
@@ -16,7 +16,7 @@
 
     <view v-else-if="!stats.length" class="empty-box">
       <text class="empty-icon">📊</text>
-      <text class="empty-text">暂无战绩数据</text>
+      <text class="empty-text">暂无战营数据</text>
     </view>
 
     <view v-else class="table-wrap">
@@ -104,6 +104,17 @@ export default {
     }
   },
   onLoad() { this.fetchData() },
+  onShareAppMessage() {
+    return {
+      title: '苍穹联赛助手｜战营',
+      path: '/pages/clan/stats'
+    }
+  },
+  onShareTimeline() {
+    return {
+      title: '苍穹联赛助手｜战营'
+    }
+  },
   methods: {
     switchTab(t) {
       if (this.tab === t) return

@@ -116,6 +116,17 @@ export default {
   created() {
     this.fetchData()
   },
+  onShareAppMessage() {
+    return {
+      title: '苍穹联赛助手｜互刷部落',
+      path: '/pages/clan/farm'
+    }
+  },
+  onShareTimeline() {
+    return {
+      title: '苍穹联赛助手｜互刷部落'
+    }
+  },
   computed: {
     memberClans() {
       return this.clans
