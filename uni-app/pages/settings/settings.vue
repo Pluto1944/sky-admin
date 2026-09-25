@@ -102,17 +102,24 @@
         <button
           class="login-btn"
           :loading="loginLoading"
-          :disabled="loginLoading"
+          :disabled="loginLoading || !privacyAgreed"
           @tap="handleLogin"
         >
           <text class="wechat-icon">💬</text>
           <text>微信一键登录</text>
         </button>
 
-        <view class="login-tip" v-if="!loginLoading">首次登录自动注册账号</view>
+        <view class="login-tip" v-if="!loginLoading">首次登录将创建账号（需先同意协议）</view>
         <view class="login-tip loading-text" v-else>正在登录中...</view>
 
-        <view class="footer-text">登录即表示同意《用户协议》和《隐私政策》</view>
+        <view class="privacy-row" @tap="togglePrivacy">
+          <text class="checkbox-mark">{{ privacyAgreed ? '☑' : '□' }}</text>
+          <text>我已阅读并同意</text>
+          <text class="privacy-link" @tap.stop="openUserAgreement">《用户协议》</text>
+          <text>和</text>
+          <text class="privacy-link" @tap.stop="openPrivacyPolicy">《隐私政策》</text>
+        </view>
+        <view class="privacy-note">未同意前不会调用微信登录或创建账号</view>
       </view>
     </view>
   </view>
@@ -133,7 +140,8 @@ export default {
       // 绑定表单
       bindAccountName: '',
       bindPlayerTag: '',
-      bindSubmitting: false
+      bindSubmitting: false,
+      privacyAgreed: false
     }
   },
   computed: {
@@ -150,7 +158,9 @@ export default {
   methods: {
     refreshLoginState() {
       const token = uni.getStorageSync('token')
-      if (token) {
+      const consented = uni.getStorageSync('privacyConsent') === 'v1'
+      this.privacyAgreed = consented
+      if (token && consented) {
         getMyInfo()
           .then((res) => {
             this.isLoggedIn = true
@@ -176,6 +186,10 @@ export default {
 
     // ====== 登录 ======
     handleLogin() {
+      if (!this.privacyAgreed) {
+        uni.showToast({ title: '请先阅读并同意用户协议和隐私政策', icon: 'none' })
+        return
+      }
       this.loginLoading = true
 
       uni.login({
@@ -184,6 +198,7 @@ export default {
           wechatLogin(loginRes.code)
             .then((res) => {
               uni.setStorageSync('token', res.token)
+              uni.setStorageSync('privacyConsent', 'v1')
               this.isLoggedIn = true
               this.userInfo = res.user
               getApp().globalData.isLoggedIn = true
@@ -216,6 +231,16 @@ export default {
           })
         }
       })
+    },
+
+    togglePrivacy() {
+      this.privacyAgreed = !this.privacyAgreed
+    },
+    openUserAgreement() {
+      uni.navigateTo({ url: '/pages/legal/user-agreement' })
+    },
+    openPrivacyPolicy() {
+      uni.navigateTo({ url: '/pages/legal/privacy-policy' })
     },
 
     // ====== 绑定 ======
@@ -613,10 +638,8 @@ export default {
   color: #8890a0;
 }
 
-.footer-text {
-  position: absolute;
-  bottom: 120rpx;
-  font-size: 22rpx;
-  color: #555;
-}
+.privacy-row { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; margin-top: 30rpx; color: #9aa0b0; font-size: 23rpx; line-height: 42rpx; }
+.checkbox-mark { color: #4a90d9; font-size: 34rpx; margin-right: 8rpx; }
+.privacy-link { color: #5fa8ff; padding: 0 4rpx; }
+.privacy-note { display: block; text-align: center; color: #666; font-size: 20rpx; margin-top: 10rpx; }
 </style>

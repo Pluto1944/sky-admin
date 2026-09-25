@@ -78,7 +78,7 @@ export default {
   methods: {
     loadUserInfo() {
       const token = uni.getStorageSync('token')
-      if (!token) {
+      if (!token || uni.getStorageSync('privacyConsent') !== 'v1') {
         this.userInfo = null
         this.loading = false
         return
@@ -101,7 +101,7 @@ export default {
     goMembers() {
       // TODO: 后续实现成员列表页
       uni.showToast({
-        title: '功能开发中',
+        title: '请使用底部导航',
         icon: 'none'
       })
     },

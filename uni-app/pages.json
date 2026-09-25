@@ -35,6 +35,18 @@
       }
     },
     {
+      "path": "pages/legal/user-agreement",
+      "style": {
+        "navigationBarTitleText": "用户协议"
+      }
+    },
+    {
+      "path": "pages/legal/privacy-policy",
+      "style": {
+        "navigationBarTitleText": "隐私政策"
+      }
+    },
+    {
       "path": "pages/bind/bind",
       "style": {
         "navigationBarTitleText": "绑定游戏账号"

@@ -6,10 +6,15 @@
     <scroll-view v-else scroll-x scroll-y class="table-scroll-x">
     <view class="table-wrap">
       <view v-if="updatedAt" class="update-time"><text class="update-text">数据更新于 {{ updatedAt }}</text></view>
+      <view v-if="searchText || memberFilter !== 'all'" class="filter-summary">
+        <text>当前：{{ filterLabel }}{{ searchText ? ' · “' + searchText + '”' : '' }} · {{ sortedMembers.length }} 人</text>
+        <text class="clear-filter" @tap="clearFilters">清除</text>
+      </view>
       <view class="tr tr-head">
         <view class="td w-name" @tap="onSort('account_name')">昵称{{ sortMark('account_name') }}</view><view class="td w-owner">归属人</view><view class="td w-clan" @tap="onSort('clan_tag')">部落{{ sortMark('clan_tag') }}</view><view class="td w-role">职位</view><view class="td w-th" @tap="onSort('town_hall_level')">本{{ sortMark('town_hall_level') }}</view><view class="td w-exp" @tap="onSort('exp_level')">经验{{ sortMark('exp_level') }}</view><view class="td w-trophy" @tap="onSort('trophies')">奖杯{{ sortMark('trophies') }}</view><view class="td w-league">联赛</view><view class="td w-score" @tap="onSort('history_score')">历史分{{ sortMark('history_score') }}</view><view class="td w-status">报名状态</view><view class="td w-member">成员状态</view><view class="td w-reg">最近报名</view><view class="td w-sync">最近同步</view>
       </view>
       <view class="tbody">
+        <view v-if="!sortedMembers.length" class="no-result">没有符合条件的成员</view>
         <view v-for="(item, idx) in sortedMembers" :key="idx" class="tr" :class="{ even: idx % 2 === 1 }">
           <view class="td w-name name-text">{{ item.account_name || '-' }}</view><view class="td w-owner">{{ item.player_name || '-' }}</view><view class="td w-clan">{{ item.clan_tag || '-' }}</view><view class="td w-role">{{ formatRole(item.clan_role) }}</view><view class="td w-th">{{ item.town_hall_level || '-' }}</view><view class="td w-exp">{{ item.exp_level || '-' }}</view><view class="td w-trophy">{{ item.trophies || 0 }}</view><view class="td w-league">{{ item.league_name || '-' }}</view><view class="td w-score">{{ item.history_score || 0 }}</view><view class="td w-status">{{ formatStatus(item.status) }}</view><view class="td w-member">{{ formatStatus(item.membership_status) }}</view><view class="td w-reg">{{ item.last_reg_period || '-' }}</view><view class="td w-sync">{{ formatTime(item.last_synced_at) }}</view>
         </view>
@@ -23,8 +28,22 @@ import TopBar from '@/components/TopBar.vue'
 import { getMembers } from '@/utils/api.js'
 export default {
   components: { TopBar },
-  data() { return { topButtons: [{ key: 'record', icon: '⚔️', text: '战营', action: 'onRecord' }, { key: 'farm', icon: '🔄', text: '互刷', action: 'onFarm' }, { key: 'filter', icon: '⏬', text: '筛选', action: 'onFilter' }, { key: 'search', icon: '🔍', text: '搜索', action: 'onSearch' }], members: [], loading: true, updatedAt: '', sortKey: 'town_hall_level', sortOrder: 'desc' } },
-  computed: { sortedMembers() { const a = [...this.members]; const k = this.sortKey; a.sort((x, y) => { const xv = x[k]; const yv = y[k]; if (xv == null) return 1; if (yv == null) return -1; const n = typeof xv === 'number' && typeof yv === 'number' ? xv - yv : String(xv).localeCompare(String(yv), 'zh-CN'); return this.sortOrder === 'desc' ? -n : n }); return a } },
+  data() { return { topButtons: [{ key: 'record', icon: '⚔️', text: '战营', action: 'onRecord' }, { key: 'farm', icon: '🔄', text: '互刷', action: 'onFarm' }, { key: 'filter', icon: '⏬', text: '筛选', action: 'onFilter' }, { key: 'search', icon: '🔍', text: '搜索', action: 'onSearch' }], members: [], loading: true, updatedAt: '', sortKey: 'town_hall_level', sortOrder: 'desc', searchText: '', memberFilter: 'all' } },
+  computed: {
+    filterLabel() { return ({ all: '全部成员', member: '仅在部落', left: '已离开' }[this.memberFilter] || '全部成员') },
+    sortedMembers() {
+      const keyword = this.searchText.trim().toLowerCase()
+      const a = this.members.filter((item) => {
+        if (this.memberFilter !== 'all' && (item.membership_status || item.status) !== this.memberFilter) return false
+        if (!keyword) return true
+        return [item.account_name, item.player_name, item.player_tag, item.clan_tag, item.league_name]
+          .filter(Boolean).some(value => String(value).toLowerCase().includes(keyword))
+      })
+      const k = this.sortKey
+      a.sort((x, y) => { const xv = x[k]; const yv = y[k]; if (xv == null) return 1; if (yv == null) return -1; const n = typeof xv === 'number' && typeof yv === 'number' ? xv - yv : String(xv).localeCompare(String(yv), 'zh-CN'); return this.sortOrder === 'desc' ? -n : n })
+      return a
+    }
+  },
   onLoad() { this.fetchMembers() },
   onShareAppMessage() {
     return {
@@ -53,7 +72,24 @@ export default {
     },
     onSort(k) { if (this.sortKey === k) this.sortOrder = this.sortOrder === 'desc' ? 'asc' : 'desc'; else { this.sortKey = k; this.sortOrder = 'desc' } },
     sortMark(k) { return this.sortKey === k ? (this.sortOrder === 'desc' ? '↓' : '↑') : '' },
-    onRecord() { uni.navigateTo({ url: '/pages/clan/stats' }) }, onFarm() { uni.navigateTo({ url: '/pages/clan/farm' }) }, onFilter() { uni.showToast({ title: '筛选功能开发中', icon: 'none' }) }, onSearch() { uni.showToast({ title: '搜索功能开发中', icon: 'none' }) }
+    onRecord() { uni.navigateTo({ url: '/pages/clan/stats' }) },
+    onFarm() { uni.navigateTo({ url: '/pages/clan/farm' }) },
+    onFilter() {
+      uni.showActionSheet({
+        itemList: ['全部成员', '仅在部落', '已离开'],
+        success: ({ tapIndex }) => { this.memberFilter = ['all', 'member', 'left'][tapIndex] }
+      })
+    },
+    onSearch() {
+      uni.showModal({
+        title: '搜索成员',
+        editable: true,
+        placeholderText: '输入昵称、玩家标签或部落标签',
+        content: this.searchText,
+        success: (res) => { if (res.confirm) this.searchText = (res.content || '').trim() }
+      })
+    },
+    clearFilters() { this.searchText = ''; this.memberFilter = 'all' }
   }
 }
 </script>
@@ -62,6 +98,9 @@ export default {
 .state-box { flex: 1; display: flex; align-items: center; justify-content: center; }
 .state-text { color: #888; font-size: 28rpx; }
 .update-time { text-align: center; padding: 12rpx 0 8rpx; }.update-text { color: #667; font-size: 22rpx; }
+.filter-summary { height: 56rpx; box-sizing: border-box; display: flex; align-items: center; justify-content: center; color: #9aa0b0; font-size: 22rpx; background: #15152a; }
+.clear-filter { color: #5fa8ff; margin-left: 18rpx; padding: 8rpx; }
+.no-result { width: 750rpx; padding: 80rpx 0; color: #777f96; font-size: 26rpx; text-align: center; }
 .table-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; padding-bottom: 100rpx; overflow: hidden; }
 .table-scroll-x { flex: 1; min-height: 0; width: 100%; }
 .table-wrap { width: 1570rpx; }

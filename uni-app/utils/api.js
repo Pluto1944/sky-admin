@@ -4,8 +4,8 @@
  */
 
 // 后端 API 基地址
-// 备案通过前使用 IP 直连；备案完成后改回 https://api.skycoc.cc
-const BASE_URL = 'https://115.159.64.19'
+// 域名备案已通过，使用正式域名访问后端
+const BASE_URL = 'https://api.skycoc.cc'
 
 /**
  * 通用请求方法

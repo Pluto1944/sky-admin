@@ -4,7 +4,8 @@ export default {
     console.log('App Launch')
     // 启动时验证 token 是否有效
     const token = uni.getStorageSync('token')
-    if (token) {
+    const consented = uni.getStorageSync('privacyConsent') === 'v1'
+    if (token && consented) {
       this.checkLoginStatus()
     }
   },
@@ -37,8 +38,8 @@ export default {
     }
   },
   globalData: {
-    // 备案通过前使用 IP 直连；备案完成后改回 https://api.skycoc.cc
-    apiBase: 'https://115.159.64.19',
+    // 域名备案已通过，使用正式域名访问后端
+    apiBase: 'https://api.skycoc.cc',
     userInfo: null,
     isLoggedIn: false
   }

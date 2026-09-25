@@ -103,7 +103,13 @@ export default {
       return arr
     }
   },
-  onLoad() { this.fetchData() },
+  onLoad(options) {
+    if (options && options.tab === 'league') {
+      this.tab = 'league'
+      this.sortKey = 'offense_6m'
+    }
+    this.fetchData()
+  },
   onShareAppMessage() {
     return {
       title: '苍穹联赛助手｜战营',

@@ -12,23 +12,30 @@
       <button
         class="login-btn"
         :loading="loading"
-        :disabled="loading"
+        :disabled="loading || !privacyAgreed"
         @tap="handleLogin"
       >
         <text class="wechat-icon">💬</text>
         <text>微信一键登录</text>
       </button>
       <view class="login-tip" v-if="!loading">
-        首次登录自动注册账号
+        首次登录将创建账号（需先同意协议）
       </view>
       <view class="login-tip loading-text" v-else>
         正在登录中...
       </view>
     </view>
 
-    <!-- 底部说明 -->
+    <!-- 用户自主选择同意协议 -->
     <view class="footer">
-      <text class="footer-text">登录即表示同意《用户协议》和《隐私政策》</text>
+      <view class="privacy-row" @tap="togglePrivacy">
+        <text class="checkbox-mark">{{ privacyAgreed ? '☑' : '□' }}</text>
+        <text>我已阅读并同意</text>
+        <text class="privacy-link" @tap.stop="openUserAgreement">《用户协议》</text>
+        <text>和</text>
+        <text class="privacy-link" @tap.stop="openPrivacyPolicy">《隐私政策》</text>
+      </view>
+      <text class="privacy-note">未同意前不会调用微信登录或创建账号</text>
     </view>
   </view>
 </template>
@@ -39,11 +46,16 @@ import { wechatLogin } from '@/utils/api.js'
 export default {
   data() {
     return {
-      loading: false
+      loading: false,
+      privacyAgreed: false
     }
   },
   methods: {
     handleLogin() {
+      if (!this.privacyAgreed) {
+        uni.showToast({ title: '请先阅读并同意用户协议和隐私政策', icon: 'none' })
+        return
+      }
       this.loading = true
 
       // 1. 调用微信登录获取 code
@@ -57,6 +69,7 @@ export default {
             .then((res) => {
               // 3. 存储 token 和用户信息
               uni.setStorageSync('token', res.token)
+              uni.setStorageSync('privacyConsent', 'v1')
               getApp().globalData.isLoggedIn = true
               getApp().globalData.userInfo = res.user
 
@@ -96,6 +109,15 @@ export default {
           })
         }
       })
+    },
+    togglePrivacy() {
+      this.privacyAgreed = !this.privacyAgreed
+    },
+    openUserAgreement() {
+      uni.navigateTo({ url: '/pages/legal/user-agreement' })
+    },
+    openPrivacyPolicy() {
+      uni.navigateTo({ url: '/pages/legal/privacy-policy' })
     }
   }
 }
@@ -191,8 +213,8 @@ export default {
   bottom: 80rpx;
 }
 
-.footer-text {
-  font-size: 22rpx;
-  color: #555;
-}
+.privacy-row { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; color: #9aa0b0; font-size: 23rpx; line-height: 42rpx; }
+.checkbox-mark { color: #4a90d9; font-size: 34rpx; margin-right: 8rpx; }
+.privacy-link { color: #5fa8ff; padding: 0 4rpx; }
+.privacy-note { display: block; text-align: center; color: #666; font-size: 20rpx; margin-top: 10rpx; }
 </style>
