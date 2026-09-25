@@ -2,7 +2,7 @@
   <view class="top-bar" :style="{ paddingTop: topPadding + 'px' }">
     <view class="top-bar-content">
       <view class="top-bar-left">
-        <text v-if="showBack" class="back-btn" @tap="goBack">&#8249;</text>
+        <view v-if="showBack" class="back-btn" @tap="goBack">&#8249;</view>
         <text class="title">{{ title }}</text>
       </view>
       <view class="top-bar-right">
@@ -65,11 +65,22 @@ export default {
 }
 
 .back-btn {
+  display: inline-flex;
+  width: 72rpx;
+  height: 88rpx;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: center;
   font-size: 48rpx;
   color: #4a90d9;
-  margin-right: 12rpx;
+  margin-left: -12rpx;
+  margin-right: 4rpx;
   font-weight: 300;
   vertical-align: middle;
+}
+
+.back-btn:active {
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .title {
