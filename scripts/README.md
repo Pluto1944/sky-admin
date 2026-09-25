@@ -89,7 +89,7 @@ python scripts/fetch_cwl_data.py --period 2026-07
 
 ## `scheduler.py` — 周期数据刷新调度器
 
-统一管理 4 类周期刷新任务，状态存 `sync_jobs` 表。
+统一管理 5 类周期任务，状态存 `sync_jobs` 表；`war_layout` 固定在北京时间每天 09:00 运行，其余任务使用间隔调度。
 
 - **运维命令 / CLI 用法**：见 [`../deploy/README.md`](../deploy/README.md)「四、运维命令速查 → 2. sky-scheduler 服务管理」
 - **设计文档**：见 [`../docs/15-scheduler.md`](../docs/15-scheduler.md)

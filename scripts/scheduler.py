@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """周期数据刷新调度器（常驻 loop 进程）。
 
-统一管理 4 类需要周期性刷新的任务，状态落 `sync_jobs` 表：
+统一管理 5 类需要周期性执行的任务，状态落 `sync_jobs` 表：
 
     farm_stats  互刷部落统计（每 30 分钟）
     coc_sync    COC 玩家档案（每 6 小时）
     war_results 普通部落战战绩（每天）
     cwl         CWL 联赛战绩（每天触发，day==12 才真正拉取）
+    war_layout  公众号阵型群发（每天北京时间 09:00）
 
 用法：
     python scripts/scheduler.py                      # loop 模式（生产，systemd 守护）
@@ -19,7 +20,7 @@
     python scripts/scheduler.py --set-interval farm_stats 60   # 调整间隔（分钟）
 
 设计要点：
-- 纯间隔模型（interval_min），不引入 cron。
+- 默认使用间隔模型；固定业务时刻使用 daily_at，不引入 cron。
 - 失败也推进 next_run_at，避免失败任务每轮被高频重试。
 - 单任务异常不影响其它任务与常驻进程。
 """
@@ -28,9 +29,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sqlite3
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from zoneinfo import ZoneInfo
 
 # 确保项目根目录在 sys.path（脚本可能从任意 cwd 启动）
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -42,6 +46,7 @@ import config  # noqa: E402
 from shared.db.connection import Database  # noqa: E402
 
 POLL_SECONDS = 60  # 主循环轮询间隔（秒）
+BUSINESS_TZ = ZoneInfo("Asia/Shanghai")
 
 
 def now_iso() -> str:
@@ -165,6 +170,37 @@ def _run_cwl(force: bool = False) -> dict:
     return {"status": "success", "reason": f"{period} 冷启动写入 {n_ok} 条"}
 
 
+def _run_war_layout() -> dict:
+    """增量采集阵型，创建草稿并按配置决定是否群发。"""
+    from modules.war_layout.scheduler_job import build_http_service, run_job
+    from modules.war_layout.settings import WarLayoutSettings
+
+    settings = WarLayoutSettings.from_env()
+    settings.validate_schedule()
+    if not settings.enabled:
+        return {"status": "skipped", "reason": "WAR_LAYOUT_ENABLED 未启用"}
+    settings.validate_x()
+    settings.validate_wechat()
+    Path(settings.db_path).parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(str(settings.db_path))
+    try:
+        service = build_http_service(connection, settings)
+        # Keep the scheduler in draft-only mode unless the explicit
+        # WAR_LAYOUT_AUTO_MASS_SEND switch is enabled.
+        result = run_job(service, settings, dry_run=False)
+    finally:
+        connection.close()
+    if result["status"] != "success":
+        return result
+    if result.get("mass_send_msg_id"):
+        reason = f"群发已提交：帖子 {result['posts']}，阵型 {result['layouts']}"
+    elif result.get("draft_media_id"):
+        reason = f"仅创建草稿：帖子 {result['posts']}，阵型 {result['layouts']}"
+    else:
+        reason = f"无新增阵型：帖子 {result['posts']}"
+    return {**result, "reason": reason}
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # 任务注册表
 # ═══════════════════════════════════════════════════════════════════════
@@ -190,6 +226,16 @@ JOBS = {
         "interval": 1440,
         "run": _run_cwl,
     },
+    "war_layout": {
+        "name": "公众号阵型更新",
+        "interval": 1440,
+        "daily_at": os.getenv("WAR_LAYOUT_DAILY_TIME", "09:00").strip(),
+        "enabled_default": os.getenv("WAR_LAYOUT_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on"),
+        # `--once all` is commonly used for data refreshes. Never make that
+        # broad command publish an external message.
+        "include_in_all": False,
+        "run": _run_war_layout,
+    },
 }
 
 
@@ -206,11 +252,16 @@ def _open_db() -> Database:
 def _ensure_rows(db: Database) -> None:
     """确保每个任务在 sync_jobs 中有一行（首次运行时补入）。"""
     for job_id, job in JOBS.items():
+        next_run_at = _next_run_iso(job) if job.get("daily_at") else None
         db.conn.execute(
             """INSERT OR IGNORE INTO sync_jobs
-               (job_id, job_name, interval_min, enabled, last_status)
-               VALUES (?, ?, ?, 1, 'never')""",
-            (job_id, job["name"], job["interval"]),
+               (job_id, job_name, interval_min, enabled, next_run_at, last_status)
+               VALUES (?, ?, ?, ?, ?, 'never')""",
+            (job_id, job["name"], job["interval"], int(job.get("enabled_default", True)), next_run_at),
+        )
+        db.conn.execute(
+            "UPDATE sync_jobs SET job_name = ? WHERE job_id = ?",
+            (job["name"], job_id),
         )
     db.conn.commit()
 
@@ -269,9 +320,12 @@ def run_one(db: Database, job_id: str, force: bool = False) -> dict:
         result = {"status": "failed", "reason": str(e)}
 
     # 无论成败都推进 next_run_at，避免失败任务每轮被高频重试
-    interval = int(_get_row(db, job_id).get("interval_min") or JOBS[job_id]["interval"])
-    next_at = (datetime.now(timezone.utc).timestamp() + interval * 60)
-    next_iso = datetime.fromtimestamp(next_at, tz=timezone.utc).isoformat(timespec="seconds")
+    if job.get("daily_at"):
+        next_iso = _next_run_iso(job)
+    else:
+        interval = int(_get_row(db, job_id).get("interval_min") or JOBS[job_id]["interval"])
+        next_at = datetime.now(timezone.utc).timestamp() + interval * 60
+        next_iso = datetime.fromtimestamp(next_at, tz=timezone.utc).isoformat(timespec="seconds")
     _update(db, job_id, last_run_at=now_iso(), next_run_at=next_iso)
 
     return result
@@ -303,6 +357,16 @@ def _parse_next_run_at(row: dict) -> float | None:
         return None
 
 
+def _next_run_iso(job: dict, now: datetime | None = None) -> str:
+    """Return the next fixed business-time run as an aware UTC timestamp."""
+    local_now = (now or datetime.now(timezone.utc)).astimezone(BUSINESS_TZ)
+    hour, minute = (int(part) for part in job["daily_at"].split(":"))
+    target = local_now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if target <= local_now:
+        target += timedelta(days=1)
+    return target.astimezone(timezone.utc).isoformat(timespec="seconds")
+
+
 def loop() -> None:
     """常驻主循环。"""
     db = _open_db()
@@ -329,7 +393,7 @@ def loop() -> None:
 def cmd_once(job_id: str, force: bool) -> None:
     db = _open_db()
     _ensure_rows(db)
-    targets = list(JOBS.keys()) if job_id == "all" else [job_id]
+    targets = [jid for jid, job in JOBS.items() if job.get("include_in_all", True)] if job_id == "all" else [job_id]
     for jid in targets:
         if jid not in JOBS:
             print(f"未知任务: {jid}", file=sys.stderr)
@@ -370,7 +434,10 @@ def cmd_enable(job_id: str, enabled: bool) -> None:
         print(f"未知任务: {job_id}", file=sys.stderr)
         db.close()
         return
-    _update(db, job_id, enabled=1 if enabled else 0)
+    fields = {"enabled": 1 if enabled else 0}
+    if enabled and JOBS[job_id].get("daily_at"):
+        fields["next_run_at"] = _next_run_iso(JOBS[job_id])
+    _update(db, job_id, **fields)
     print(f"{JOBS[job_id]['name']}({job_id}): {'已启用' if enabled else '已停用'}")
     db.close()
 

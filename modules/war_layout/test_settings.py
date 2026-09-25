@@ -25,3 +25,14 @@ def test_database_defaults_inside_ignored_runtime_dir(monkeypatch):
     settings = WarLayoutSettings.from_env()
     assert settings.db_path.parent.name == "runtime"
     assert settings.db_path.name == "war_layout.db"
+
+
+def test_mass_send_schedule_settings(monkeypatch):
+    monkeypatch.setenv("WAR_LAYOUT_ENABLED", "true")
+    monkeypatch.setenv("WAR_LAYOUT_AUTO_MASS_SEND", "true")
+    monkeypatch.setenv("WAR_LAYOUT_DAILY_TIME", "09:00")
+    settings = WarLayoutSettings.from_env()
+    settings.validate_schedule()
+    assert settings.enabled is True
+    assert settings.auto_mass_send is True
+    assert settings.daily_time == "09:00"

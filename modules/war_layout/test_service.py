@@ -8,6 +8,7 @@ from .service import WarLayoutService
 from .source_x import XPage, XSource
 from .wechat_publisher import WeChatPublisher
 from .media import ImageBlob, ImageMaterializer
+from .wechat_http import WeChatApiError
 
 
 def test_dry_run_does_not_write_or_publish():
@@ -34,16 +35,73 @@ def test_execute_is_idempotent():
 
 def test_daily_limit_is_five_per_author():
     db = sqlite3.connect(":memory:")
-    links = " ".join(f"https://link.clashofclans.com/{i}" for i in range(6))
-    images = tuple(f"https://img/{i}" for i in range(6))
+    posts = tuple(
+        PostPayload(f"p{i}", "a", f"https://link.clashofclans.com/{i}", (f"https://img/{i}",))
+        for i in range(6)
+    )
     service = WarLayoutService(
-        XSource(lambda *_: XPage((PostPayload("p", "a", links, images),))),
+        XSource(lambda *_: XPage(posts)),
         WarLayoutRepository(db),
         WeChatPublisher(lambda _: "m", lambda _: "draft"),
     )
     result = service.run_once(["a"], dry_run=False)
-    assert result.layouts == 1
-    assert db.execute("SELECT COUNT(*) FROM war_layout_items").fetchone()[0] == 1
+    assert result.layouts == 5
+    assert db.execute("SELECT COUNT(*) FROM war_layout_items").fetchone()[0] == 5
+
+
+def test_auto_mass_send_records_submission_and_stable_dedupe_id():
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    source = XSource(lambda *_: XPage((PostPayload("p", "a", "https://link.clashofclans.com/x", ("https://img/x",)),)))
+    sends = []
+    publisher = WeChatPublisher(
+        lambda _: "media-1",
+        lambda _: "draft-1",
+        mass_send=lambda media_id, client_id: sends.append((media_id, client_id)) or {"msg_id": "123", "msg_data_id": "456"},
+    )
+    result = WarLayoutService(source, WarLayoutRepository(db), publisher).run_once(
+        ["a"], dry_run=False, auto_mass_send=True
+    )
+    row = db.execute("SELECT * FROM war_layout_items").fetchone()
+    assert result.mass_send.msg_id == "123"
+    assert sends == [("draft-1", row["mass_send_client_msg_id"])]
+    assert len(row["mass_send_client_msg_id"]) == 32
+    assert row["status"] == "mass_send_submitted"
+    assert row["mass_send_msg_id"] == "123"
+
+
+def test_ambiguous_mass_send_failure_never_returns_item_to_draft_retry():
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    source = XSource(lambda *_: XPage((PostPayload("p", "a", "https://link.clashofclans.com/x", ("https://img/x",)),)))
+    publisher = WeChatPublisher(
+        lambda _: "media-1",
+        lambda _: "draft-1",
+        mass_send=lambda *_: (_ for _ in ()).throw(TimeoutError()),
+    )
+    service = WarLayoutService(source, WarLayoutRepository(db), publisher)
+    try:
+        service.run_once(["a"], dry_run=False, auto_mass_send=True)
+    except TimeoutError:
+        pass
+    row = db.execute("SELECT status, draft_media_id FROM war_layout_items").fetchone()
+    assert tuple(row) == ("mass_send_unknown", "draft-1")
+
+
+def test_explicit_wechat_rejection_is_recorded_as_failed_send():
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    source = XSource(lambda *_: XPage((PostPayload("p", "a", "https://link.clashofclans.com/x", ("https://img/x",)),)))
+    publisher = WeChatPublisher(
+        lambda _: "media-1",
+        lambda _: "draft-1",
+        mass_send=lambda *_: (_ for _ in ()).throw(WeChatApiError("unauthorized", code=48001)),
+    )
+    try:
+        WarLayoutService(source, WarLayoutRepository(db), publisher).run_once(["a"], dry_run=False, auto_mass_send=True)
+    except WeChatApiError:
+        pass
+    assert db.execute("SELECT status FROM war_layout_items").fetchone()[0] == "mass_send_failed"
 
 
 def test_failed_draft_is_retryable():

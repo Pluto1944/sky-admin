@@ -10,7 +10,7 @@
 
 ### 1.1 现状问题
 
-项目当前有 **4 类** 需要周期性刷新的数据，但脚本各自为政，存在以下痛点：
+项目当前有 **5 类** 需要周期性执行的任务，其中数据刷新任务采用间隔调度，公众号阵型采用固定业务时刻：
 
 | 问题 | 现状 | 影响 |
 |------|------|------|
@@ -65,7 +65,7 @@
 | `farm_stats` | `sync_farm_stats` | `api_server`（farm-config） |
 | `sync_jobs` | `scheduler.py` | `scheduler.py`（`--list`） |
 
-### 2.3 需要周期性刷新的任务（4 类）
+### 2.3 需要周期性执行的任务（5 类）
 
 | job_id | 数据表 | 脚本 | 数据源 | 频率 | 前端接口 |
 |--------|--------|------|--------|------|----------|
@@ -73,6 +73,7 @@
 | `farm_stats` | `farm_stats` | `sync_farm_stats.py` | COC 官方 API | 每 30 分钟 | `/api/clan/farm-config` |
 | `war_results` | `war_results` | `fetch_war_data.py` | ClashKing API | 每天 | `/api/clan/war-stats` |
 | `cwl` | `league_results`+`results` | `fetch_cwl_data.py` | ClashKing API | 每月 12 号 | `/api/clan/league-stats` |
+| `war_layout` | 独立 `war_layout.db` | `modules.war_layout` | SocialData/X + 微信公众号 API | 每天 09:00（北京时间） | — |
 
 其余表（`registrations`、`league_teams`、`wechat_users`）由月度人工流程或用户实时操作写入，**不纳入周期刷新**。
 
@@ -163,8 +164,9 @@
 | 决策点 | 结论 |
 |--------|------|
 | 运行形态 | 常驻 loop 进程 + systemd 守护，状态存 `sync_jobs` 表 |
-| 调度模型 | 纯间隔 `interval_min`，**不引入 cron** |
+| 调度模型 | 默认使用 `interval_min`；固定业务时刻使用 `daily_at`，不引入 cron |
 | CWL 任务 | `interval_min=1440`（每天触发），函数内判断 `day==12` 才真正拉取，其余天返回 `skipped`，**不做时刻对齐** |
+| 阵型群发 | `daily_at=09:00`，按 `Asia/Shanghai` 计算下一次运行；不加入 `--once all` |
 | 状态表 | 最小可用版（状态/错误/耗时/次数） |
 | 失败策略 | 失败也推进 `next_run_at`，避免高频重试 |
 

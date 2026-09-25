@@ -13,21 +13,32 @@ from .x_http import XHttpTransport
 from .socialdata_source import SocialDataSource
 
 
-def run_job(service: WarLayoutService, settings: WarLayoutSettings, *, dry_run: bool = True) -> dict[str, Any]:
+def run_job(service: WarLayoutService, settings: WarLayoutSettings, *, dry_run: bool = True, auto_mass_send: bool | None = None) -> dict[str, Any]:
     """Scheduler-safe wrapper returning a serializable status dictionary."""
     try:
         settings.validate_x()
         if not dry_run:
             settings.validate_wechat()
-        result = service.run_once(list(settings.authors), dry_run=dry_run)
-        return {
+        # The environment setting is the hard safety gate.  The optional
+        # argument may suppress a send, but must never enable one while
+        # WAR_LAYOUT_AUTO_MASS_SEND is disabled.
+        should_mass_send = settings.auto_mass_send and auto_mass_send is not False
+        result = service.run_once(list(settings.authors), dry_run=dry_run, auto_mass_send=should_mass_send and not dry_run)
+        response = {
             "status": "success",
             "posts": result.posts,
             "layouts": result.layouts,
             "discovered": result.discovered,
             "skipped": result.skipped,
             "draft_media_id": result.draft.media_id if result.draft else None,
+            "mass_send_msg_id": result.mass_send.msg_id if result.mass_send else None,
         }
+        if should_mass_send and not dry_run:
+            try:
+                response["mass_send_statuses"] = service.refresh_mass_send_statuses()
+            except Exception as exc:
+                response["mass_send_status_error"] = type(exc).__name__
+        return response
     except Exception as exc:  # scheduler must record failure and continue other jobs
         return {"status": "failed", "reason": type(exc).__name__}
 
@@ -53,7 +64,13 @@ def build_http_service(connection, settings: WarLayoutSettings, *, session: Any 
         return ImageBlob(response.content, response.headers.get("Content-Type", ""))
 
     materializer = ImageMaterializer(download, Path(settings.media_dir))
-    publisher = WeChatPublisher(wechat.upload_content_image, wechat.create_draft, upload_cover=wechat.upload_cover)
+    publisher = WeChatPublisher(
+        wechat.upload_content_image,
+        wechat.create_draft,
+        upload_cover=wechat.upload_cover,
+        mass_send=wechat.mass_send_all,
+        get_mass_send_status=wechat.get_mass_send_status,
+    )
     from .repository import WarLayoutRepository
 
     return WarLayoutService(x_source, WarLayoutRepository(connection), publisher, materializer)

@@ -13,6 +13,10 @@ CREATE TABLE IF NOT EXISTS war_layout_items (
     image_url TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'discovered',
     draft_media_id TEXT,
+    mass_send_client_msg_id TEXT,
+    mass_send_msg_id TEXT,
+    mass_send_msg_data_id TEXT,
+    mass_send_status TEXT,
     error_message TEXT,
     layout_urls_json TEXT,
     image_urls_json TEXT,
@@ -59,6 +63,9 @@ class WarLayoutRepository:
             self.connection.execute("ALTER TABLE war_layout_items ADD COLUMN layout_urls_json TEXT")
         if "image_urls_json" not in cols:
             self.connection.execute("ALTER TABLE war_layout_items ADD COLUMN image_urls_json TEXT")
+        for name in ("mass_send_client_msg_id", "mass_send_msg_id", "mass_send_msg_data_id", "mass_send_status"):
+            if name not in cols:
+                self.connection.execute(f"ALTER TABLE war_layout_items ADD COLUMN {name} TEXT")
         self.connection.commit()
 
     def get_last_pull_time(self, author: str) -> datetime | None:
@@ -167,14 +174,41 @@ class WarLayoutRepository:
         self.connection.commit()
         return cursor.rowcount == 1
 
-    def update_status(self, fingerprint: str, status: str, *, draft_media_id: str | None = None, error_message: str | None = None) -> None:
+    def update_status(self, fingerprint: str, status: str, *, draft_media_id: str | None = None, error_message: str | None = None, mass_send_client_msg_id: str | None = None, mass_send_msg_id: str | None = None, mass_send_msg_data_id: str | None = None, mass_send_status: str | None = None) -> None:
         now = datetime.now(timezone.utc).isoformat()
         self.connection.execute(
             """UPDATE war_layout_items
                SET status = ?, draft_media_id = COALESCE(?, draft_media_id),
+                   mass_send_client_msg_id = COALESCE(?, mass_send_client_msg_id),
+                   mass_send_msg_id = COALESCE(?, mass_send_msg_id),
+                   mass_send_msg_data_id = COALESCE(?, mass_send_msg_data_id),
+                   mass_send_status = COALESCE(?, mass_send_status),
                    error_message = ?, updated_at = ?
                WHERE layout_fingerprint = ?""",
-            (status, draft_media_id, error_message, now, fingerprint),
+            (status, draft_media_id, mass_send_client_msg_id, mass_send_msg_id,
+             mass_send_msg_data_id, mass_send_status, error_message, now, fingerprint),
+        )
+        self.connection.commit()
+
+    def pending_mass_send_ids(self) -> list[str]:
+        rows = self.connection.execute(
+            """SELECT DISTINCT mass_send_msg_id FROM war_layout_items
+               WHERE status = 'mass_send_submitted' AND mass_send_msg_id IS NOT NULL"""
+        ).fetchall()
+        return [str(row[0]) for row in rows]
+
+    def update_mass_send_result(self, msg_id: str, send_status: str) -> None:
+        item_status = {
+            "SEND_SUCCESS": "mass_sent",
+            "SEND_FAIL": "mass_send_failed",
+            "DELETE": "mass_send_deleted",
+        }.get(send_status, "mass_send_submitted")
+        now = datetime.now(timezone.utc).isoformat()
+        self.connection.execute(
+            """UPDATE war_layout_items
+               SET status = ?, mass_send_status = ?, updated_at = ?
+               WHERE mass_send_msg_id = ?""",
+            (item_status, send_status, now, msg_id),
         )
         self.connection.commit()
 

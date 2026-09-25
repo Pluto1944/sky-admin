@@ -10,7 +10,7 @@
 小程序 → https://api.skycoc.cc → Nginx(:443) → FastAPI(:8000) → SQLite
 ```
 
-> **备案过渡期**（备案未通过时）：走 IP 直连 `https://115.159.64.19`，见「三·五、备案过渡期（IP 直连方案）」。
+> 备案已通过，当前正式入口为 `https://api.skycoc.cc`。IP 直连方案仅作为历史应急方案保留在「三·五」。
 
 - **Nginx**：公网入口，处理 HTTPS，转发请求到 FastAPI
 - **FastAPI**：Python 后端，只监听 127.0.0.1:8000（不直接对外）
@@ -76,7 +76,7 @@ sudo certbot --nginx -d api.skycoc.cc
 
 ---
 
-## 三·五、备案过渡期（IP 直连方案）
+## 三·五、备案过渡期（IP 直连方案，历史）
 
 > 适用场景：小程序/域名备案尚未通过，暂时无法用 `api.skycoc.cc` 域名访问。
 
@@ -88,12 +88,12 @@ sudo certbot --nginx -d api.skycoc.cc
 小程序/前端 → https://115.159.64.19 → Nginx(:443) → FastAPI(:8000) → SQLite
 ```
 
-### 现状说明（截至 2026-09-12）
+### 历史说明（截至 2026-09-12）
 
-- **对外入口**：`https://115.159.64.19`（Nginx 监听 443，带 SSL 证书）
-- **Nginx 配置**：使用仓库中的 `deploy/nginx-ip.conf`，反代到 `127.0.0.1:8000`
+- **当时对外入口**：`https://115.159.64.19`（Nginx 监听 443，带 SSL 证书）
+- **当时 Nginx 配置**：使用仓库中的 `deploy/nginx-ip.conf`，反代到 `127.0.0.1:8000`
 - **FastAPI**：正常由 systemd 托管，监听 `127.0.0.1:8000`（不直接对外）
-- **HTTPS 证书**：使用 Let's Encrypt 的短期 IP 证书
+- **当时 HTTPS 证书**：使用 Let's Encrypt 的短期 IP 证书
   （`/etc/letsencrypt/live/115.159.64.19/`），有效期约 6 天，必须保持自动续期正常
 
 ### IP 直连 server 块（临时）
@@ -122,7 +122,7 @@ server {
 
 1. **FastAPI 只监听 `127.0.0.1:8000`，外网无法直接访问 8000 端口**。小程序/前端必须通过 `https://115.159.64.19` 走 Nginx 反代，不要配 `http://IP:8000`。
 2. **不要手动用 `uvicorn --reload` 起进程**。历史上曾因手动起的 `0.0.0.0:8000 --reload` 进程占用端口，导致 systemd 的 `sky-admin` 服务崩溃循环（重启 11 万+ 次）。开发调试需先 `sudo systemctl stop sky-admin`，且结束后用 systemd 恢复托管。
-3. **备案通过后切换回域名**：删掉 Nginx 配置里的 IP 直连 server 块，回到 `api.skycoc.cc` 域名架构（见本文档「三、首次部署」），小程序里 API 地址改为 `https://api.skycoc.cc`。
+3. **当前已切回域名**：生产 Nginx 使用 `deploy/nginx.conf`，小程序 API 地址为 `https://api.skycoc.cc`。
 4. **IP 证书必须自动续期**：IP 证书需要 Certbot 5.4 或更高版本，并使用
    `shortlived` profile；续期后必须 reload Nginx。用 `sudo certbot renew --dry-run`
    定期验证续期链路。
@@ -133,7 +133,7 @@ server {
 # 直连本机 FastAPI
 curl http://127.0.0.1:8000/api/ping
 
-# 通过 Nginx IP 直连（当前过渡期入口）
+# 历史过渡期验证命令（当前生产入口请使用域名）
 curl https://115.159.64.19/api/ping
 ```
 
@@ -175,7 +175,7 @@ sudo systemctl restart sky-scheduler
 sudo systemctl enable sky-scheduler
 ```
 
-调度器统一管理 **4 类周期刷新任务**，状态落 `sync_jobs` 表（设计详见 `docs/15-scheduler.md`）：
+调度器统一管理 **5 类周期任务**，状态落 `sync_jobs` 表（设计详见 `docs/15-scheduler.md`）：
 
 | job_id | 说明 | 频率 |
 |--------|------|------|
@@ -183,6 +183,7 @@ sudo systemctl enable sky-scheduler
 | `coc_sync` | COC 玩家档案 | 每 6 小时 |
 | `war_results` | 普通部落战战绩 | 每天 |
 | `cwl` | CWL 联赛战绩 | 每天触发，仅 12 号真正拉取 |
+| `war_layout` | 公众号阵型更新 | 每天北京时间 09:00；`WAR_LAYOUT_ENABLED=true` 时创建草稿，另有群发权限时才启用 `WAR_LAYOUT_AUTO_MASS_SEND` |
 
 任务本身的状态管理（查看/手动触发/启停单个任务）用 CLI，无需动 systemd：
 
@@ -445,7 +446,7 @@ sudo tail -f /var/log/sky-scheduler-error.log
 | 项目代码 | `/home/ubuntu/YANG/sky-admin/` | Python 后端代码 |
 | .env | `/home/ubuntu/YANG/sky-admin/.env` | 密钥、Token 等敏感配置 |
 | 数据库 | `/home/ubuntu/YANG/sky-admin/data/league.db` | SQLite 数据库 |
-| Nginx 配置 | `/etc/nginx/sites-available/sky-admin` | Nginx 站点配置（含备案过渡期 IP 直连 server 块） |
+| Nginx 配置 | `/etc/nginx/sites-available/sky-admin-domain` | 当前正式域名站点配置 |
 | systemd 服务 | `/etc/systemd/system/sky-admin.service` | 守护进程配置 |
 | systemd 调度器 | `/etc/systemd/system/sky-scheduler.service` | 周期调度器守护配置 |
 | 调度器脚本 | `/home/ubuntu/YANG/sky-admin/scripts/scheduler.py` | 周期调度器核心脚本（CLI + 常驻循环） |
@@ -633,11 +634,10 @@ sudo bash /home/ubuntu/YANG/sky-admin/deploy/deploy.sh
 sudo certbot --nginx -d api.skycoc.cc
 ```
 
-### 8.7 Nginx 与备案过渡期
+### 8.7 Nginx 与备案过渡期（历史）
 
-仓库 `deploy/nginx.conf` 是域名部署模板。旧生产配置额外包含本章“三·五”中的 IP 直连 443
-`server` 块，一键脚本不会自动添加。只有确实仍需备案过渡期 IP 入口时才手工加入，并注意域名证书
-用于 IP URL 会产生主机名不匹配；正式环境应使用 `https://api.skycoc.cc`。
+仓库 `deploy/nginx.conf` 是当前域名部署模板。`deploy/nginx-ip.conf` 仅保留为备案过渡期
+历史模板；IP 证书与域名证书的 SAN 不同，不能混用。当前正式环境使用 `https://api.skycoc.cc`。
 
 无论是否启用临时 IP 块，都必须先执行：
 

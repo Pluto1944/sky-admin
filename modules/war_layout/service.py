@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import date
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 
 from .composer import compose_article
 from .extractor import extract_layouts, layout_fingerprint
@@ -8,7 +9,7 @@ from .models import PostPayload, LayoutCandidate
 from .media import ImageMaterializer
 from .repository import WarLayoutRepository
 from .source_x import XSource
-from .wechat_publisher import WeChatDraft, WeChatPublisher
+from .wechat_publisher import WeChatDraft, WeChatMassSend, WeChatPublisher
 
 
 @dataclass(frozen=True)
@@ -18,13 +19,14 @@ class RunResult:
     discovered: int
     skipped: int
     draft: WeChatDraft | None = None
+    mass_send: WeChatMassSend | None = None
 
 
 class WarLayoutService:
     def __init__(self, source: XSource, repository: WarLayoutRepository, publisher: WeChatPublisher, materializer: ImageMaterializer | None = None):
         self.source, self.repository, self.publisher, self.materializer = source, repository, publisher, materializer
 
-    def run_once(self, authors: list[str], *, since_id: str | None = None, dry_run: bool = True, published_on: date | None = None, force: bool = False, publish_limit: int | None = None) -> RunResult:
+    def run_once(self, authors: list[str], *, since_id: str | None = None, dry_run: bool = True, published_on: date | None = None, force: bool = False, publish_limit: int | None = None, auto_mass_send: bool = False) -> RunResult:
         if publish_limit is not None and publish_limit < 1:
             raise ValueError("publish_limit must be positive")
         run_started_at = datetime.now(timezone.utc)
@@ -40,8 +42,6 @@ class WarLayoutService:
             posts.sort(key=lambda post: self._post_time(post) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
         # Discover candidates first, then apply the per-author daily quota.
         all_layouts = extract_layouts(posts, limit=max(1, len(posts) * 10))
-        # Apply the daily quota independently for each author. Overflow is
-        # intentionally discarded and never persisted as a backlog.
         author_counts: dict[str, int] = {}
         layouts = []
         for layout in all_layouts:
@@ -82,21 +82,21 @@ class WarLayoutService:
             self.repository.record_global_sync(window_start=watermark, window_end=run_started_at, status="success", posts=len(posts), layouts=0)
             return RunResult(len(posts), 0, discovered, skipped)
         publish_layouts = new_layouts if publish_limit is None else new_layouts[:publish_limit]
-        if self.materializer:
-            publish_layouts = [
-                layout.__class__(
-                    image_url=str(self.materializer.save(layout.image_urls[0], layout_fingerprint(layout.layout_url))),
-                    layout_url=layout.layout_url,
-                    caption=layout.caption,
-                    post_id=layout.post_id,
-                    author=layout.author,
-                    image_urls=tuple(str(self.materializer.save(image, layout_fingerprint(layout.layout_url) + f"-{index}")) for index, image in enumerate(layout.image_urls)),
-                    layout_urls=layout.layout_urls,
-                )
-                for layout in publish_layouts
-            ]
-        article = compose_article(publish_layouts, published_on)
         try:
+            if self.materializer:
+                publish_layouts = [
+                    layout.__class__(
+                        image_url=str(self.materializer.save(layout.image_urls[0], layout_fingerprint(layout.layout_url))),
+                        layout_url=layout.layout_url,
+                        caption=layout.caption,
+                        post_id=layout.post_id,
+                        author=layout.author,
+                        image_urls=tuple(str(self.materializer.save(image, layout_fingerprint(layout.layout_url) + f"-{index}")) for index, image in enumerate(layout.image_urls)),
+                        layout_urls=layout.layout_urls,
+                    )
+                    for layout in publish_layouts
+                ]
+            article = compose_article(publish_layouts, published_on)
             draft = self.publisher.create_layout_draft(article["title"], publish_layouts)
         except Exception as exc:
             for layout in publish_layouts:
@@ -117,6 +117,43 @@ class WarLayoutService:
         if draft:
             for layout in publish_layouts:
                 self.repository.update_status(layout_fingerprint(layout.layout_url), "draft_created", draft_media_id=draft.media_id)
+        mass_send = None
+        if draft and auto_mass_send:
+            fingerprints = sorted(layout_fingerprint(layout.layout_url) for layout in publish_layouts)
+            client_msg_id = sha256("|".join(fingerprints).encode("utf-8")).hexdigest()[:32]
+            try:
+                mass_send = self.publisher.mass_send_draft(draft, client_msg_id)
+            except Exception as exc:
+                # The request may have reached WeChat even if the response was
+                # lost. Never turn these records back into draft retries.
+                send_status = "mass_send_unknown" if getattr(exc, "submission_unknown", True) else "mass_send_failed"
+                for layout in publish_layouts:
+                    self.repository.update_status(
+                        layout_fingerprint(layout.layout_url),
+                        send_status,
+                        draft_media_id=draft.media_id,
+                        mass_send_client_msg_id=client_msg_id,
+                        error_message=type(exc).__name__,
+                    )
+                self.repository.record_global_sync(
+                    window_start=watermark,
+                    window_end=run_started_at,
+                    status="failed",
+                    posts=len(posts),
+                    layouts=len(publish_layouts),
+                    error_message=type(exc).__name__,
+                )
+                raise
+            for layout in publish_layouts:
+                self.repository.update_status(
+                    layout_fingerprint(layout.layout_url),
+                    "mass_send_submitted",
+                    draft_media_id=draft.media_id,
+                    mass_send_client_msg_id=client_msg_id,
+                    mass_send_msg_id=mass_send.msg_id,
+                    mass_send_msg_data_id=mass_send.msg_data_id,
+                    mass_send_status=mass_send.status,
+                )
         self.repository.record_global_sync(
             window_start=watermark,
             window_end=run_started_at,
@@ -124,7 +161,16 @@ class WarLayoutService:
             posts=len(posts),
             layouts=len(publish_layouts),
         )
-        return RunResult(len(posts), len(publish_layouts), discovered, skipped, draft)
+        return RunResult(len(posts), len(publish_layouts), discovered, skipped, draft, mass_send)
+
+    def refresh_mass_send_statuses(self) -> dict[str, str]:
+        self.repository.initialize()
+        statuses = {}
+        for msg_id in self.repository.pending_mass_send_ids():
+            status = self.publisher.query_mass_send_status(msg_id)
+            self.repository.update_mass_send_result(msg_id, status)
+            statuses[msg_id] = status
+        return statuses
 
     @staticmethod
     def _post_time(post: PostPayload) -> datetime | None:

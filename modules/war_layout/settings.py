@@ -13,6 +13,9 @@ class WarLayoutSettings:
     socialdata_max_requests: int = 3
     wechat_app_id: str = ""
     wechat_app_secret: str = ""
+    enabled: bool = False
+    auto_mass_send: bool = False
+    daily_time: str = "09:00"
     media_dir: Path = Path("/tmp/sky-admin-war-layout")
     db_path: Path = Path(__file__).resolve().parent / "runtime" / "war_layout.db"
 
@@ -39,6 +42,9 @@ class WarLayoutSettings:
             socialdata_max_requests=int(os.getenv("SOCIALDATA_MAX_REQUESTS_PER_RUN", "3")),
             wechat_app_id=os.getenv("WECHAT_APP_ID", ""),
             wechat_app_secret=os.getenv("WECHAT_APP_SECRET", ""),
+            enabled=os.getenv("WAR_LAYOUT_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on"),
+            auto_mass_send=os.getenv("WAR_LAYOUT_AUTO_MASS_SEND", "false").strip().lower() in ("1", "true", "yes", "on"),
+            daily_time=os.getenv("WAR_LAYOUT_DAILY_TIME", "09:00").strip(),
             media_dir=Path(os.getenv("WAR_LAYOUT_MEDIA_DIR", "/tmp/sky-admin-war-layout")),
             db_path=Path(os.getenv("WAR_LAYOUT_DB_PATH", str(Path(__file__).resolve().parent / "runtime" / "war_layout.db"))),
         )
@@ -60,3 +66,11 @@ class WarLayoutSettings:
     def validate_wechat(self) -> None:
         if not self.wechat_app_id or not self.wechat_app_secret:
             raise ValueError("WECHAT_APP_ID and WECHAT_APP_SECRET are required")
+
+    def validate_schedule(self) -> None:
+        try:
+            hour, minute = (int(part) for part in self.daily_time.split(":"))
+        except (TypeError, ValueError):
+            raise ValueError("WAR_LAYOUT_DAILY_TIME must use HH:MM") from None
+        if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+            raise ValueError("WAR_LAYOUT_DAILY_TIME must use HH:MM")

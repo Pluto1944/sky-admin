@@ -13,13 +13,22 @@ class WeChatDraft:
     body: str
 
 
+@dataclass(frozen=True)
+class WeChatMassSend:
+    msg_id: str
+    msg_data_id: str = ""
+    status: str = "SUBMITTED"
+
+
 class WeChatPublisher:
     """公众号 draft-only publisher; transport is injected for API isolation."""
 
-    def __init__(self, upload_image: Callable[[str], str], create_draft: Callable[[dict], str], upload_cover: Callable[[str], str] | None = None):
+    def __init__(self, upload_image: Callable[[str], str], create_draft: Callable[[dict], str], upload_cover: Callable[[str], str] | None = None, mass_send: Callable[[str, str], dict[str, str]] | None = None, get_mass_send_status: Callable[[str], str] | None = None):
         self.upload_image = upload_image
         self.create_draft = create_draft
         self.upload_cover = upload_cover
+        self.mass_send = mass_send
+        self.get_mass_send_status = get_mass_send_status
 
     def create_layout_draft(self, title: str, layouts: list[LayoutCandidate]) -> WeChatDraft | None:
         if not layouts:
@@ -35,3 +44,14 @@ class WeChatPublisher:
         payload = {"title": title, "thumb_media_id": cover_media_id, "content": body}
         draft_id = self.create_draft(payload)
         return WeChatDraft(draft_id, title, cover_media_id, body)
+
+    def mass_send_draft(self, draft: WeChatDraft, client_msg_id: str) -> WeChatMassSend:
+        if not self.mass_send:
+            raise RuntimeError("mass send transport is not configured")
+        result = self.mass_send(draft.media_id, client_msg_id)
+        return WeChatMassSend(result["msg_id"], result.get("msg_data_id", ""))
+
+    def query_mass_send_status(self, msg_id: str) -> str:
+        if not self.get_mass_send_status:
+            raise RuntimeError("mass send status transport is not configured")
+        return self.get_mass_send_status(msg_id)

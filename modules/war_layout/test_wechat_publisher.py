@@ -26,3 +26,16 @@ def test_publisher_uploads_in_order_and_creates_draft_only():
 def test_empty_layouts_do_not_call_api():
     publisher = WeChatPublisher(lambda _: (_ for _ in ()).throw(AssertionError()), lambda _: (_ for _ in ()).throw(AssertionError()))
     assert publisher.create_layout_draft("x", []) is None
+
+
+def test_mass_send_uses_existing_draft_and_client_message_id():
+    calls = []
+    publisher = WeChatPublisher(
+        lambda _: "image",
+        lambda _: "draft-1",
+        mass_send=lambda media_id, client_id: calls.append((media_id, client_id)) or {"msg_id": "123", "msg_data_id": "456"},
+    )
+    draft = publisher.create_layout_draft("title", [LayoutCandidate("image", "layout")])
+    receipt = publisher.mass_send_draft(draft, "dedupe-1")
+    assert calls == [("draft-1", "dedupe-1")]
+    assert (receipt.msg_id, receipt.msg_data_id, receipt.status) == ("123", "456", "SUBMITTED")

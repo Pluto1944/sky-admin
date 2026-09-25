@@ -54,3 +54,17 @@ def test_global_sync_cursor_advances_only_after_success():
     assert repo.get_global_last_pull_time() == end
     row = repo.connection.execute("SELECT author, status FROM war_layout_sync_history ORDER BY id DESC LIMIT 1").fetchone()
     assert tuple(row) == ("*", "success")
+
+
+def test_mass_send_status_is_recorded_for_every_item_in_the_draft():
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    repo = WarLayoutRepository(db)
+    repo.initialize()
+    for fingerprint in ("f1", "f2"):
+        repo.add_discovered(post_id=fingerprint, author="a", fingerprint=fingerprint, layout_url=f"https://link/{fingerprint}", image_url="https://img/x")
+        repo.update_status(fingerprint, "mass_send_submitted", mass_send_msg_id="123", mass_send_status="SUBMITTED")
+    assert repo.pending_mass_send_ids() == ["123"]
+    repo.update_mass_send_result("123", "SEND_SUCCESS")
+    rows = db.execute("SELECT status, mass_send_status FROM war_layout_items ORDER BY id").fetchall()
+    assert [tuple(row) for row in rows] == [("mass_sent", "SEND_SUCCESS"), ("mass_sent", "SEND_SUCCESS")]

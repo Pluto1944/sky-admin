@@ -1,4 +1,5 @@
 import sqlite3
+from types import SimpleNamespace
 
 from .models import PostPayload
 from .repository import WarLayoutRepository
@@ -24,3 +25,48 @@ def test_scheduler_wrapper_returns_serializable_success():
 def test_scheduler_wrapper_hides_error_details():
     result = run_job(_service(), WarLayoutSettings((), ""), dry_run=True)
     assert result == {"status": "failed", "reason": "ValueError"}
+
+
+class _CapturingService:
+    def __init__(self):
+        self.auto_mass_send = None
+
+    def run_once(self, authors, *, dry_run, auto_mass_send):
+        self.auto_mass_send = auto_mass_send
+        return SimpleNamespace(
+            posts=0,
+            layouts=0,
+            discovered=0,
+            skipped=0,
+            draft=None,
+            mass_send=None,
+        )
+
+    def refresh_mass_send_statuses(self):
+        return {}
+
+
+def test_scheduler_switch_cannot_be_bypassed_by_true_override():
+    service = _CapturingService()
+    settings = WarLayoutSettings(("a",), "token", wechat_app_id="app", wechat_app_secret="secret")
+
+    result = run_job(service, settings, dry_run=False, auto_mass_send=True)
+
+    assert result["status"] == "success"
+    assert service.auto_mass_send is False
+
+
+def test_scheduler_switch_allows_explicit_mass_send_when_enabled():
+    service = _CapturingService()
+    settings = WarLayoutSettings(
+        ("a",),
+        "token",
+        wechat_app_id="app",
+        wechat_app_secret="secret",
+        auto_mass_send=True,
+    )
+
+    result = run_job(service, settings, dry_run=False, auto_mass_send=True)
+
+    assert result["status"] == "success"
+    assert service.auto_mass_send is True

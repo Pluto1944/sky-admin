@@ -18,6 +18,7 @@ def main(argv: list[str] | None = None) -> int:
     group.add_argument("--all", action="store_true", help="process all configured authors in one draft")
     parser.add_argument("--force", action="store_true", help="recreate a draft for already published records")
     parser.add_argument("--date", help="article title date in YYYY-MM-DD (default: today; does not filter posts)")
+    parser.add_argument("--mass-send", action="store_true", help="submit the created draft to all followers")
     args = parser.parse_args(argv)
     settings = WarLayoutSettings.from_env()
     settings.validate_x()
@@ -30,7 +31,15 @@ def main(argv: list[str] | None = None) -> int:
     try:
         service = build_http_service(connection, settings)
         target_date = date.fromisoformat(args.date) if args.date else date.today()
-        result = service.run_once(authors, dry_run=False, force=args.force, published_on=target_date)
+        # Keep the environment switch as the hard gate even for this manual
+        # command; --mass-send cannot bypass WAR_LAYOUT_AUTO_MASS_SEND=false.
+        result = service.run_once(
+            authors,
+            dry_run=False,
+            force=args.force,
+            published_on=target_date,
+            auto_mass_send=settings.auto_mass_send and args.mass_send,
+        )
         print(json.dumps({
             "authors": authors,
             "posts": result.posts,
@@ -38,6 +47,7 @@ def main(argv: list[str] | None = None) -> int:
             "discovered": result.discovered,
             "skipped": result.skipped,
             "draft_media_id": result.draft.media_id if result.draft else None,
+            "mass_send_msg_id": result.mass_send.msg_id if result.mass_send else None,
         }, ensure_ascii=False, indent=2))
     finally:
         connection.close()
