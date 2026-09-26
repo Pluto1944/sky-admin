@@ -3,8 +3,8 @@ from typing import Any
 
 import requests
 
-from .media import ImageBlob, ImageMaterializer
-from .service import WarLayoutService
+from .media import ImageMaterializer, RetryingImageDownloader
+from .service import WarLayoutService, public_error_reason
 from .settings import WarLayoutSettings
 from .source_x import XSource
 from .wechat_http import WeChatHttpClient
@@ -40,7 +40,7 @@ def run_job(service: WarLayoutService, settings: WarLayoutSettings, *, dry_run: 
                 response["mass_send_status_error"] = type(exc).__name__
         return response
     except Exception as exc:  # scheduler must record failure and continue other jobs
-        return {"status": "failed", "reason": type(exc).__name__}
+        return {"status": "failed", "reason": public_error_reason(exc)}
 
 
 def build_http_service(connection, settings: WarLayoutSettings, *, session: Any = None) -> WarLayoutService:
@@ -58,12 +58,10 @@ def build_http_service(connection, settings: WarLayoutSettings, *, session: Any 
     wechat_http.trust_env = False
     wechat = WeChatHttpClient(settings.wechat_app_id, settings.wechat_app_secret, session=wechat_http)
 
-    def download(url: str) -> ImageBlob:
-        response = http.get(url, timeout=20)
-        response.raise_for_status()
-        return ImageBlob(response.content, response.headers.get("Content-Type", ""))
-
-    materializer = ImageMaterializer(download, Path(settings.media_dir))
+    # Images use a separate retry wrapper. Reusing an HTTPAdapter here would
+    # also retry SocialData calls on this shared session and consume paid API
+    # requests. The wrapper retries only image GETs.
+    materializer = ImageMaterializer(RetryingImageDownloader(http), Path(settings.media_dir))
     publisher = WeChatPublisher(
         wechat.upload_content_image,
         wechat.create_draft,

@@ -145,6 +145,24 @@ def test_execute_materializes_images_outside_git_tree(tmp_path):
     assert Path(uploaded[0]).parent == tmp_path
 
 
+def test_execute_downloads_each_source_image_once(tmp_path):
+    db = sqlite3.connect(":memory:")
+    source = XSource(lambda *_: XPage((PostPayload(
+        "p", "a", "https://link.clashofclans.com/x",
+        ("https://img/one", "https://img/two"),
+    ),)))
+    downloads = []
+    materializer = ImageMaterializer(
+        lambda url: downloads.append(url) or ImageBlob(b"x", "image/jpeg"),
+        tmp_path,
+    )
+    publisher = WeChatPublisher(lambda _: "media", lambda _: "draft", upload_cover=lambda _: "cover")
+
+    WarLayoutService(source, WarLayoutRepository(db), publisher, materializer).run_once(["a"], dry_run=False)
+
+    assert downloads == ["https://img/one", "https://img/two"]
+
+
 def test_execute_uses_per_author_incremental_watermark():
     db = sqlite3.connect(":memory:")
     now = datetime.now(timezone.utc)

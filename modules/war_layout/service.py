@@ -22,6 +22,17 @@ class RunResult:
     mass_send: WeChatMassSend | None = None
 
 
+def public_error_reason(exc: BaseException) -> str:
+    """Return a diagnostic that is useful in logs without exposing secrets."""
+    reason = getattr(exc, "public_reason", None)
+    if reason:
+        return str(reason)
+    code = getattr(exc, "code", None)
+    if code is not None:
+        return f"{type(exc).__name__}:{code}"
+    return type(exc).__name__
+
+
 class WarLayoutService:
     def __init__(self, source: XSource, repository: WarLayoutRepository, publisher: WeChatPublisher, materializer: ImageMaterializer | None = None):
         self.source, self.repository, self.publisher, self.materializer = source, repository, publisher, materializer
@@ -84,18 +95,7 @@ class WarLayoutService:
         publish_layouts = new_layouts if publish_limit is None else new_layouts[:publish_limit]
         try:
             if self.materializer:
-                publish_layouts = [
-                    layout.__class__(
-                        image_url=str(self.materializer.save(layout.image_urls[0], layout_fingerprint(layout.layout_url))),
-                        layout_url=layout.layout_url,
-                        caption=layout.caption,
-                        post_id=layout.post_id,
-                        author=layout.author,
-                        image_urls=tuple(str(self.materializer.save(image, layout_fingerprint(layout.layout_url) + f"-{index}")) for index, image in enumerate(layout.image_urls)),
-                        layout_urls=layout.layout_urls,
-                    )
-                    for layout in publish_layouts
-                ]
+                publish_layouts = [self._materialize(layout) for layout in publish_layouts]
             article = compose_article(publish_layouts, published_on)
             draft = self.publisher.create_layout_draft(article["title"], publish_layouts)
         except Exception as exc:
@@ -103,7 +103,7 @@ class WarLayoutService:
                 self.repository.update_status(
                     layout_fingerprint(layout.layout_url),
                     "failed",
-                    error_message=type(exc).__name__,
+                    error_message=public_error_reason(exc),
                 )
             self.repository.record_global_sync(
                 window_start=watermark,
@@ -111,7 +111,7 @@ class WarLayoutService:
                 status="failed",
                 posts=len(posts),
                 layouts=len(publish_layouts),
-                error_message=type(exc).__name__,
+                error_message=public_error_reason(exc),
             )
             raise
         if draft:
@@ -162,6 +162,24 @@ class WarLayoutService:
             layouts=len(publish_layouts),
         )
         return RunResult(len(posts), len(publish_layouts), discovered, skipped, draft, mass_send)
+
+    def _materialize(self, layout: LayoutCandidate) -> LayoutCandidate:
+        """Download every source image once and reuse the first as the cover."""
+        assert self.materializer is not None
+        fingerprint = layout_fingerprint(layout.layout_url)
+        image_paths = tuple(
+            str(self.materializer.save(image, f"{fingerprint}-{index}"))
+            for index, image in enumerate(layout.image_urls)
+        )
+        return layout.__class__(
+            image_url=image_paths[0],
+            layout_url=layout.layout_url,
+            caption=layout.caption,
+            post_id=layout.post_id,
+            author=layout.author,
+            image_urls=image_paths,
+            layout_urls=layout.layout_urls,
+        )
 
     def refresh_mass_send_statuses(self) -> dict[str, str]:
         self.repository.initialize()

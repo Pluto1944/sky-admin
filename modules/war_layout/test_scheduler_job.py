@@ -1,7 +1,10 @@
 import sqlite3
 from types import SimpleNamespace
 
+import requests
+
 from .models import PostPayload
+from .media import ImageDownloadError
 from .repository import WarLayoutRepository
 from .scheduler_job import run_job
 from .service import WarLayoutService
@@ -25,6 +28,19 @@ def test_scheduler_wrapper_returns_serializable_success():
 def test_scheduler_wrapper_hides_error_details():
     result = run_job(_service(), WarLayoutSettings((), ""), dry_run=True)
     assert result == {"status": "failed", "reason": "ValueError"}
+
+
+def test_scheduler_wrapper_reports_safe_image_failure_stage():
+    class _FailingService:
+        def run_once(self, *args, **kwargs):
+            raise ImageDownloadError("pbs.twimg.com", requests.ConnectionError("secret"), 4)
+
+    result = run_job(_FailingService(), WarLayoutSettings(("a",), "token"), dry_run=True)
+
+    assert result == {
+        "status": "failed",
+        "reason": "ImageDownloadError(pbs.twimg.com, ConnectionError, attempts=4)",
+    }
 
 
 class _CapturingService:
