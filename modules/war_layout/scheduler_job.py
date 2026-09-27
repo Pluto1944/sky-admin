@@ -58,10 +58,19 @@ def build_http_service(connection, settings: WarLayoutSettings, *, session: Any 
     wechat_http.trust_env = False
     wechat = WeChatHttpClient(settings.wechat_app_id, settings.wechat_app_secret, session=wechat_http)
 
-    # Images use a separate retry wrapper. Reusing an HTTPAdapter here would
-    # also retry SocialData calls on this shared session and consume paid API
-    # requests. The wrapper retries only image GETs.
-    materializer = ImageMaterializer(RetryingImageDownloader(http), Path(settings.media_dir))
+    # Images may need a proxy even when SocialData and WeChat are reachable
+    # directly. Keep that route isolated so other jobs and paid API calls are
+    # unaffected by the image egress configuration.
+    image_http = http
+    if settings.image_proxy_url:
+        settings.validate_image_proxy()
+        image_http = requests.Session()
+        image_http.trust_env = False
+        image_http.proxies.update({
+            "http": settings.image_proxy_url,
+            "https": settings.image_proxy_url,
+        })
+    materializer = ImageMaterializer(RetryingImageDownloader(image_http), Path(settings.media_dir))
     publisher = WeChatPublisher(
         wechat.upload_content_image,
         wechat.create_draft,

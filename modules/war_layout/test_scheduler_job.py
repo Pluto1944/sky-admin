@@ -6,7 +6,7 @@ import requests
 from .models import PostPayload
 from .media import ImageDownloadError
 from .repository import WarLayoutRepository
-from .scheduler_job import run_job
+from .scheduler_job import build_http_service, run_job
 from .service import WarLayoutService
 from .settings import WarLayoutSettings
 from .source_x import XPage, XSource
@@ -40,6 +40,27 @@ def test_scheduler_wrapper_reports_safe_image_failure_stage():
     assert result == {
         "status": "failed",
         "reason": "ImageDownloadError(pbs.twimg.com, ConnectionError, attempts=4)",
+    }
+
+
+def test_http_service_uses_proxy_only_for_image_downloads():
+    source_session = requests.Session()
+    settings = WarLayoutSettings(
+        ("a",),
+        "token",
+        wechat_app_id="app",
+        wechat_app_secret="secret",
+        image_proxy_url="http://127.0.0.1:17895",
+    )
+
+    service = build_http_service(sqlite3.connect(":memory:"), settings, session=source_session)
+    image_session = service.materializer.downloader.session
+
+    assert image_session is not source_session
+    assert image_session.trust_env is False
+    assert image_session.proxies == {
+        "http": "http://127.0.0.1:17895",
+        "https": "http://127.0.0.1:17895",
     }
 
 

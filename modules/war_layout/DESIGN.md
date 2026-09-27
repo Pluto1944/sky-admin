@@ -111,6 +111,7 @@
 - SocialData 作者 ID：使用 `WAR_LAYOUT_X_USER_IDS=name=id,name2=id2` 持久化映射；启用 SocialData 时必须为所有作者配置，避免每轮额外消耗用户资料请求。
 - 测试数据库：`modules/war_layout/runtime/war_layout.db`，可由 `WAR_LAYOUT_DB_PATH` 覆盖。
 - 图片素材：默认 `/tmp/sky-admin-war-layout`，可由 `WAR_LAYOUT_MEDIA_DIR` 覆盖。
+- 图片代理：服务器无法直连 `pbs.twimg.com` 时设置 `WAR_LAYOUT_IMAGE_PROXY_URL`；该代理只用于阵型图片下载，不影响 SocialData、微信或其他调度任务。
 - `modules/war_layout/.gitignore` 已忽略 `runtime/`、数据库和图片扩展名。
 
 ### 帖子筛选规则

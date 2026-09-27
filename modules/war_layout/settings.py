@@ -1,6 +1,7 @@
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,7 @@ class WarLayoutSettings:
     daily_time: str = "09:00"
     media_dir: Path = Path("/tmp/sky-admin-war-layout")
     db_path: Path = Path(__file__).resolve().parent / "runtime" / "war_layout.db"
+    image_proxy_url: str = ""
 
     @classmethod
     def from_env(cls) -> "WarLayoutSettings":
@@ -47,6 +49,7 @@ class WarLayoutSettings:
             daily_time=os.getenv("WAR_LAYOUT_DAILY_TIME", "09:00").strip(),
             media_dir=Path(os.getenv("WAR_LAYOUT_MEDIA_DIR", "/tmp/sky-admin-war-layout")),
             db_path=Path(os.getenv("WAR_LAYOUT_DB_PATH", str(Path(__file__).resolve().parent / "runtime" / "war_layout.db"))),
+            image_proxy_url=os.getenv("WAR_LAYOUT_IMAGE_PROXY_URL", "").strip(),
         )
 
     def validate_x(self) -> None:
@@ -74,3 +77,10 @@ class WarLayoutSettings:
             raise ValueError("WAR_LAYOUT_DAILY_TIME must use HH:MM") from None
         if not 0 <= hour <= 23 or not 0 <= minute <= 59:
             raise ValueError("WAR_LAYOUT_DAILY_TIME must use HH:MM")
+
+    def validate_image_proxy(self) -> None:
+        if not self.image_proxy_url:
+            return
+        parsed = urlparse(self.image_proxy_url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            raise ValueError("WAR_LAYOUT_IMAGE_PROXY_URL must be an HTTP(S) URL")

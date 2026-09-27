@@ -36,3 +36,12 @@ def test_mass_send_schedule_settings(monkeypatch):
     assert settings.enabled is True
     assert settings.auto_mass_send is True
     assert settings.daily_time == "09:00"
+
+
+def test_image_proxy_must_be_http_url(monkeypatch):
+    monkeypatch.setenv("WAR_LAYOUT_IMAGE_PROXY_URL", "socks5://127.0.0.1:1080")
+    with pytest.raises(ValueError, match="WAR_LAYOUT_IMAGE_PROXY_URL"):
+        WarLayoutSettings.from_env().validate_image_proxy()
+
+    monkeypatch.setenv("WAR_LAYOUT_IMAGE_PROXY_URL", "http://127.0.0.1:17895")
+    WarLayoutSettings.from_env().validate_image_proxy()
