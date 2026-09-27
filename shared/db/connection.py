@@ -169,6 +169,18 @@ CREATE TABLE IF NOT EXISTS farm_stats (
 );
 """
 
+_CURRENT_WAR_CACHE_DDL = """
+CREATE TABLE IF NOT EXISTS current_war_cache (
+    clan_tag    TEXT PRIMARY KEY,
+    clan_name   TEXT NOT NULL,
+    category    TEXT NOT NULL,
+    status      TEXT NOT NULL,
+    data_json   TEXT NOT NULL,
+    error       TEXT,
+    updated_at  TEXT NOT NULL
+);
+"""
+
 # sync_jobs 表：周期调度器（scripts/scheduler.py）的任务状态。
 # last_status 取值：success / failed / skipped / running / never
 _SYNC_JOBS_DDL = """
@@ -196,6 +208,7 @@ _CHILDREN_DDL = (
     + _WECHAT_USERS_DDL
     + _WAR_RESULTS_DDL
     + _FARM_STATS_DDL
+    + _CURRENT_WAR_CACHE_DDL
     + _SYNC_JOBS_DDL
 )
 
@@ -304,6 +317,11 @@ class Database:
         if not fs_cols:
             self.conn.execute(_FARM_STATS_DDL)
 
+        # current_war_cache 表迁移（全部自有部落当前战争缓存）
+        cw_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(current_war_cache)")}
+        if not cw_cols:
+            self.conn.execute(_CURRENT_WAR_CACHE_DDL)
+
         # sync_jobs 表迁移（周期调度器状态）
         sj_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(sync_jobs)")}
         if not sj_cols:
@@ -365,7 +383,7 @@ class Database:
     def reset(self) -> None:
         """清空并重建所有业务表（历史数据清零）。"""
         self.conn.execute("PRAGMA foreign_keys = OFF")
-        for table in ("war_results", "league_results", "league_teams", "results", "registrations", "accounts", "sync_jobs"):
+        for table in ("current_war_cache", "war_results", "league_results", "league_teams", "results", "registrations", "accounts", "sync_jobs"):
             self.conn.execute(f"DROP TABLE IF EXISTS {table}")
         self.conn.commit()
         self.conn.execute("PRAGMA foreign_keys = ON")

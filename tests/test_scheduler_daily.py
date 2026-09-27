@@ -14,6 +14,10 @@ def test_war_layout_is_excluded_from_broad_manual_all():
     assert JOBS["war_layout"]["include_in_all"] is False
 
 
+def test_current_wars_refreshes_every_five_minutes():
+    assert JOBS["current_wars"]["interval"] == 5
+
+
 def test_next_run_parser_honors_persisted_timestamp():
     expected = datetime(2026, 9, 23, 1, 0, tzinfo=timezone.utc).timestamp()
     assert _parse_next_run_at({"next_run_at": "2026-09-23T01:00:00+00:00"}) == expected

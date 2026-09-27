@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """周期数据刷新调度器（常驻 loop 进程）。
 
-统一管理 5 类需要周期性执行的任务，状态落 `sync_jobs` 表：
+统一管理 6 类需要周期性执行的任务，状态落 `sync_jobs` 表：
 
+    current_wars 全部自有部落当前战争（每 5 分钟）
     farm_stats  互刷部落统计（每 30 分钟）
     coc_sync    COC 玩家档案（每 6 小时）
     war_results 普通部落战战绩（每天）
@@ -11,6 +12,7 @@
 
 用法：
     python scripts/scheduler.py                      # loop 模式（生产，systemd 守护）
+    python scripts/scheduler.py --once current_wars  # 手动刷新当前部落战缓存
     python scripts/scheduler.py --once farm_stats    # 手动执行单个任务（调试）
     python scripts/scheduler.py --once all           # 手动执行全部任务
     python scripts/scheduler.py --once cwl --force   # --force 跳过 day==12 判断
@@ -91,6 +93,53 @@ def _run_farm_stats() -> dict:
     if not success:
         return {"status": "failed", "reason": "0 个部落写入成功"}
     return {"status": "success", "reason": f"同步 {success} 个互刷部落"}
+
+
+def _run_current_wars() -> dict:
+    """拉取全部已启用自有部落的当前战争，写入缓存表。"""
+    from modules.coc_sync.service import CocSyncService
+
+    items = CocSyncService().fetch_current_wars()
+    if not items:
+        return {"status": "skipped", "reason": "没有配置已启用部落"}
+
+    db = Database(config.DB_PATH)
+    db.init_schema()
+    success = 0
+    failed = 0
+    for item in items:
+        db.conn.execute(
+            """INSERT INTO current_war_cache
+               (clan_tag, clan_name, category, status, data_json, error, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(clan_tag) DO UPDATE SET
+                   clan_name = excluded.clan_name,
+                   category = excluded.category,
+                   status = excluded.status,
+                   data_json = excluded.data_json,
+                   error = excluded.error,
+                   updated_at = excluded.updated_at""",
+            (
+                item["clan_tag"],
+                item["clan_name"],
+                item["category"],
+                item["status"],
+                json.dumps(item, ensure_ascii=False),
+                item.get("error"),
+                item["synced_at"],
+            ),
+        )
+        if item["status"] == "error":
+            failed += 1
+        else:
+            success += 1
+    db.conn.commit()
+    db.close()
+
+    if not success:
+        return {"status": "failed", "reason": f"全部 {failed} 个部落同步失败"}
+    suffix = f"，失败 {failed}" if failed else ""
+    return {"status": "success", "reason": f"同步 {success} 个部落{suffix}"}
 
 
 def _run_coc_sync() -> dict:
@@ -206,6 +255,11 @@ def _run_war_layout() -> dict:
 # ═══════════════════════════════════════════════════════════════════════
 
 JOBS = {
+    "current_wars": {
+        "name": "当前部落战",
+        "interval": 5,
+        "run": _run_current_wars,
+    },
     "farm_stats": {
         "name": "互刷部落统计",
         "interval": 30,

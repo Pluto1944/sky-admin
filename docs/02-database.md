@@ -7,7 +7,7 @@
 
 ## 一、数据库概览
 
-系统包含 **5 张表**：
+系统当前包含 **10 张业务与运行状态表**：
 
 | 表名 | 职责 | 主键 | 状态 |
 |------|------|------|------|
@@ -16,6 +16,13 @@
 | `league_teams` | 队伍配置快照 | `id` (自增) | **v3.0 新增** |
 | `league_results` | 联赛战绩（结构化） | `id` (自增) | **v3.0 新增** |
 | `results` | 月度战绩（旧） | `id` (自增) | 过渡期保留 |
+| `war_results` | 普通部落战历史统计 | `id` (自增) | 活跃 |
+| `farm_stats` | 互刷部落统计缓存 | `clan_tag` | 活跃 |
+| `current_war_cache` | 自有部落当前战争缓存 | `clan_tag` | 活跃 |
+| `wechat_users` | 微信用户和游戏账号绑定 | `openid` | 活跃 |
+| `sync_jobs` | 周期调度任务状态 | `job_id` | 活跃 |
+
+`current_war_cache` 每个已启用自有部落一行，保存标准化后的当前战争 JSON、状态、错误和同步时间。它由 `current_wars` 调度任务每 5 分钟覆盖更新，API 只读缓存，不在页面请求中直接调用 COC。
 
 ---
 
@@ -241,6 +248,11 @@ CREATE TABLE league_results (
 | `league_teams` | `arrange`（幂等写入） | `arrange`（读上月配置+team_name） |
 | `league_results` | `fetch_cwl_data` | `arrange`（读星数+队伍归属） |
 | `results`（旧） | `fetch_cwl_data`（双写） | `arrange`（回退读取） |
+| `war_results` | `fetch_war_data` | `api_server`（war-stats） |
+| `farm_stats` | `scheduler.py`（farm_stats） | `api_server`（farm-config） |
+| `current_war_cache` | `scheduler.py`（current_wars） | `api_server`（current-wars 汇总/详情） |
+| `wechat_users` | `api_server`（登录/绑定） | `api_server` |
+| `sync_jobs` | `scheduler.py` | `scheduler.py`（任务状态） |
 
 ---
 

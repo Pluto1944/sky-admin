@@ -54,6 +54,10 @@ class CocApiClient:
         """按玩家 Tag 查询单个账号信息。"""
         return self._get(f"/players/{self._encode_tag(player_tag)}")
 
+    def get_current_war(self, clan_tag: str) -> dict:
+        """查询指定部落的当前战争详情。"""
+        return self._get(f"/clans/{self._encode_tag(clan_tag)}/currentwar")
+
     # ------------------------------------------------------------------
     # CWL 相关接口
     # ------------------------------------------------------------------

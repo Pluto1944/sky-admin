@@ -104,3 +104,10 @@ def test_find_by_name(player_repo):
     assert {a["player_tag"] for a in player_repo.find_by_name("同名")} == {"#A", "#B"}
     assert len(player_repo.find_by_name("唯一")) == 1
     assert player_repo.find_by_name("不存在") == []
+
+
+def test_current_war_cache_table_is_created(db):
+    columns = {
+        row[1] for row in db.conn.execute("PRAGMA table_info(current_war_cache)")
+    }
+    assert {"clan_tag", "clan_name", "category", "status", "data_json", "error", "updated_at"} <= columns

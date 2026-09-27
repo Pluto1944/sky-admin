@@ -23,6 +23,7 @@ export default {
   props: {
     title: { type: String, default: '' },
     showBack: { type: Boolean, default: false },
+    backFallback: { type: String, default: '' },
     buttons: { type: Array, default: () => [] }
   },
   data() {
@@ -39,7 +40,12 @@ export default {
   },
   methods: {
     goBack() {
-      uni.navigateBack({ delta: 1 })
+      uni.navigateBack({
+        delta: 1,
+        fail: () => {
+          if (this.backFallback) uni.switchTab({ url: this.backFallback })
+        }
+      })
     }
   }
 }

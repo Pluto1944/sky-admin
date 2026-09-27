@@ -113,6 +113,28 @@ GET /api/members
 
 ---
 
+### 2.1 当前部落战汇总
+
+```
+GET /api/clan/current-wars
+```
+
+无需认证。返回 `config/settings.yaml` 中全部已启用自有部落的当前战争摘要、分类筛选元数据和缓存更新时间。接口只读取 `current_war_cache`，不会在 HTTP 请求中直接访问 COC。
+
+每个部落的 `status` 为 `preparation`、`in_war`、`war_ended`、`cwl`、`not_in_war`、`sync_pending` 或 `error`。汇总响应不包含成员宽表 `rows`。
+
+### 2.2 单个部落当前战争详情
+
+```
+GET /api/clan/current-wars/{clan_tag}
+```
+
+无需认证，但 `clan_tag` 必须属于已启用自有部落，否则返回 `404`。详情包含战争概要和按 `mapPosition` 对齐的 `rows`。每位成员包含按官方 `order` 排序的第一/第二刀、最佳防守，以及 `three_star_count / total_attacks` 防守次数数据。
+
+这两个接口的数据由调度器 `current_wars` 任务每 5 分钟刷新。完整设计见 [18-current-war-dashboard.md](18-current-war-dashboard.md)。
+
+---
+
 ### 3. 微信登录
 
 ```

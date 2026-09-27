@@ -71,10 +71,12 @@ class FakeCocApiClient:
         members_by_clan: Optional[dict[str, list[dict]]] = None,
         fail_clans: Optional[set[str]] = None,
         players_by_tag: Optional[dict[str, dict]] = None,
+        wars_by_clan: Optional[dict[str, dict]] = None,
     ):
         self._members = members_by_clan or {}
         self._fail = set(fail_clans or ())
         self._players = players_by_tag or {}
+        self._wars = wars_by_clan or {}
 
     def get_clan_members(self, clan_tag: str) -> list[dict]:
         if clan_tag in self._fail:
@@ -86,6 +88,13 @@ class FakeCocApiClient:
     def get_player(self, player_tag: str) -> dict:
         """按玩家 Tag 返回预置资料；未预置则视为"当前无部落"（已退部/未知）。"""
         return copy.deepcopy(self._players.get(player_tag, {"tag": player_tag}))
+
+    def get_current_war(self, clan_tag: str) -> dict:
+        if clan_tag in self._fail:
+            from modules.coc_sync.official.api_client import CocApiError
+
+            raise CocApiError(f"模拟部落 {clan_tag} 当前战争抓取失败")
+        return copy.deepcopy(self._wars.get(clan_tag, {"state": "notInWar"}))
 
 
 def coc_member(tag, name, role="member", exp=100, trophies=3000, th=15, league="传奇"):

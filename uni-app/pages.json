@@ -65,6 +65,15 @@
       }
     },
     {
+      "path": "pages/war/current-detail",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "当前部落战",
+        "enablePullDownRefresh": true,
+        "backgroundColor": "#0f0f23"
+      }
+    },
+    {
       "path": "pages/clan/stats",
       "style": {
         "navigationStyle": "custom",

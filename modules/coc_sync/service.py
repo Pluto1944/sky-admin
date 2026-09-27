@@ -13,8 +13,10 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime, timezone
 
 import config
+from modules.coc_sync.current_war import failed_current_war, normalize_current_war
 from modules.coc_sync.official.api_client import CocApiClient, CocApiError
 from modules.coc_sync.official.mapper import map_member, normalize_tag
 from modules.player.service import PlayerService
@@ -37,6 +39,23 @@ class CocSyncService:
         """拉取并标准化某部落全部成员（不写库）。"""
         members = self.api_client.get_clan_members(clan_tag)
         return [map_member(m, clan_tag, clan_name) for m in members]
+
+    def fetch_current_wars(self, clans: list | None = None) -> list[dict]:
+        """拉取并标准化多个自有部落的当前战争，逐部落隔离失败。"""
+        clan_list = self._resolve_clans(clans)
+        synced_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        results = []
+        for clan in clan_list:
+            try:
+                raw = self.api_client.get_current_war(clan["tag"])
+                results.append(normalize_current_war(raw, clan, synced_at))
+            except Exception as exc:  # noqa: BLE001 - 单部落隔离，不能中断其余部落
+                print(
+                    f"[warn] 部落 {clan.get('name') or clan['tag']} 当前战争同步失败：{exc}",
+                    file=sys.stderr,
+                )
+                results.append(failed_current_war(clan, str(exc), synced_at))
+        return results
 
     # ------------------------------------------------------------------
     # 同步落库
@@ -156,14 +175,22 @@ class CocSyncService:
         """把入参统一成 [{'tag','name'}]。None -> config.CLANS(仅 enabled)。"""
         if clans is None:
             return [
-                {"tag": c["tag"], "name": c.get("name")}
+                {
+                    "tag": c["tag"],
+                    "name": c.get("name"),
+                    "category": c.get("category", "normal"),
+                }
                 for c in config.CLANS
                 if c.get("enabled", True)
             ]
         normalized = []
         for c in clans:
             if isinstance(c, str):
-                normalized.append({"tag": c, "name": None})
+                normalized.append({"tag": c, "name": None, "category": "normal"})
             else:
-                normalized.append({"tag": c["tag"], "name": c.get("name")})
+                normalized.append({
+                    "tag": c["tag"],
+                    "name": c.get("name"),
+                    "category": c.get("category", "normal"),
+                })
         return normalized

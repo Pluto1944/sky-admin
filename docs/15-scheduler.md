@@ -10,7 +10,7 @@
 
 ### 1.1 现状问题
 
-项目当前有 **5 类** 需要周期性执行的任务，其中数据刷新任务采用间隔调度，公众号阵型采用固定业务时刻：
+项目当前有 **6 类** 需要周期性执行的任务，其中数据刷新任务采用间隔调度，公众号阵型采用固定业务时刻：
 
 | 问题 | 现状 | 影响 |
 |------|------|------|
@@ -34,7 +34,7 @@
 
 ### 2.1 数据表全景
 
-系统共 **9 张表**（`shared/db/connection.py` 中定义），按数据生命周期分三类：
+系统共 **10 张表**（`shared/db/connection.py` 中定义），按数据生命周期分三类：
 
 | 表名 | 职责 | 主键 | 数据来源 | 刷新方式 |
 |------|------|------|----------|----------|
@@ -46,7 +46,8 @@
 | `war_results` | 普通部落战战绩 | `id` 自增 | ClashKing API | **周期**（每天） |
 | `wechat_users` | 微信用户绑定 | `openid` | 微信小程序 | 实时（用户登录） |
 | `farm_stats` | 互刷部落统计缓存 | `clan_tag` | COC 官方 API | **周期**（每 30 分钟） |
-| `sync_jobs` | 调度器任务状态（待新增） | `job_id` | `scheduler.py` | 实时（调度器维护） |
+| `current_war_cache` | 自有部落当前战争缓存 | `clan_tag` | COC 官方 API | **周期**（每 5 分钟） |
+| `sync_jobs` | 调度器任务状态 | `job_id` | `scheduler.py` | 实时（调度器维护） |
 
 > `results` 为过渡期旧表，`league_results` 写入时双写，稳定后废弃。
 > `sync_jobs` 为周期调度方案新增的状态表，详见第三节。
@@ -63,12 +64,14 @@
 | `war_results` | `fetch_war_data` | `api_server`（war-stats） |
 | `wechat_users` | `api_server`（登录/绑定） | `api_server` |
 | `farm_stats` | `sync_farm_stats` | `api_server`（farm-config） |
+| `current_war_cache` | `current_wars` | `api_server`（current-wars） |
 | `sync_jobs` | `scheduler.py` | `scheduler.py`（`--list`） |
 
-### 2.3 需要周期性执行的任务（5 类）
+### 2.3 需要周期性执行的任务（6 类）
 
 | job_id | 数据表 | 脚本 | 数据源 | 频率 | 前端接口 |
 |--------|--------|------|--------|------|----------|
+| `current_wars` | `current_war_cache` | `scheduler.py` | COC 官方 API | 每 5 分钟 | `/api/clan/current-wars` |
 | `coc_sync` | `accounts` | `cli.py coc-sync` | COC 官方 API | 每天 | `/api/members` |
 | `farm_stats` | `farm_stats` | `sync_farm_stats.py` | COC 官方 API | 每 30 分钟 | `/api/clan/farm-config` |
 | `war_results` | `war_results` | `fetch_war_data.py` | ClashKing API | 每天 | `/api/clan/war-stats` |
@@ -78,6 +81,15 @@
 其余表（`registrations`、`league_teams`、`wechat_users`）由月度人工流程或用户实时操作写入，**不纳入周期刷新**。
 
 ### 2.4 各周期任务详情
+
+#### `current_wars` — 当前部落战（`current_war_cache`）
+
+| 项 | 内容 |
+|----|------|
+| 入口 | `scripts/scheduler.py::_run_current_wars()` → `CocSyncService.fetch_current_wars()` |
+| 数据源 | Supercell 官方 COC API `/clans/{tag}/currentwar` |
+| 建议频率 | 每 5 分钟（`interval_min=5`） |
+| 逻辑 | 遍历全部已启用自有部落 → 标准化双方对位/出刀/防守 → 每部落一行覆盖缓存；单部落失败不阻塞其余部落 |
 
 #### `coc_sync` — 部落成员档案（`accounts`）
 
@@ -311,7 +323,8 @@ def loop():
 
 ```bash
 python scripts/scheduler.py                    # loop 模式（生产，systemd 守护）
-python scripts/scheduler.py --once farm_stats  # 手动执行单个任务（调试）
+python scripts/scheduler.py --once current_wars # 手动刷新当前部落战缓存
+python scripts/scheduler.py --once farm_stats   # 手动执行单个任务（调试）
 python scripts/scheduler.py --once all         # 手动执行全部任务
 python scripts/scheduler.py --once cwl --force # --force 跳过 day==12 判断，强制拉取
 python scripts/scheduler.py --list             # 查看所有任务状态

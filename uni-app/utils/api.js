@@ -123,6 +123,16 @@ export function getFarmConfig() {
   return request('/api/clan/farm-config')
 }
 
+/** 获取全部自有部落的当前战争摘要。 */
+export function getCurrentWars() {
+  return request('/api/clan/current-wars')
+}
+
+/** 获取单个自有部落的当前战争详情。 */
+export function getCurrentWar(clanTag) {
+  return request(`/api/clan/current-wars/${encodeURIComponent(clanTag)}`)
+}
+
 export default {
   wechatLogin,
   getMyInfo,
@@ -130,5 +140,7 @@ export default {
   getMembers,
   getLeagueStats,
   getWarStats,
-  getFarmConfig
+  getFarmConfig,
+  getCurrentWars,
+  getCurrentWar
 }

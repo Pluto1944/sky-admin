@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import requests
 import sqlite3
@@ -20,10 +21,12 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 
 from modules.player.repository import PlayerRepository
+from modules.coc_sync.current_war import current_war_summary
+from modules.coc_sync.official.mapper import normalize_tag
 from .deps import get_repo, get_db
 from .auth import create_token, require_user
 from shared.db.connection import Database
-from config import CLANS, DB_PATH, LEAGUE_COMBAT, get_farm_clans
+from config import CLANS, CLAN_CATEGORY_LABELS, DB_PATH, LEAGUE_COMBAT, get_farm_clans
 
 router = APIRouter(prefix="/api")
 
@@ -62,6 +65,101 @@ def list_members(repo: PlayerRepository = Depends(get_repo)):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"数据库查询失败: {e}")
+
+
+# ── 当前部落战 ────────────────────────────────────────────────
+
+
+def _enabled_clans() -> list[dict]:
+    return [clan for clan in CLANS if clan.get("enabled", True)]
+
+
+def _pending_current_war(clan: dict) -> dict:
+    return {
+        "clan_tag": normalize_tag(clan["tag"]),
+        "clan_name": clan.get("name") or clan["tag"],
+        "category": clan.get("category", "normal"),
+        "status": "sync_pending",
+        "state": "syncPending",
+        "war_type": None,
+        "team_size": 0,
+        "attacks_per_member": 0,
+        "preparation_start_time": None,
+        "start_time": None,
+        "end_time": None,
+        "result": "pending",
+        "clan": None,
+        "opponent": None,
+        "rows": [],
+        "error": None,
+        "synced_at": None,
+    }
+
+
+def _cached_current_wars(db: Database) -> dict[str, dict]:
+    rows = db.conn.execute(
+        "SELECT clan_tag, data_json FROM current_war_cache"
+    ).fetchall()
+    result = {}
+    for row in rows:
+        try:
+            result[normalize_tag(row["clan_tag"])] = json.loads(row["data_json"])
+        except (TypeError, json.JSONDecodeError):
+            continue
+    return result
+
+
+@router.get("/clan/current-wars")
+def current_wars(db: Database = Depends(get_db)):
+    """返回全部已启用自有部落的当前战争摘要。"""
+    cached = _cached_current_wars(db)
+    clans = []
+    categories = []
+    seen_categories = set()
+    updated = []
+    for order, configured in enumerate(_enabled_clans()):
+        tag = normalize_tag(configured["tag"])
+        item = cached.get(tag) or _pending_current_war(configured)
+        item.update({
+            "clan_tag": tag,
+            "clan_name": configured.get("name") or configured["tag"],
+            "category": configured.get("category", "normal"),
+            "config_order": order,
+        })
+        clans.append(current_war_summary(item))
+        if item.get("synced_at"):
+            updated.append(item["synced_at"])
+        category = configured.get("category", "normal")
+        if category not in seen_categories:
+            seen_categories.add(category)
+            categories.append({
+                "key": category,
+                "label": CLAN_CATEGORY_LABELS.get(category, category),
+            })
+    return {
+        "updated_at": max(updated) if updated else None,
+        "categories": categories,
+        "clans": clans,
+    }
+
+
+@router.get("/clan/current-wars/{clan_tag}")
+def current_war_detail(clan_tag: str, db: Database = Depends(get_db)):
+    """返回单个配置部落的当前战争详情。"""
+    normalized = normalize_tag(clan_tag)
+    configured = next(
+        (clan for clan in _enabled_clans() if normalize_tag(clan["tag"]) == normalized),
+        None,
+    )
+    if configured is None:
+        raise HTTPException(status_code=404, detail="部落不在允许查询的自有部落列表中")
+    item = _cached_current_wars(db).get(normalized) or _pending_current_war(configured)
+    item.update({
+        "clan_tag": normalized,
+        "clan_name": configured.get("name") or configured["tag"],
+        "category": configured.get("category", "normal"),
+    })
+    return item
 
 
 # ── 联赛战绩统计 ──────────────────────────────────────────────
