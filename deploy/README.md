@@ -179,7 +179,7 @@ sudo systemctl enable sky-scheduler
 
 | job_id | 说明 | 频率 |
 |--------|------|------|
-| `current_wars` | 全部自有部落当前战争缓存 | 每 5 分钟 |
+| `current_wars` | 全部自有部落当前战争缓存 | 每 2 分钟 |
 | `farm_stats` | 互刷部落统计 | 每 30 分钟 |
 | `coc_sync` | COC 玩家档案 | 每 6 小时 |
 | `war_results` | 普通部落战战绩 | 每天 |
@@ -192,6 +192,7 @@ sudo systemctl enable sky-scheduler
 cd /home/ubuntu/YANG/sky-admin
 venv/bin/python scripts/scheduler.py --list                       # 查看任务状态
 venv/bin/python scripts/scheduler.py --once current_wars          # 手动刷新当前部落战缓存
+venv/bin/python scripts/scheduler.py --set-interval current_wars 2 # 既有环境调整为每 2 分钟
 venv/bin/python scripts/scheduler.py --once farm_stats            # 手动触发某任务
 venv/bin/python scripts/scheduler.py --once all                   # 手动触发全部任务
 venv/bin/python scripts/scheduler.py --once cwl --force           # 强制拉当月 CWL（跳过 12 号判断）

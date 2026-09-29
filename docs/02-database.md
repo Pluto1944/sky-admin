@@ -22,7 +22,7 @@
 | `wechat_users` | 微信用户和游戏账号绑定 | `openid` | 活跃 |
 | `sync_jobs` | 周期调度任务状态 | `job_id` | 活跃 |
 
-`current_war_cache` 每个已启用自有部落一行，保存标准化后的当前战争 JSON、状态、错误和同步时间。它由 `current_wars` 调度任务每 5 分钟覆盖更新，API 只读缓存，不在页面请求中直接调用 COC。
+`current_war_cache` 每个已启用自有部落一行，保存标准化后的当前战争 JSON、状态、错误和同步时间。它由 `current_wars` 调度任务每 2 分钟覆盖更新，API 只读缓存，不在页面请求中直接调用 COC。
 
 ---
 

@@ -3,7 +3,7 @@
 
 统一管理 6 类需要周期性执行的任务，状态落 `sync_jobs` 表：
 
-    current_wars 全部自有部落当前战争（每 5 分钟）
+    current_wars 全部自有部落当前战争（每 2 分钟）
     farm_stats  互刷部落统计（每 30 分钟）
     coc_sync    COC 玩家档案（每 6 小时）
     war_results 普通部落战战绩（每天）
@@ -257,7 +257,7 @@ def _run_war_layout() -> dict:
 JOBS = {
     "current_wars": {
         "name": "当前部落战",
-        "interval": 5,
+        "interval": 2,
         "run": _run_current_wars,
     },
     "farm_stats": {

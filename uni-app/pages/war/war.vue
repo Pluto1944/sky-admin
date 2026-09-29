@@ -115,6 +115,7 @@ import TopBar from '@/components/TopBar.vue'
 import { getCurrentWars } from '@/utils/api.js'
 
 const STATUS_ORDER = { in_war: 0, preparation: 1, war_ended: 2, cwl: 3, not_in_war: 4, sync_pending: 5, error: 6 }
+const CACHE_REFRESH_INTERVAL_MS = 60 * 1000
 
 export default {
   components: { TopBar },
@@ -218,7 +219,7 @@ export default {
       this.stopTimers()
       this.nowMs = Date.now()
       this.clockTimer = setInterval(() => { this.nowMs = Date.now() }, 1000)
-      this.refreshTimer = setInterval(() => { this.fetchCurrentWars() }, 5 * 60 * 1000)
+      this.refreshTimer = setInterval(() => { this.fetchCurrentWars() }, CACHE_REFRESH_INTERVAL_MS)
     },
     stopTimers() {
       if (this.clockTimer) clearInterval(this.clockTimer)

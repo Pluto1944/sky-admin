@@ -46,7 +46,7 @@
 | `war_results` | 普通部落战战绩 | `id` 自增 | ClashKing API | **周期**（每天） |
 | `wechat_users` | 微信用户绑定 | `openid` | 微信小程序 | 实时（用户登录） |
 | `farm_stats` | 互刷部落统计缓存 | `clan_tag` | COC 官方 API | **周期**（每 30 分钟） |
-| `current_war_cache` | 自有部落当前战争缓存 | `clan_tag` | COC 官方 API | **周期**（每 5 分钟） |
+| `current_war_cache` | 自有部落当前战争缓存 | `clan_tag` | COC 官方 API | **周期**（每 2 分钟） |
 | `sync_jobs` | 调度器任务状态 | `job_id` | `scheduler.py` | 实时（调度器维护） |
 
 > `results` 为过渡期旧表，`league_results` 写入时双写，稳定后废弃。
@@ -71,7 +71,7 @@
 
 | job_id | 数据表 | 脚本 | 数据源 | 频率 | 前端接口 |
 |--------|--------|------|--------|------|----------|
-| `current_wars` | `current_war_cache` | `scheduler.py` | COC 官方 API | 每 5 分钟 | `/api/clan/current-wars` |
+| `current_wars` | `current_war_cache` | `scheduler.py` | COC 官方 API | 每 2 分钟 | `/api/clan/current-wars` |
 | `coc_sync` | `accounts` | `cli.py coc-sync` | COC 官方 API | 每天 | `/api/members` |
 | `farm_stats` | `farm_stats` | `sync_farm_stats.py` | COC 官方 API | 每 30 分钟 | `/api/clan/farm-config` |
 | `war_results` | `war_results` | `fetch_war_data.py` | ClashKing API | 每天 | `/api/clan/war-stats` |
@@ -88,8 +88,11 @@
 |----|------|
 | 入口 | `scripts/scheduler.py::_run_current_wars()` → `CocSyncService.fetch_current_wars()` |
 | 数据源 | Supercell 官方 COC API `/clans/{tag}/currentwar` |
-| 建议频率 | 每 5 分钟（`interval_min=5`） |
+| 建议频率 | 每 2 分钟（`interval_min=2`） |
 | 逻辑 | 遍历全部已启用自有部落 → 标准化双方对位/出刀/防守 → 每部落一行覆盖缓存；单部落失败不阻塞其余部落 |
+
+`sync_jobs.interval_min` 会持久化已有环境的设置。将既有部署从旧的 5 分钟调整为 2 分钟时，
+部署后需执行 `python scripts/scheduler.py --set-interval current_wars 2`；新建数据库直接使用代码中的 2 分钟默认值。
 
 #### `coc_sync` — 部落成员档案（`accounts`）
 

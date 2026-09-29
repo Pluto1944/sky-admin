@@ -14,8 +14,8 @@ def test_war_layout_is_excluded_from_broad_manual_all():
     assert JOBS["war_layout"]["include_in_all"] is False
 
 
-def test_current_wars_refreshes_every_five_minutes():
-    assert JOBS["current_wars"]["interval"] == 5
+def test_current_wars_refreshes_every_two_minutes():
+    assert JOBS["current_wars"]["interval"] == 2
 
 
 def test_next_run_parser_honors_persisted_timestamp():

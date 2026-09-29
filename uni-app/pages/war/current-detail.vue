@@ -83,6 +83,8 @@
 import TopBar from '@/components/TopBar.vue'
 import { getCurrentWar } from '@/utils/api.js'
 
+const CACHE_REFRESH_INTERVAL_MS = 60 * 1000
+
 export default {
   components: { TopBar },
   data() {
@@ -118,7 +120,7 @@ export default {
       this.stopTimers()
       this.nowMs = Date.now()
       this.clockTimer = setInterval(() => { this.nowMs = Date.now() }, 1000)
-      this.refreshTimer = setInterval(() => { this.fetchDetail() }, 5 * 60 * 1000)
+      this.refreshTimer = setInterval(() => { this.fetchDetail() }, CACHE_REFRESH_INTERVAL_MS)
     },
     stopTimers() {
       if (this.clockTimer) clearInterval(this.clockTimer)

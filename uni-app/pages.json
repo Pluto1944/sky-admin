@@ -1,17 +1,17 @@
 {
   "pages": [
     {
-      "path": "pages/clan/clan",
-      "style": {
-        "navigationStyle": "custom",
-        "navigationBarTitleText": "部落"
-      }
-    },
-    {
       "path": "pages/war/war",
       "style": {
         "navigationStyle": "custom",
         "navigationBarTitleText": "战斗"
+      }
+    },
+    {
+      "path": "pages/clan/clan",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "部落"
       }
     },
     {
