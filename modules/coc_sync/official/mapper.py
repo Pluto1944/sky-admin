@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from typing import Optional
 
-from config import MEMBERSHIP_MEMBER
+from config import MEMBERSHIP_LEFT, MEMBERSHIP_MEMBER
 
 
 def normalize_tag(tag: Optional[str]) -> Optional[str]:
@@ -54,3 +54,16 @@ def map_member(member: dict, clan_tag: str, clan_name: Optional[str] = None) -> 
         # 出现在部落成员列表 => 当前确在联盟部落内
         "membership_status": MEMBERSHIP_MEMBER,
     }
+
+
+def map_player(player: dict, alliance_clan_tags: set[str]) -> dict:
+    """把 `/players/{tag}` 响应映射为账号，并按当前部落判断联盟身份。"""
+    clan = player.get("clan") or {}
+    clan_tag = normalize_tag(clan.get("tag"))
+    fields = map_member(player, clan_tag or "", clan.get("name"))
+    alliance = {normalize_tag(tag) for tag in alliance_clan_tags}
+    alliance.discard(None)
+    fields["membership_status"] = (
+        MEMBERSHIP_MEMBER if clan_tag in alliance else MEMBERSHIP_LEFT
+    )
+    return fields

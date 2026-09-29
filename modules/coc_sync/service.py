@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 import config
 from modules.coc_sync.current_war import failed_current_war, normalize_current_war
 from modules.coc_sync.official.api_client import CocApiClient, CocApiError
-from modules.coc_sync.official.mapper import map_member, normalize_tag
+from modules.coc_sync.official.mapper import map_member, map_player, normalize_tag
 from modules.player.service import PlayerService
 
 
@@ -39,6 +39,25 @@ class CocSyncService:
         """拉取并标准化某部落全部成员（不写库）。"""
         members = self.api_client.get_clan_members(clan_tag)
         return [map_member(m, clan_tag, clan_name) for m in members]
+
+    def fetch_clan_profile(self, clan_tag: str) -> dict:
+        """读取部落概要（名称、首领、人数和 CWL 等级），不写数据库。"""
+        raw = self.api_client.get_clan(clan_tag)
+        leader = next(
+            (
+                member.get("name", "")
+                for member in raw.get("memberList", []) or []
+                if member.get("role") == "leader"
+            ),
+            "",
+        )
+        return {
+            "clan_tag": normalize_tag(raw.get("tag") or clan_tag),
+            "clan_name": raw.get("name", ""),
+            "leader_name": leader,
+            "members": raw.get("members"),
+            "league_level": (raw.get("warLeague") or {}).get("name", ""),
+        }
 
     def fetch_current_wars(self, clans: list | None = None) -> list[dict]:
         """拉取并标准化多个自有部落的当前战争，逐部落隔离失败。"""
@@ -121,6 +140,17 @@ class CocSyncService:
         # 退部对账：只针对本次成功同步的部落，避免抓取失败的部落误伤其成员
         self._reconcile_left_members(set(seen.keys()), synced_clan_tags, stats)
         return stats
+
+    def sync_player(self, player_tag: str) -> dict:
+        """按真实 Tag 从官方 API 同步单个玩家，不依赖其当前所在部落。"""
+        if self.player_service is None:
+            raise ValueError("sync_player 需要 player_service")
+        raw = self.api_client.get_player(player_tag)
+        fields = map_player(raw, set(config.ALLIANCE_CLAN_TAGS))
+        if not fields.get("player_tag"):
+            raise ValueError(f"COC API 未返回有效玩家 Tag: {player_tag}")
+        self.player_service.update_from_coc(fields)
+        return fields
 
     def _reconcile_left_members(
         self, present_tags: set[str], synced_clan_tags: set[str], stats: dict

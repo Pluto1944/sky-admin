@@ -76,6 +76,53 @@ def test_fetch_clan_members_readonly_no_write(player_service):
     assert player_service.list_all() == []            # 只读，不落库
 
 
+def test_fetch_clan_profile_returns_cwl_level_without_write(player_service):
+    class ProfileApi:
+        def get_clan(self, clan_tag):
+            return {
+                "tag": clan_tag,
+                "name": "测试部落",
+                "members": 2,
+                "warLeague": {"name": "Titan League III"},
+                "memberList": [
+                    {"name": "首领", "role": "leader"},
+                    {"name": "成员", "role": "member"},
+                ],
+            }
+
+    profile = CocSyncService(player_service, ProfileApi()).fetch_clan_profile("#C1")
+
+    assert profile == {
+        "clan_tag": "#C1",
+        "clan_name": "测试部落",
+        "leader_name": "首领",
+        "members": 2,
+        "league_level": "Titan League III",
+    }
+    assert player_service.list_all() == []
+
+
+def test_sync_player_creates_external_account_as_left(player_service, monkeypatch):
+    monkeypatch.setattr(config, "ALLIANCE_CLAN_TAGS", ["#C1"])
+    api = FakeCocApiClient(
+        {},
+        players_by_tag={
+            "#P": {
+                **coc_member("#P", "外援"),
+                "clan": {"tag": "#EXT", "name": "外部落"},
+            }
+        },
+    )
+
+    fields = CocSyncService(player_service, api).sync_player("#P")
+
+    assert fields["membership_status"] == "left"
+    account = player_service.get("#P")
+    assert account["account_name"] == "外援"
+    assert account["clan_tag"] == "#EXT"
+    assert account["membership_status"] == "left"
+
+
 # ---------------------------------------------------------------------------
 # 退部对账
 # ---------------------------------------------------------------------------

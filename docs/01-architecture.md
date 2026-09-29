@@ -123,6 +123,9 @@ flowchart TD
 - `list_members_by_clan(clan_tags)`：按部落标签查成员（战营名单数据源）
 - `get(player_tag)`：取单个账号（排序阶段取 trophies + history_score）
 - `update_history_score()`：战绩回写
+
+`CocSyncService.sync_player(player_tag)` 用于按官方玩家接口补录单个真实 Tag；它根据玩家当前部落判断 `membership_status`，不会把联盟外账号误标为联盟成员。
+`CocSyncService.fetch_clan_profile(clan_tag)` 只读获取部落名称、首领、成员数和最新 CWL 等级，供编排前核对使用。
 - `update_from_coc()`：COC 权威建档
 - `mark_left_alliance()` / `relocate_within_alliance()`：部落归属维护
 

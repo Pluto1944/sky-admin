@@ -1,7 +1,8 @@
 """命令行入口。
 
 用法：
-  python cli.py coc-sync      [--clan '#2QQ' --clan '#XX']   先同步 COC 建档
+  python cli.py coc-sync      [--clan '#2QQ' --clan '#XX']   同步部落成员
+  python cli.py coc-sync      --player '#PLAYER'             同步单个 COC 账号
   python cli.py import-reg    报名表.xlsx --period 2026-08
   python cli.py import-reg    <fileId> --period 2026-08 --sheet 报名表 --to tencent
   python cli.py arrange       --period 2026-08 -o 名单.xlsx
@@ -308,6 +309,15 @@ def cmd_coc_sync(args) -> None:
     db = make_db()
     player_service = PlayerService(PlayerRepository(db.conn))
     svc = CocSyncService(player_service)
+    if args.player:
+        for player_tag in args.player:
+            fields = svc.sync_player(player_tag)
+            print(
+                f"COC 玩家同步完成：{fields.get('account_name')} "
+                f"({fields['player_tag']})，部落 {fields.get('clan_tag') or '-'}，"
+                f"联盟身份 {fields.get('membership_status')}"
+            )
+        return
     clans = args.clan or None  # 命令行 --clan 覆盖 config.CLANS
     stats = svc.sync_clans(clans)
     print(
@@ -435,11 +445,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_exp.set_defaults(func=cmd_player_export)
 
     p5 = sub.add_parser("coc-sync", help="通过 COC API 同步部落成员到账号档案")
-    p5.add_argument(
+    coc_target = p5.add_mutually_exclusive_group()
+    coc_target.add_argument(
         "--clan",
         action="append",
         default=None,
         help="部落标签，如 '#2QQ'；可多次指定，覆盖 config.CLANS（不传则用配置）",
+    )
+    coc_target.add_argument(
+        "--player",
+        action="append",
+        default=None,
+        help="按玩家 Tag 同步单个账号；可多次指定，不执行部落批量同步",
     )
     p5.set_defaults(func=cmd_coc_sync)
 
