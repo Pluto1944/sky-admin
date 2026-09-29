@@ -74,6 +74,15 @@
       }
     },
     {
+      "path": "pages/war/cwl-detail",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "联赛详情",
+        "enablePullDownRefresh": true,
+        "backgroundColor": "#0f0f23"
+      }
+    },
+    {
       "path": "pages/clan/stats",
       "style": {
         "navigationStyle": "custom",

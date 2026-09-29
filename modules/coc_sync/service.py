@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 
 import config
 from modules.coc_sync.current_war import failed_current_war, normalize_current_war
+from modules.coc_sync.cwl_live import normalize_cwl_group, normalize_cwl_war
 from modules.coc_sync.official.api_client import CocApiClient, CocApiError
 from modules.coc_sync.official.mapper import map_member, map_player, normalize_tag
 from modules.player.service import PlayerService
@@ -75,6 +76,23 @@ class CocSyncService:
                 )
                 results.append(failed_current_war(clan, str(exc), synced_at))
         return results
+
+    def fetch_cwl_group(self, team: dict) -> dict | None:
+        """拉取并规范化一个月度联赛队伍的当前 leaguegroup，不写数据库。"""
+        clan_tag = team.get("clan_tag") or team.get("tag")
+        if not clan_tag:
+            raise ValueError("联赛队伍缺少 clan_tag")
+        raw = self.api_client.get_league_group(clan_tag)
+        if raw is None:
+            return None
+        synced_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        return normalize_cwl_group(raw, team, synced_at)
+
+    def fetch_cwl_war(self, war_tag: str) -> dict:
+        """拉取并规范化一场 CWL 战争，不写数据库。"""
+        raw = self.api_client.get_cwl_war(war_tag)
+        synced_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        return normalize_cwl_war(raw, war_tag, synced_at)
 
     # ------------------------------------------------------------------
     # 同步落库

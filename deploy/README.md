@@ -175,11 +175,12 @@ sudo systemctl restart sky-scheduler
 sudo systemctl enable sky-scheduler
 ```
 
-调度器统一管理 **6 类周期任务**，状态落 `sync_jobs` 表（设计详见 `docs/15-scheduler.md`）：
+调度器统一管理 **7 类周期任务**，状态落 `sync_jobs` 表（设计详见 `docs/15-scheduler.md`）：
 
 | job_id | 说明 | 频率 |
 |--------|------|------|
 | `current_wars` | 全部自有部落当前战争缓存 | 每 2 分钟 |
+| `cwl_live` | 当月 CWL 联赛组与逐场战争缓存 | 联赛活跃期每 2 分钟；已结束增量跳过 |
 | `farm_stats` | 互刷部落统计 | 每 30 分钟 |
 | `coc_sync` | COC 玩家档案 | 每 6 小时 |
 | `war_results` | 普通部落战战绩 | 每天 |
@@ -192,6 +193,7 @@ sudo systemctl enable sky-scheduler
 cd /home/ubuntu/YANG/sky-admin
 venv/bin/python scripts/scheduler.py --list                       # 查看任务状态
 venv/bin/python scripts/scheduler.py --once current_wars          # 手动刷新当前部落战缓存
+venv/bin/python scripts/scheduler.py --once cwl_live --force      # 强制刷新当月 CWL 实时缓存
 venv/bin/python scripts/scheduler.py --set-interval current_wars 2 # 既有环境调整为每 2 分钟
 venv/bin/python scripts/scheduler.py --once farm_stats            # 手动触发某任务
 venv/bin/python scripts/scheduler.py --once all                   # 手动触发全部任务
@@ -207,7 +209,7 @@ CLI 参数说明：
 |------|------|
 | （无参数） | loop 常驻模式（生产，由 systemd 守护，勿手动再起） |
 | `--once <job_id\|all>` | 单次执行（不进入常驻循环），调试/补数据用 |
-| `--force` | 搭配 `--once` 使用，跳过 CWL 的 `day==12` 判断 |
+| `--force` | 搭配 `--once` 使用；`cwl` 跳过 12 号判断，`cwl_live` 跳过 1～12 日窗口判断 |
 | `--list` | 打印 `sync_jobs` 表全部任务状态（含 `last_error` 报错原因） |
 | `--enable` / `--disable` | 切换任务启用状态 |
 | `--set-interval <分钟>` | 调整任务刷新间隔 |

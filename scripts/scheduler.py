@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """周期数据刷新调度器（常驻 loop 进程）。
 
-统一管理 6 类需要周期性执行的任务，状态落 `sync_jobs` 表：
+统一管理 7 类需要周期性执行的任务，状态落 `sync_jobs` 表：
 
     current_wars 全部自有部落当前战争（每 2 分钟）
+    cwl_live    当月 CWL 联赛组与逐场战争（活跃期每 2 分钟）
     farm_stats  互刷部落统计（每 30 分钟）
     coc_sync    COC 玩家档案（每 6 小时）
     war_results 普通部落战战绩（每天）
@@ -13,6 +14,7 @@
 用法：
     python scripts/scheduler.py                      # loop 模式（生产，systemd 守护）
     python scripts/scheduler.py --once current_wars  # 手动刷新当前部落战缓存
+    python scripts/scheduler.py --once cwl_live --force  # 手动刷新当月 CWL 实时缓存
     python scripts/scheduler.py --once farm_stats    # 手动执行单个任务（调试）
     python scripts/scheduler.py --once all           # 手动执行全部任务
     python scripts/scheduler.py --once cwl --force   # --force 跳过 day==12 判断
@@ -142,6 +144,238 @@ def _run_current_wars() -> dict:
     return {"status": "success", "reason": f"同步 {success} 个部落{suffix}"}
 
 
+def _minutes_since(value: str | None, now: datetime) -> float | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return max(0.0, (now.astimezone(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds() / 60)
+    except (TypeError, ValueError):
+        return None
+
+
+def _run_cwl_live(force: bool = False, now: datetime | None = None) -> dict:
+    """增量刷新当前月份 CWL 联赛组与逐场战争缓存。"""
+    from modules.coc_sync.cwl_live import group_war_tags
+    from modules.coc_sync.official.mapper import normalize_tag
+    from modules.coc_sync.service import CocSyncService
+
+    local_now = (now or datetime.now(timezone.utc)).astimezone(BUSINESS_TZ)
+    period = local_now.strftime("%Y-%m")
+    if not force and local_now.day > 12:
+        return {"status": "skipped", "reason": f"{period} 已过联赛实时窗口（今天{local_now.day}号）"}
+
+    db = Database(config.DB_PATH)
+    db.init_schema()
+    teams = [dict(row) for row in db.conn.execute(
+        """SELECT period, team_index, team_alias, team_name, clan_tag,
+                  category, member_count, league_level
+           FROM league_teams
+           WHERE period = ? AND category IN ('combat', 'shell')
+           ORDER BY team_index""",
+        (period,),
+    ).fetchall()]
+    if not teams:
+        db.close()
+        return {"status": "skipped", "reason": f"{period} 无 league_teams 联赛队伍"}
+
+    service = CocSyncService()
+    attempted_at = local_now.astimezone(timezone.utc).isoformat(timespec="seconds")
+    group_payloads: list[dict] = []
+    group_ok = group_waiting = group_failed = 0
+
+    for team in teams:
+        clan_tag = normalize_tag(team.get("clan_tag"))
+        if not clan_tag:
+            group_failed += 1
+            continue
+        team["clan_tag"] = clan_tag
+        cached = db.conn.execute(
+            "SELECT * FROM cwl_live_group_cache WHERE period = ? AND clan_tag = ?",
+            (period, clan_tag),
+        ).fetchone()
+        cached = dict(cached) if cached else None
+        age = _minutes_since((cached or {}).get("attempted_at"), local_now)
+        due = force or cached is None or (cached.get("status") != "ended" and (age is None or age >= 30))
+
+        if due:
+            try:
+                group = service.fetch_cwl_group(team)
+                if group and group.get("season") == period:
+                    status = "ended" if group.get("state") == "ended" else "active"
+                    db.conn.execute(
+                        """INSERT INTO cwl_live_group_cache
+                           (period, clan_tag, team_index, team_alias, team_name, category,
+                            league_level, season, state, status, data_json, error,
+                            updated_at, attempted_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+                           ON CONFLICT(period, clan_tag) DO UPDATE SET
+                               team_index = excluded.team_index,
+                               team_alias = excluded.team_alias,
+                               team_name = excluded.team_name,
+                               category = excluded.category,
+                               league_level = excluded.league_level,
+                               season = excluded.season,
+                               state = excluded.state,
+                               status = excluded.status,
+                               data_json = excluded.data_json,
+                               error = NULL,
+                               updated_at = excluded.updated_at,
+                               attempted_at = excluded.attempted_at""",
+                        (
+                            period, clan_tag, team["team_index"], team["team_alias"],
+                            team.get("team_name"), team["category"], team.get("league_level"),
+                            group.get("season"), group.get("state"), status,
+                            json.dumps(group, ensure_ascii=False), group.get("synced_at"), attempted_at,
+                        ),
+                    )
+                    group_ok += 1
+                elif cached and cached.get("data_json"):
+                    db.conn.execute(
+                        """UPDATE cwl_live_group_cache
+                           SET error = ?, attempted_at = ?
+                           WHERE period = ? AND clan_tag = ?""",
+                        ("官方暂未返回当前赛季联赛组", attempted_at, period, clan_tag),
+                    )
+                    group_waiting += 1
+                else:
+                    message = (
+                        f"官方返回赛季 {group.get('season')}，与 {period} 不一致"
+                        if group else "等待联赛开启"
+                    )
+                    db.conn.execute(
+                        """INSERT INTO cwl_live_group_cache
+                           (period, clan_tag, team_index, team_alias, team_name, category,
+                            league_level, season, state, status, data_json, error,
+                            updated_at, attempted_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting', NULL, ?, NULL, ?)
+                           ON CONFLICT(period, clan_tag) DO UPDATE SET
+                               team_index = excluded.team_index,
+                               team_alias = excluded.team_alias,
+                               team_name = excluded.team_name,
+                               category = excluded.category,
+                               league_level = excluded.league_level,
+                               season = excluded.season,
+                               state = excluded.state,
+                               status = 'waiting',
+                               error = excluded.error,
+                               attempted_at = excluded.attempted_at""",
+                        (
+                            period, clan_tag, team["team_index"], team["team_alias"],
+                            team.get("team_name"), team["category"], team.get("league_level"),
+                            group.get("season") if group else None,
+                            group.get("state") if group else None,
+                            message, attempted_at,
+                        ),
+                    )
+                    group_waiting += 1
+            except Exception as exc:  # noqa: BLE001 - 单队失败隔离
+                group_failed += 1
+                if cached:
+                    db.conn.execute(
+                        """UPDATE cwl_live_group_cache SET error = ?, attempted_at = ?
+                           WHERE period = ? AND clan_tag = ?""",
+                        (str(exc), attempted_at, period, clan_tag),
+                    )
+                else:
+                    db.conn.execute(
+                        """INSERT INTO cwl_live_group_cache
+                           (period, clan_tag, team_index, team_alias, team_name, category,
+                            league_level, status, error, updated_at, attempted_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, 'error', ?, NULL, ?)""",
+                        (
+                            period, clan_tag, team["team_index"], team["team_alias"],
+                            team.get("team_name"), team["category"], team.get("league_level"),
+                            str(exc), attempted_at,
+                        ),
+                    )
+            db.conn.commit()
+
+        row = db.conn.execute(
+            "SELECT data_json FROM cwl_live_group_cache WHERE period = ? AND clan_tag = ?",
+            (period, clan_tag),
+        ).fetchone()
+        if row and row["data_json"]:
+            try:
+                group_payloads.append(json.loads(row["data_json"]))
+            except (TypeError, json.JSONDecodeError):
+                pass
+
+    unique_war_tags = []
+    seen_war_tags = set()
+    for group in group_payloads:
+        for war_tag in group_war_tags(group):
+            if war_tag not in seen_war_tags:
+                seen_war_tags.add(war_tag)
+                unique_war_tags.append(war_tag)
+
+    war_ok = war_skipped = war_failed = 0
+    for war_tag in unique_war_tags:
+        cached = db.conn.execute(
+            "SELECT * FROM cwl_live_war_cache WHERE war_tag = ?", (war_tag,)
+        ).fetchone()
+        cached = dict(cached) if cached else None
+        if cached and cached.get("state") == "warEnded":
+            war_skipped += 1
+            continue
+        age = _minutes_since((cached or {}).get("attempted_at"), local_now)
+        cached_state = (cached or {}).get("state")
+        retry_minutes = 2 if cached_state in {"preparation", "inWar"} else 30
+        due = force or cached is None or age is None or age >= retry_minutes
+        if not due:
+            war_skipped += 1
+            continue
+        try:
+            war = service.fetch_cwl_war(war_tag)
+            db.conn.execute(
+                """INSERT INTO cwl_live_war_cache
+                   (war_tag, season, state, status, data_json, error, updated_at, attempted_at)
+                   VALUES (?, ?, ?, ?, ?, NULL, ?, ?)
+                   ON CONFLICT(war_tag) DO UPDATE SET
+                       season = excluded.season,
+                       state = excluded.state,
+                       status = excluded.status,
+                       data_json = excluded.data_json,
+                       error = NULL,
+                       updated_at = excluded.updated_at,
+                       attempted_at = excluded.attempted_at""",
+                (
+                    war_tag, period, war.get("state") or "unknown", war.get("status") or "unknown",
+                    json.dumps(war, ensure_ascii=False), war.get("synced_at"), attempted_at,
+                ),
+            )
+            war_ok += 1
+        except Exception as exc:  # noqa: BLE001 - 单场失败隔离
+            war_failed += 1
+            if cached:
+                db.conn.execute(
+                    "UPDATE cwl_live_war_cache SET error = ?, attempted_at = ? WHERE war_tag = ?",
+                    (str(exc), attempted_at, war_tag),
+                )
+            else:
+                db.conn.execute(
+                    """INSERT INTO cwl_live_war_cache
+                       (war_tag, season, state, status, data_json, error, updated_at, attempted_at)
+                       VALUES (?, ?, 'unknown', 'error', NULL, ?, NULL, ?)""",
+                    (war_tag, period, str(exc), attempted_at),
+                )
+        db.conn.commit()
+
+    db.close()
+    if group_failed == len(teams) and not group_payloads:
+        return {"status": "failed", "reason": f"{period} 全部 {len(teams)} 个联赛队伍同步失败"}
+    suffix = f"，失败：组 {group_failed} / 战争 {war_failed}" if group_failed or war_failed else ""
+    return {
+        "status": "success",
+        "reason": (
+            f"{period} 队伍 {len(teams)}（更新 {group_ok}、等待 {group_waiting}），"
+            f"战争更新 {war_ok}、跳过 {war_skipped}{suffix}"
+        ),
+    }
+
+
 def _run_coc_sync() -> dict:
     """同步联盟部落成员到 accounts 表。"""
     from modules.coc_sync.service import CocSyncService
@@ -260,6 +494,11 @@ JOBS = {
         "interval": 2,
         "run": _run_current_wars,
     },
+    "cwl_live": {
+        "name": "CWL实时看板",
+        "interval": 2,
+        "run": _run_cwl_live,
+    },
     "farm_stats": {
         "name": "互刷部落统计",
         "interval": 30,
@@ -348,7 +587,7 @@ def run_one(db: Database, job_id: str, force: bool = False) -> dict:
     start = time.monotonic()
     try:
         run_fn = job["run"]
-        if job_id == "cwl":
+        if job_id in {"cwl", "cwl_live"}:
             result = run_fn(force=force)
         else:
             result = run_fn()
@@ -514,7 +753,11 @@ def cmd_set_interval(job_id: str, minutes: int) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="周期数据刷新调度器")
     parser.add_argument("--once", metavar="JOB|all", default=None, help="单次执行指定任务或 all")
-    parser.add_argument("--force", action="store_true", help="配合 --once，跳过 CWL 的 day==12 判断")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="配合 --once：cwl 跳过 12 号判断，cwl_live 跳过月初窗口判断",
+    )
     parser.add_argument("--list", action="store_true", help="查看所有任务状态")
     parser.add_argument("--enable", metavar="JOB", default=None, help="启用任务")
     parser.add_argument("--disable", metavar="JOB", default=None, help="停用任务")

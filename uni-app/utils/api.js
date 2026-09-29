@@ -133,6 +133,20 @@ export function getCurrentWar(clanTag) {
   return request(`/api/clan/current-wars/${encodeURIComponent(clanTag)}`)
 }
 
+/** 获取当前月份 CWL 参赛部落摘要。 */
+export function getCwlLive(period) {
+  const query = period ? `?period=${encodeURIComponent(period)}` : ''
+  return request(`/api/clan/cwl-live${query}`)
+}
+
+/** 获取单个联赛部落的战斗日与联赛总览。 */
+export function getCwlLiveDetail(clanTag, period, round) {
+  const query = []
+  if (period) query.push(`period=${encodeURIComponent(period)}`)
+  if (round) query.push(`round=${encodeURIComponent(round)}`)
+  return request(`/api/clan/cwl-live/${encodeURIComponent(clanTag)}${query.length ? '?' + query.join('&') : ''}`)
+}
+
 export default {
   wechatLogin,
   getMyInfo,
@@ -142,5 +156,7 @@ export default {
   getWarStats,
   getFarmConfig,
   getCurrentWars,
-  getCurrentWar
+  getCurrentWar,
+  getCwlLive,
+  getCwlLiveDetail
 }

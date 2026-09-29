@@ -1,0 +1,63 @@
+from modules.coc_sync.cwl_live import (
+    build_cwl_dashboard,
+    normalize_cwl_group,
+    normalize_cwl_war,
+    orient_cwl_war,
+)
+
+from .cwl_live_fixtures import league_group, league_war_one, league_war_two, team
+
+
+def _dashboard():
+    group = normalize_cwl_group(league_group(), team(), "2026-09-03T00:00:00+00:00")
+    wars = {
+        "#W1": normalize_cwl_war(league_war_one(), "#W1", "2026-09-03T00:00:00+00:00"),
+        "#W2": normalize_cwl_war(league_war_two(), "#W2", "2026-09-05T00:00:00+00:00"),
+    }
+    return build_cwl_dashboard(group, wars)
+
+
+def test_normalize_and_orient_cwl_war_keeps_single_attack_and_best_defense():
+    war = normalize_cwl_war(league_war_one(), "#W1")
+    oriented = orient_cwl_war(war, "#AAA")
+
+    assert oriented["status"] == "in_war"
+    assert oriented["result"] == "losing"
+    assert len(oriented["rows"]) == 2
+    assert oriented["rows"][0]["clan_member"]["attack"]["target_position"] == 2
+    assert oriented["rows"][0]["clan_member"]["defense"]["attacker_position"] == 1
+
+
+def test_dashboard_builds_rounds_standings_town_halls_and_member_stats():
+    dashboard = _dashboard()
+
+    assert dashboard["current_round"] == 1
+    assert dashboard["updated_at"] == "2026-09-05T00:00:00+00:00"
+    assert [item["status"] for item in dashboard["rounds"]] == ["in_war", "war_ended"]
+    assert dashboard["overview"]["town_halls"]["levels"] == [18, 17]
+
+    own = next(row for row in dashboard["overview"]["standings"]["rows"] if row["clan_tag"] == "#AAA")
+    assert own["wins"] == 1
+    assert own["losses"] == 1
+    assert own["attack_stars"] == 5
+    assert own["league_stars"] == 15
+
+    offense = next(row for row in dashboard["overview"]["offense"]["rows"] if row["player_tag"] == "#A1")
+    assert offense["total_stars"] == 5
+    assert offense["attacks"] == 2
+    assert offense["matchup_difference"] == -1
+
+    defense = next(row for row in dashboard["overview"]["defense"]["rows"] if row["player_tag"] == "#A1")
+    assert defense["saved_stars"] == 3
+    assert defense["saved_destruction"] == 70
+    assert defense["successful_defenses"] == 2
+
+
+def test_member_states_distinguish_not_attacked_and_unattacked():
+    dashboard = _dashboard()
+    offense = next(row for row in dashboard["overview"]["offense"]["rows"] if row["player_tag"] == "#A2")
+    defense = next(row for row in dashboard["overview"]["defense"]["rows"] if row["player_tag"] == "#A2")
+
+    assert [item["status"] for item in offense["rounds"]] == ["not_attacked", "not_attacked"]
+    assert [item["status"] for item in defense["rounds"]] == ["defended", "unattacked"]
+    assert defense["successful_defenses"] == 0

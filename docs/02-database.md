@@ -7,7 +7,7 @@
 
 ## 一、数据库概览
 
-系统当前包含 **10 张业务与运行状态表**：
+系统当前包含 **12 张业务与运行状态表**：
 
 | 表名 | 职责 | 主键 | 状态 |
 |------|------|------|------|
@@ -19,10 +19,14 @@
 | `war_results` | 普通部落战历史统计 | `id` (自增) | 活跃 |
 | `farm_stats` | 互刷部落统计缓存 | `clan_tag` | 活跃 |
 | `current_war_cache` | 自有部落当前战争缓存 | `clan_tag` | 活跃 |
+| `cwl_live_group_cache` | 当月 CWL 联赛组缓存 | `(period, clan_tag)` | 活跃 |
+| `cwl_live_war_cache` | CWL 单场战争缓存 | `war_tag` | 活跃 |
 | `wechat_users` | 微信用户和游戏账号绑定 | `openid` | 活跃 |
 | `sync_jobs` | 周期调度任务状态 | `job_id` | 活跃 |
 
 `current_war_cache` 每个已启用自有部落一行，保存标准化后的当前战争 JSON、状态、错误和同步时间。它由 `current_wars` 调度任务每 2 分钟覆盖更新，API 只读缓存，不在页面请求中直接调用 COC。
+
+`cwl_live_group_cache` 以当月 `league_teams` 为部落范围，保存官方联赛组和轮次 warTag；`cwl_live_war_cache` 以 `war_tag` 去重保存完整逐场攻防数据。两表由 `cwl_live` 增量更新，页面 API 只读缓存。已结束战争不再重复拉取。
 
 ---
 
@@ -251,6 +255,8 @@ CREATE TABLE league_results (
 | `war_results` | `fetch_war_data` | `api_server`（war-stats） |
 | `farm_stats` | `scheduler.py`（farm_stats） | `api_server`（farm-config） |
 | `current_war_cache` | `scheduler.py`（current_wars） | `api_server`（current-wars 汇总/详情） |
+| `cwl_live_group_cache` | `scheduler.py`（cwl_live） | `api_server`（cwl-live 汇总/详情） |
+| `cwl_live_war_cache` | `scheduler.py`（cwl_live） | `api_server`（cwl-live 详情与总览） |
 | `wechat_users` | `api_server`（登录/绑定） | `api_server` |
 | `sync_jobs` | `scheduler.py` | `scheduler.py`（任务状态） |
 

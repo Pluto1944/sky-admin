@@ -10,7 +10,7 @@
 
 ### 1.1 现状问题
 
-项目当前有 **6 类** 需要周期性执行的任务，其中数据刷新任务采用间隔调度，公众号阵型采用固定业务时刻：
+项目当前有 **7 类** 需要周期性执行的任务，其中数据刷新任务采用间隔调度，公众号阵型采用固定业务时刻：
 
 | 问题 | 现状 | 影响 |
 |------|------|------|
@@ -34,7 +34,7 @@
 
 ### 2.1 数据表全景
 
-系统共 **10 张表**（`shared/db/connection.py` 中定义），按数据生命周期分三类：
+系统共 **12 张表**（`shared/db/connection.py` 中定义），按数据生命周期分三类：
 
 | 表名 | 职责 | 主键 | 数据来源 | 刷新方式 |
 |------|------|------|----------|----------|
@@ -47,6 +47,8 @@
 | `wechat_users` | 微信用户绑定 | `openid` | 微信小程序 | 实时（用户登录） |
 | `farm_stats` | 互刷部落统计缓存 | `clan_tag` | COC 官方 API | **周期**（每 30 分钟） |
 | `current_war_cache` | 自有部落当前战争缓存 | `clan_tag` | COC 官方 API | **周期**（每 2 分钟） |
+| `cwl_live_group_cache` | 当月联赛组缓存 | `(period, clan_tag)` | COC 官方 API | **周期**（联赛窗口） |
+| `cwl_live_war_cache` | CWL 逐场战争缓存 | `war_tag` | COC 官方 API | **周期**（活跃战争每 2 分钟） |
 | `sync_jobs` | 调度器任务状态 | `job_id` | `scheduler.py` | 实时（调度器维护） |
 
 > `results` 为过渡期旧表，`league_results` 写入时双写，稳定后废弃。
@@ -65,13 +67,16 @@
 | `wechat_users` | `api_server`（登录/绑定） | `api_server` |
 | `farm_stats` | `sync_farm_stats` | `api_server`（farm-config） |
 | `current_war_cache` | `current_wars` | `api_server`（current-wars） |
+| `cwl_live_group_cache` | `cwl_live` | `api_server`（cwl-live） |
+| `cwl_live_war_cache` | `cwl_live` | `api_server`（cwl-live） |
 | `sync_jobs` | `scheduler.py` | `scheduler.py`（`--list`） |
 
-### 2.3 需要周期性执行的任务（6 类）
+### 2.3 需要周期性执行的任务（7 类）
 
 | job_id | 数据表 | 脚本 | 数据源 | 频率 | 前端接口 |
 |--------|--------|------|--------|------|----------|
 | `current_wars` | `current_war_cache` | `scheduler.py` | COC 官方 API | 每 2 分钟 | `/api/clan/current-wars` |
+| `cwl_live` | `cwl_live_group_cache` + `cwl_live_war_cache` | `scheduler.py` | COC 官方 API | 活跃期每 2 分钟 | `/api/clan/cwl-live` |
 | `coc_sync` | `accounts` | `cli.py coc-sync` | COC 官方 API | 每天 | `/api/members` |
 | `farm_stats` | `farm_stats` | `sync_farm_stats.py` | COC 官方 API | 每 30 分钟 | `/api/clan/farm-config` |
 | `war_results` | `war_results` | `fetch_war_data.py` | ClashKing API | 每天 | `/api/clan/war-stats` |
@@ -93,6 +98,18 @@
 
 `sync_jobs.interval_min` 会持久化已有环境的设置。将既有部署从旧的 5 分钟调整为 2 分钟时，
 部署后需执行 `python scripts/scheduler.py --set-interval current_wars 2`；新建数据库直接使用代码中的 2 分钟默认值。
+
+#### `cwl_live` — CWL 实时看板
+
+| 项 | 内容 |
+|----|------|
+| 入口 | `scripts/scheduler.py::_run_cwl_live()` → `CocSyncService.fetch_cwl_group/fetch_cwl_war()` |
+| 队伍范围 | 当月 `league_teams` 中的 `combat` 和 `shell`，不读取普通战部落列表 |
+| 数据源 | Supercell 官方 `leaguegroup` + `clanwarleagues/wars/{warTag}` |
+| 频率 | 任务每 2 分钟触发；待开启联赛组和未开始战争内部限频 30 分钟 |
+| 窗口 | 北京时间每月 1～12 日；之后只读当月缓存 |
+| 增量 | 活跃战争刷新，`warEnded` 成功缓存后停止请求；warTag 全局去重 |
+| 容错 | 单部落/单 warTag 失败隔离，保留最近成功数据 |
 
 #### `coc_sync` — 部落成员档案（`accounts`）
 

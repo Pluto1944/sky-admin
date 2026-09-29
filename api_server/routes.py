@@ -15,13 +15,15 @@ import os
 import requests
 import sqlite3
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from modules.player.repository import PlayerRepository
 from modules.coc_sync.current_war import current_war_summary
+from modules.coc_sync.cwl_live import build_cwl_dashboard, group_war_tags
 from modules.coc_sync.official.mapper import normalize_tag
 from .deps import get_repo, get_db
 from .auth import create_token, require_user
@@ -160,6 +162,203 @@ def current_war_detail(clan_tag: str, db: Database = Depends(get_db)):
         "category": configured.get("category", "normal"),
     })
     return item
+
+
+# ── CWL 联赛实时看板 ──────────────────────────────────────────
+
+
+def _current_cwl_live_period() -> str:
+    return datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m")
+
+
+def _valid_period(value: str) -> bool:
+    try:
+        return datetime.strptime(value, "%Y-%m").strftime("%Y-%m") == value
+    except (TypeError, ValueError):
+        return False
+
+
+def _cwl_live_teams(db: Database, period: str) -> list[dict]:
+    rows = db.conn.execute(
+        """SELECT period, team_index, team_alias, team_name, clan_tag,
+                  category, member_count, league_level
+           FROM league_teams
+           WHERE period = ? AND category IN ('combat', 'shell')
+           ORDER BY team_index""",
+        (period,),
+    ).fetchall()
+    result = []
+    for row in rows:
+        item = dict(row)
+        item["clan_tag"] = normalize_tag(item.get("clan_tag"))
+        result.append(item)
+    return result
+
+
+def _load_json(value: str | None) -> dict | None:
+    if not value:
+        return None
+    try:
+        data = json.loads(value)
+        return data if isinstance(data, dict) else None
+    except (TypeError, json.JSONDecodeError):
+        return None
+
+
+def _cwl_live_group_row(db: Database, period: str, clan_tag: str) -> dict | None:
+    row = db.conn.execute(
+        "SELECT * FROM cwl_live_group_cache WHERE period = ? AND clan_tag = ?",
+        (period, clan_tag),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def _cwl_live_wars(db: Database, group: dict) -> dict[str, dict]:
+    war_tags = group_war_tags(group)
+    if not war_tags:
+        return {}
+    placeholders = ",".join("?" for _ in war_tags)
+    rows = db.conn.execute(
+        f"SELECT war_tag, data_json FROM cwl_live_war_cache WHERE war_tag IN ({placeholders})",
+        war_tags,
+    ).fetchall()
+    result = {}
+    for row in rows:
+        data = _load_json(row["data_json"])
+        if data:
+            result[normalize_tag(row["war_tag"])] = data
+    return result
+
+
+def _pending_cwl_summary(team: dict, cache: dict | None = None) -> dict:
+    return {
+        "period": team.get("period"),
+        "team_index": team.get("team_index"),
+        "team_alias": team.get("team_alias"),
+        "team_name": team.get("team_name") or team.get("team_alias") or team.get("clan_tag"),
+        "clan_tag": team.get("clan_tag"),
+        "category": team.get("category"),
+        "member_count": team.get("member_count", 0),
+        "league_level": team.get("league_level") or "-",
+        "season": (cache or {}).get("season"),
+        "status": (cache or {}).get("status") or "waiting",
+        "current_round": None,
+        "rank": None,
+        "wins": 0,
+        "losses": 0,
+        "ties": 0,
+        "attack_stars": 0,
+        "league_stars": 0,
+        "average_destruction": 0.0,
+        "synced_at": (cache or {}).get("updated_at"),
+        "error": (cache or {}).get("error"),
+    }
+
+
+def _build_cwl_live_summary(db: Database, period: str) -> dict:
+    teams = _cwl_live_teams(db, period)
+    clans = []
+    updated = []
+    for team in teams:
+        if not team.get("clan_tag"):
+            clans.append({**_pending_cwl_summary(team), "status": "error", "error": "联赛队伍缺少部落标签"})
+            continue
+        cache = _cwl_live_group_row(db, period, team["clan_tag"])
+        group = _load_json((cache or {}).get("data_json"))
+        if not group or group.get("season") != period:
+            item = _pending_cwl_summary(team, cache)
+        else:
+            dashboard = build_cwl_dashboard(group, _cwl_live_wars(db, group))
+            item = {**dashboard["summary"], "error": (cache or {}).get("error")}
+        if item.get("synced_at"):
+            updated.append(item["synced_at"])
+        clans.append(item)
+    return {
+        "period": period,
+        "updated_at": max(updated) if updated else None,
+        "categories": [
+            {"key": "combat", "label": "实战队"},
+            {"key": "shell", "label": "壳子队"},
+        ],
+        "clans": clans,
+    }
+
+
+@router.get("/clan/cwl-live")
+def cwl_live(period: Optional[str] = None, db: Database = Depends(get_db)):
+    """返回当月联赛参赛部落卡片；只读本地缓存。"""
+    selected_period = period or _current_cwl_live_period()
+    if not _valid_period(selected_period):
+        raise HTTPException(status_code=400, detail="period 必须为 YYYY-MM")
+    return _build_cwl_live_summary(db, selected_period)
+
+
+@router.get("/clan/cwl-live/{clan_tag}")
+def cwl_live_detail(
+    clan_tag: str,
+    period: Optional[str] = None,
+    round: Optional[int] = None,
+    db: Database = Depends(get_db),
+):
+    """返回当月单个自有联赛部落的战斗日和联赛总览。"""
+    selected_period = period or _current_cwl_live_period()
+    if not _valid_period(selected_period):
+        raise HTTPException(status_code=400, detail="period 必须为 YYYY-MM")
+    normalized = normalize_tag(clan_tag)
+    teams = _cwl_live_teams(db, selected_period)
+    team = next((item for item in teams if item.get("clan_tag") == normalized), None)
+    if team is None:
+        raise HTTPException(status_code=404, detail="部落不在当月联赛队伍列表中")
+
+    cache = _cwl_live_group_row(db, selected_period, normalized)
+    group = _load_json((cache or {}).get("data_json"))
+    if group and group.get("season") == selected_period:
+        result = build_cwl_dashboard(group, _cwl_live_wars(db, group))
+        result["error"] = (cache or {}).get("error")
+    else:
+        summary = _pending_cwl_summary(team, cache)
+        result = {
+            "period": selected_period,
+            "team": {
+                "team_index": team.get("team_index"),
+                "team_alias": team.get("team_alias"),
+                "team_name": team.get("team_name") or team.get("team_alias"),
+                "clan_tag": normalized,
+                "category": team.get("category"),
+                "member_count": team.get("member_count"),
+                "league_level": team.get("league_level"),
+            },
+            "season": None,
+            "group_state": None,
+            "status": summary["status"],
+            "current_round": None,
+            "summary": summary,
+            "rounds": [],
+            "overview": {
+                "town_halls": {"levels": [], "rows": []},
+                "standings": {"round_count": 0, "rows": []},
+                "offense": {"round_count": 0, "rows": []},
+                "defense": {"round_count": 0, "rows": []},
+            },
+            "updated_at": summary.get("synced_at"),
+            "error": summary.get("error"),
+        }
+
+    summary_response = _build_cwl_live_summary(db, selected_period)
+    result["available_teams"] = [
+        {
+            "team_index": item.get("team_index"),
+            "team_alias": item.get("team_alias"),
+            "team_name": item.get("team_name"),
+            "clan_tag": item.get("clan_tag"),
+            "display_name": item.get("team_name") or item.get("team_alias") or item.get("clan_tag"),
+        }
+        for item in summary_response["clans"]
+        if item.get("clan_tag")
+    ]
+    if round is not None:
+        result["requested_round"] = max(1, min(round, len(result["rounds"]) or 1))
+    return result
 
 
 # ── 联赛战绩统计 ──────────────────────────────────────────────

@@ -72,11 +72,15 @@ class FakeCocApiClient:
         fail_clans: Optional[set[str]] = None,
         players_by_tag: Optional[dict[str, dict]] = None,
         wars_by_clan: Optional[dict[str, dict]] = None,
+        cwl_groups_by_clan: Optional[dict[str, dict | None]] = None,
+        cwl_wars_by_tag: Optional[dict[str, dict]] = None,
     ):
         self._members = members_by_clan or {}
         self._fail = set(fail_clans or ())
         self._players = players_by_tag or {}
         self._wars = wars_by_clan or {}
+        self._cwl_groups = cwl_groups_by_clan or {}
+        self._cwl_wars = cwl_wars_by_tag or {}
 
     def get_clan_members(self, clan_tag: str) -> list[dict]:
         if clan_tag in self._fail:
@@ -95,6 +99,20 @@ class FakeCocApiClient:
 
             raise CocApiError(f"模拟部落 {clan_tag} 当前战争抓取失败")
         return copy.deepcopy(self._wars.get(clan_tag, {"state": "notInWar"}))
+
+    def get_league_group(self, clan_tag: str) -> dict | None:
+        if clan_tag in self._fail:
+            from modules.coc_sync.official.api_client import CocApiError
+
+            raise CocApiError(f"模拟部落 {clan_tag} 联赛组抓取失败")
+        return copy.deepcopy(self._cwl_groups.get(clan_tag))
+
+    def get_cwl_war(self, war_tag: str) -> dict:
+        if war_tag in self._fail:
+            from modules.coc_sync.official.api_client import CocApiError
+
+            raise CocApiError(f"模拟联赛战争 {war_tag} 抓取失败")
+        return copy.deepcopy(self._cwl_wars.get(war_tag, {"state": "notInWar"}))
 
 
 def coc_member(tag, name, role="member", exp=100, trophies=3000, th=15, league="传奇"):

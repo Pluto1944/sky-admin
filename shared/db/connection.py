@@ -181,6 +181,39 @@ CREATE TABLE IF NOT EXISTS current_war_cache (
 );
 """
 
+_CWL_LIVE_GROUP_CACHE_DDL = """
+CREATE TABLE IF NOT EXISTS cwl_live_group_cache (
+    period        TEXT NOT NULL,
+    clan_tag      TEXT NOT NULL,
+    team_index    INTEGER NOT NULL,
+    team_alias    TEXT NOT NULL,
+    team_name     TEXT,
+    category      TEXT NOT NULL,
+    league_level  TEXT,
+    season        TEXT,
+    state         TEXT,
+    status        TEXT NOT NULL,
+    data_json     TEXT,
+    error         TEXT,
+    updated_at    TEXT,
+    attempted_at  TEXT NOT NULL,
+    PRIMARY KEY(period, clan_tag)
+);
+"""
+
+_CWL_LIVE_WAR_CACHE_DDL = """
+CREATE TABLE IF NOT EXISTS cwl_live_war_cache (
+    war_tag       TEXT PRIMARY KEY,
+    season        TEXT,
+    state         TEXT NOT NULL,
+    status        TEXT NOT NULL,
+    data_json     TEXT,
+    error         TEXT,
+    updated_at    TEXT,
+    attempted_at  TEXT NOT NULL
+);
+"""
+
 # sync_jobs 表：周期调度器（scripts/scheduler.py）的任务状态。
 # last_status 取值：success / failed / skipped / running / never
 _SYNC_JOBS_DDL = """
@@ -209,6 +242,8 @@ _CHILDREN_DDL = (
     + _WAR_RESULTS_DDL
     + _FARM_STATS_DDL
     + _CURRENT_WAR_CACHE_DDL
+    + _CWL_LIVE_GROUP_CACHE_DDL
+    + _CWL_LIVE_WAR_CACHE_DDL
     + _SYNC_JOBS_DDL
 )
 
@@ -322,6 +357,22 @@ class Database:
         if not cw_cols:
             self.conn.execute(_CURRENT_WAR_CACHE_DDL)
 
+        # CWL 实时联赛组与逐场战争缓存
+        cwl_group_cols = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(cwl_live_group_cache)")
+        }
+        if not cwl_group_cols:
+            self.conn.execute(_CWL_LIVE_GROUP_CACHE_DDL)
+        elif "attempted_at" not in cwl_group_cols:
+            self.conn.execute("ALTER TABLE cwl_live_group_cache ADD COLUMN attempted_at TEXT")
+        cwl_war_cols = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(cwl_live_war_cache)")
+        }
+        if not cwl_war_cols:
+            self.conn.execute(_CWL_LIVE_WAR_CACHE_DDL)
+        elif "attempted_at" not in cwl_war_cols:
+            self.conn.execute("ALTER TABLE cwl_live_war_cache ADD COLUMN attempted_at TEXT")
+
         # sync_jobs 表迁移（周期调度器状态）
         sj_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(sync_jobs)")}
         if not sj_cols:
@@ -383,7 +434,11 @@ class Database:
     def reset(self) -> None:
         """清空并重建所有业务表（历史数据清零）。"""
         self.conn.execute("PRAGMA foreign_keys = OFF")
-        for table in ("current_war_cache", "war_results", "league_results", "league_teams", "results", "registrations", "accounts", "sync_jobs"):
+        for table in (
+            "cwl_live_war_cache", "cwl_live_group_cache", "current_war_cache",
+            "war_results", "league_results", "league_teams", "results",
+            "registrations", "accounts", "sync_jobs",
+        ):
             self.conn.execute(f"DROP TABLE IF EXISTS {table}")
         self.conn.commit()
         self.conn.execute("PRAGMA foreign_keys = ON")

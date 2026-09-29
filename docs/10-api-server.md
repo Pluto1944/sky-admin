@@ -133,6 +133,24 @@ GET /api/clan/current-wars/{clan_tag}
 
 这两个接口的数据由调度器 `current_wars` 任务每 2 分钟从 COC 刷新；小程序停留在页面时每 1 分钟读取一次缓存。完整设计见 [18-current-war-dashboard.md](18-current-war-dashboard.md)。
 
+### 2.3 CWL 参赛部落汇总
+
+```
+GET /api/clan/cwl-live?period=YYYY-MM
+```
+
+无需认证。`period` 可选，默认北京时间当前月份。部落范围只读当月 `league_teams` 中的 `combat` 和 `shell` 队伍，返回队伍类别、轮次、排名、胜负、星数、摧毁率、缓存状态和更新时间。
+
+### 2.4 单个 CWL 部落详情
+
+```
+GET /api/clan/cwl-live/{clan_tag}?period=YYYY-MM&round=4
+```
+
+无需认证，但 `clan_tag` 必须属于对应月份的 `league_teams`，否则返回 `404`。详情包含第 1～7 场战斗日、双方对位宽表、大本概览、小组对局、成员进攻和成员防守统计。
+
+两个接口只读取 `cwl_live_group_cache` 和 `cwl_live_war_cache`，不会在 HTTP 请求中访问 COC。实时同步与页面结构见 [19-cwl-live-dashboard.md](19-cwl-live-dashboard.md)。
+
 ---
 
 ### 3. 微信登录

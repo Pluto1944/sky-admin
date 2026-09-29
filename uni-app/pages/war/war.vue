@@ -59,7 +59,7 @@
                 <text class="countdown">{{ countdownLabel(clan) }}</text>
                 <view class="card-actions" @tap.stop>
                   <text class="detail-link" @tap="openDetail(clan)">详情 ›</text>
-                  <button class="share-btn" open-type="share" :data-clan-tag="clan.clan_tag" :data-clan-name="clan.clan_name">分享</button>
+                  <button class="share-btn" open-type="share" data-share-type="current-war" :data-clan-tag="clan.clan_tag" :data-clan-name="clan.clan_name">分享</button>
                 </view>
               </view>
             </view>
@@ -69,14 +69,61 @@
       </scroll-view>
     </view>
 
-    <view v-else class="content-area">
-      <view class="inner-tab-bar">
-        <view v-for="tab in leagueTabs" :key="tab.key" class="inner-tab-item" :class="{ active: activeLeagueTab === tab.key }" @tap="switchLeagueTab(tab.key)">{{ tab.label }}</view>
+    <view v-else class="war-pane">
+      <view class="war-toolbar">
+        <view class="toolbar-title-wrap">
+          <text class="toolbar-title">本月参赛部落</text>
+          <text class="toolbar-count">{{ leagueClans.length }}</text>
+        </view>
+        <text class="period-label">{{ leaguePeriod || '-' }}</text>
       </view>
-      <view class="placeholder-box">
-        <text class="placeholder-icon">🏆</text>
-        <text class="placeholder-text">{{ activeLeagueTab === 'war-day' ? '战斗日' : '联赛总览' }}</text>
+
+      <view v-if="leagueLoading" class="state-box"><text class="state-text">加载联赛队伍...</text></view>
+      <view v-else-if="leagueError && !leagueClans.length" class="state-box">
+        <text class="error-text">{{ leagueError }}</text>
+        <text class="retry-btn" @tap="fetchCwlLive">点击重试</text>
       </view>
+      <scroll-view v-else scroll-y class="war-list-scroll">
+        <view class="war-list-inner">
+          <view v-if="leagueUpdatedAt" class="update-time">数据更新于 {{ formatTime(leagueUpdatedAt) }}</view>
+          <view v-if="!leagueClans.length" class="empty-list">本月尚未生成联赛队伍</view>
+
+          <view v-for="clan in leagueClans" :key="clan.team_index" class="war-card league-card" @tap="openLeagueDetail(clan)">
+            <view class="card-header">
+              <text class="category-badge" :class="'category-' + clan.category">{{ leagueCategoryLabel(clan.category) }}</text>
+              <text class="clan-name">{{ clan.team_name || clan.team_alias }}</text>
+              <text class="clan-tag">{{ clan.clan_tag || '缺少标签' }}</text>
+              <text class="status-badge" :class="'league-status-' + clan.status">{{ leagueStatusLabel(clan.status) }}</text>
+            </view>
+
+            <view v-if="clan.status === 'error'" class="simple-state error-state">{{ clan.error || '联赛数据同步失败' }}</view>
+            <view v-else-if="clan.status === 'waiting'" class="simple-state">
+              <text class="league-alias">{{ clan.team_alias }} · {{ clan.league_level || '未定级' }}</text>
+              <text class="waiting-hint">{{ clan.error || '等待联赛开启' }}</text>
+            </view>
+            <view v-else class="league-summary">
+              <view class="league-primary-row">
+                <text>{{ clan.team_alias }} · {{ clan.league_level || '未定级' }}</text>
+                <text v-if="clan.rank" class="league-rank">当前第{{ clan.rank }}名</text>
+              </view>
+              <view class="league-metrics">
+                <text>第{{ clan.current_round || '-' }}场</text>
+                <text>{{ clan.wins || 0 }}胜 {{ clan.losses || 0 }}负{{ clan.ties ? ' ' + clan.ties + '平' : '' }}</text>
+                <text>{{ clan.attack_stars || 0 }}⭐</text>
+                <text>{{ formatPercent(clan.average_destruction) }}</text>
+              </view>
+              <view class="card-footer">
+                <text class="countdown">{{ clan.member_count || 0 }}人队 · {{ clan.category === 'shell' ? '壳子队' : '实战队' }}</text>
+                <view class="card-actions" @tap.stop>
+                  <text class="detail-link" @tap="openLeagueDetail(clan)">详情 ›</text>
+                  <button class="share-btn" open-type="share" data-share-type="cwl" :data-clan-tag="clan.clan_tag" :data-clan-name="clan.team_name || clan.team_alias" :data-period="leaguePeriod">分享</button>
+                </view>
+              </view>
+            </view>
+          </view>
+          <view class="bottom-space"></view>
+        </view>
+      </scroll-view>
     </view>
 
     <view v-if="filterVisible" class="filter-mask" @tap="closeFilter">
@@ -112,7 +159,7 @@
 
 <script>
 import TopBar from '@/components/TopBar.vue'
-import { getCurrentWars } from '@/utils/api.js'
+import { getCurrentWars, getCwlLive } from '@/utils/api.js'
 
 const STATUS_ORDER = { in_war: 0, preparation: 1, war_ended: 2, cwl: 3, not_in_war: 4, sync_pending: 5, error: 6 }
 const CACHE_REFRESH_INTERVAL_MS = 60 * 1000
@@ -126,13 +173,16 @@ export default {
         { key: 'league', icon: '🏆', text: '联赛', action: 'onTopTab' }
       ],
       activeTopTab: 'clan-war',
-      leagueTabs: [{ key: 'war-day', label: '战斗日' }, { key: 'league-overview', label: '联赛总览' }],
-      activeLeagueTab: 'war-day',
       loading: true,
       loadError: '',
       clans: [],
       categories: [],
       updatedAt: '',
+      leagueLoading: false,
+      leagueError: '',
+      leagueClans: [],
+      leaguePeriod: '',
+      leagueUpdatedAt: '',
       selectedCategories: [],
       selectedClans: [],
       statusFilter: 'all',
@@ -175,28 +225,42 @@ export default {
       return labels.length ? `当前：${labels.join(' · ')}` : '全部部落'
     }
   },
-  onLoad() { this.fetchCurrentWars() },
+  onLoad(options) {
+    if (options && options.tab === 'league') this.activeTopTab = 'league'
+    if (this.activeTopTab === 'league') this.fetchCwlLive()
+    else this.fetchCurrentWars()
+  },
   onShow() {
+    const storedTab = uni.getStorageSync('war_active_top_tab')
+    if (storedTab === 'league') {
+      this.activeTopTab = 'league'
+      uni.removeStorageSync('war_active_top_tab')
+    }
     this.startTimers()
-    if (this.clans.length) this.fetchCurrentWars()
+    if (this.activeTopTab === 'league' && this.leagueClans.length) this.fetchCwlLive()
+    else if (this.activeTopTab === 'clan-war' && this.clans.length) this.fetchCurrentWars()
   },
   onHide() { this.stopTimers() },
   onUnload() { this.stopTimers() },
   onShareAppMessage(options) {
     const dataset = options && options.target && options.target.dataset
+    if (dataset && dataset.shareType === 'cwl' && dataset.clanTag) {
+      return { title: `苍穹联赛助手｜${dataset.clanName || '联赛战斗日'}`, path: `/pages/war/cwl-detail?clan_tag=${encodeURIComponent(dataset.clanTag)}&period=${encodeURIComponent(dataset.period || this.leaguePeriod)}&view=war-day` }
+    }
     if (dataset && dataset.clanTag) {
       return { title: `苍穹联赛助手｜${dataset.clanName || '当前部落战'}`, path: `/pages/war/current-detail?clan_tag=${encodeURIComponent(dataset.clanTag)}` }
     }
+    if (this.activeTopTab === 'league') return { title: '苍穹联赛助手｜本月联赛', path: '/pages/war/war?tab=league' }
     return { title: '苍穹联赛助手｜当前部落战', path: '/pages/war/war' }
   },
-  onShareTimeline() { return { title: '苍穹联赛助手｜当前部落战' } },
+  onShareTimeline() { return { title: this.activeTopTab === 'league' ? '苍穹联赛助手｜本月联赛' : '苍穹联赛助手｜当前部落战', query: this.activeTopTab === 'league' ? 'tab=league' : '' } },
   methods: {
     onTopTab(tab) {
       this.activeTopTab = tab
       this.filterVisible = false
-      if (tab === 'league') this.activeLeagueTab = 'war-day'
+      if (tab === 'league' && !this.leagueClans.length) this.fetchCwlLive()
+      if (tab === 'clan-war' && !this.clans.length) this.fetchCurrentWars()
     },
-    switchLeagueTab(tab) { this.activeLeagueTab = tab },
     async fetchCurrentWars() {
       if (!this.clans.length) this.loading = true
       this.loadError = ''
@@ -215,11 +279,27 @@ export default {
         if (this.clans.length) uni.showToast({ title: this.loadError, icon: 'none' })
       } finally { this.loading = false }
     },
+    async fetchCwlLive() {
+      if (!this.leagueClans.length) this.leagueLoading = true
+      this.leagueError = ''
+      try {
+        const res = await getCwlLive()
+        this.leagueClans = res.clans || []
+        this.leaguePeriod = res.period || ''
+        this.leagueUpdatedAt = res.updated_at || ''
+      } catch (e) {
+        this.leagueError = e.message || '联赛队伍加载失败'
+        if (this.leagueClans.length) uni.showToast({ title: this.leagueError, icon: 'none' })
+      } finally { this.leagueLoading = false }
+    },
     startTimers() {
       this.stopTimers()
       this.nowMs = Date.now()
       this.clockTimer = setInterval(() => { this.nowMs = Date.now() }, 1000)
-      this.refreshTimer = setInterval(() => { this.fetchCurrentWars() }, CACHE_REFRESH_INTERVAL_MS)
+      this.refreshTimer = setInterval(() => {
+        if (this.activeTopTab === 'league') this.fetchCwlLive()
+        else this.fetchCurrentWars()
+      }, CACHE_REFRESH_INTERVAL_MS)
     },
     stopTimers() {
       if (this.clockTimer) clearInterval(this.clockTimer)
@@ -264,9 +344,18 @@ export default {
       if (['not_in_war', 'sync_pending', 'error'].indexOf(clan.status) >= 0) return
       uni.navigateTo({ url: `/pages/war/current-detail?clan_tag=${encodeURIComponent(clan.clan_tag)}` })
     },
+    openLeagueDetail(clan) {
+      if (!clan.clan_tag || ['waiting', 'error'].indexOf(clan.status) >= 0) return
+      uni.setStorageSync('war_active_top_tab', 'league')
+      uni.navigateTo({ url: `/pages/war/cwl-detail?clan_tag=${encodeURIComponent(clan.clan_tag)}&period=${encodeURIComponent(this.leaguePeriod)}&view=war-day` })
+    },
     categoryLabel(key) {
       const item = this.categories.find(category => category.key === key)
       return item ? item.label : key
+    },
+    leagueCategoryLabel(key) { return key === 'shell' ? '壳子' : '实战' },
+    leagueStatusLabel(status) {
+      return ({ active: '战斗日', preparation: '准备日', ended: '已结束', waiting: '待开启', error: '同步失败' })[status] || status
     },
     statusLabel(status) {
       return ({ in_war: '战斗日', preparation: '准备日', war_ended: '已结束', not_in_war: '无战争', cwl: '联赛中', sync_pending: '待同步', error: '同步失败' })[status] || status
@@ -325,5 +414,5 @@ export default {
 .score-row { margin-top: 18rpx; display: flex; align-items: center; }.side-score { flex: 1; display: flex; align-items: center; color: #9aa0b0; font-size: 22rpx; }.side-score text { margin-right: 10rpx; }.opponent-score { justify-content: flex-end; }.opponent-score text { margin-right: 0; margin-left: 10rpx; }.side-name { color: #66708a; }.stars { color: #f0f0f5; font-weight: 600; }.versus { margin: 0 12rpx; color: #4a90d9; font-size: 22rpx; font-weight: 600; }
 .card-footer { margin-top: 18rpx; padding-top: 14rpx; display: flex; align-items: center; border-top: 1rpx solid #252540; }.countdown { color: #747c91; font-size: 22rpx; }.card-actions { margin-left: auto; display: flex; align-items: center; }.detail-link { padding: 8rpx 12rpx; color: #5fa8ff; font-size: 23rpx; }.share-btn { margin: 0 0 0 8rpx; padding: 8rpx 12rpx; border: 0; border-radius: 6rpx; color: #aab4c8; background: #252540; font-size: 23rpx; line-height: 1.4; }.share-btn::after { border: 0; }.bottom-space { height: 120rpx; }
 .filter-mask { position: fixed; z-index: 1000; top: 0; right: 0; bottom: 0; left: 0; display: flex; align-items: flex-end; background: rgba(0,0,0,.6); }.filter-panel { width: 100%; max-height: 82vh; padding: 26rpx 30rpx 34rpx; box-sizing: border-box; border-radius: 24rpx 24rpx 0 0; background: #1a1a2e; }.filter-title { margin-bottom: 20rpx; color: #fff; font-size: 31rpx; font-weight: 600; text-align: center; }.filter-group-title { display: block; margin: 16rpx 0 10rpx; color: #8890a0; font-size: 23rpx; }.filter-options { display: flex; flex-wrap: wrap; }.filter-option { min-height: 62rpx; margin-right: 26rpx; display: flex; align-items: center; color: #d0d0dc; font-size: 25rpx; }.filter-check { width: 34rpx; height: 34rpx; margin-right: 9rpx; display: flex; align-items: center; justify-content: center; box-sizing: border-box; border: 2rpx solid #66708a; border-radius: 5rpx; color: #fff; }.filter-check.checked { border-color: #4a90d9; background: #4a90d9; }.status-filter-options { display: flex; flex-wrap: wrap; }.status-filter-option { margin: 0 12rpx 12rpx 0; padding: 10rpx 17rpx; border-radius: 8rpx; color: #9097aa; background: #252540; font-size: 23rpx; }.status-filter-option.active { color: #fff; background: #4a90d9; }.clan-options { max-height: 320rpx; border-top: 1rpx solid #2a2a4a; border-bottom: 1rpx solid #2a2a4a; }.clan-option { margin-right: 0; padding: 0 6rpx; border-bottom: 1rpx solid #252540; }.filter-actions { margin-top: 22rpx; display: flex; justify-content: flex-end; }.filter-action { min-width: 110rpx; margin-left: 14rpx; padding: 14rpx 20rpx; border-radius: 7rpx; text-align: center; font-size: 25rpx; }.reset-action { color: #74b9ff; }.cancel-action { color: #aab4c8; background: #252540; }.confirm-action { color: #fff; background: #4a90d9; }
-.inner-tab-bar { display: flex; flex-shrink: 0; height: 72rpx; background: #141428; border-bottom: 1rpx solid #1a1a2e; }.inner-tab-item { flex: 1; display: flex; align-items: center; justify-content: center; color: #7d8498; font-size: 27rpx; }.inner-tab-item.active { color: #5fa8ff; font-weight: 600; border-bottom: 4rpx solid #4a90d9; }.placeholder-box { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }.placeholder-icon { margin-bottom: 22rpx; font-size: 72rpx; }.placeholder-text { color: #d8dce8; font-size: 34rpx; }
+.period-label { color: #66708a; font-size: 22rpx; }.league-card { min-height: 150rpx; }.league-status-active { color: #ff7675; }.league-status-preparation { color: #fdcb6e; }.league-status-ended { color: #74b9ff; }.league-status-error { color: #e17055; }.league-alias, .waiting-hint { display: block; }.league-alias { color: #aab4c8; }.waiting-hint { margin-top: 8rpx; color: #66708a; font-size: 22rpx; }.league-summary { padding: 18rpx; }.league-primary-row { display: flex; align-items: center; color: #d8dce8; font-size: 25rpx; }.league-rank { margin-left: auto; color: #fdcb6e; }.league-metrics { margin-top: 18rpx; display: flex; align-items: center; justify-content: space-between; color: #9aa0b0; font-size: 23rpx; }
 </style>
