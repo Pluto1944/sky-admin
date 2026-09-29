@@ -305,6 +305,7 @@ def build_temp_lists(
             "clan_tag": reg.get("clan_tag"),
             "team_index": reg.get("team_index"),
             "stars": stars if stars is not None else -1,  # 无星数排最后
+            "attacks": reg.get("attacks"),
         }
         # 构建 prev_team："index name" 拼接，用于区分同名队伍
         prev_ti = reg.get("team_index")
@@ -444,6 +445,16 @@ def _split_list1_into_slots(
     return slots + [members for _, members in groups_fallback]
 
 
+def _slot_max_stars(slot: list[dict]) -> int | None:
+    """按队伍实际最多进攻次数计算满星值；旧数据无 attacks 时返回 None。"""
+    attacks = [
+        int(m["attacks"])
+        for m in slot
+        if m.get("attacks") is not None and int(m["attacks"]) > 0
+    ]
+    return max(attacks) * 3 if attacks else None
+
+
 def _apply_promotion_relegation_on_slots(
     prev_slots: list[list[dict]],
     star_data: dict[str, int],
@@ -452,10 +463,11 @@ def _apply_promotion_relegation_on_slots(
     """在 prev_slots 上执行配对交换升降级。
 
     对每对相邻 (i, i+1)：
-      上队 ≤18星 → 降级到 i+1
-      下队 21满星 → 升级到 i
+      上队得星率 ≤18/21 → 降级到 i+1
+      下队得星率 100% → 升级到 i
       配对交换，每对最多换 count 人
-      19-20星/无星数 → 不动
+      各队满星值按该队成员最大进攻次数 × 3 计算；旧数据没有进攻次数时
+      回退到 21/18 星绝对门槛。
 
     返回 (升降级后的 prev_slots, movements日志)
     """
@@ -463,42 +475,70 @@ def _apply_promotion_relegation_on_slots(
         "count": PROMOTION_RELEGATION_CONFIG["count"],
         "promotion_min_stars": PROMOTION_RELEGATION_CONFIG["promotion_min_stars"],
         "relegation_max_stars": PROMOTION_RELEGATION_CONFIG["relegation_max_stars"],
+        "promotion_min_rate": PROMOTION_RELEGATION_CONFIG.get("promotion_min_rate", 1.0),
+        "relegation_max_rate": PROMOTION_RELEGATION_CONFIG.get(
+            "relegation_max_rate", 18 / 21
+        ),
         **(config or {}),
     }
     prom_min = cfg["promotion_min_stars"]
     rel_max = cfg["relegation_max_stars"]
+    prom_rate = cfg["promotion_min_rate"]
+    rel_rate = cfg["relegation_max_rate"]
     count = cfg["count"]
 
     movements: list[dict] = []
     moved: set[str] = set()
 
     slots = [list(s) for s in prev_slots]  # 深拷贝
+    # 必须在交换前固定各队满星值，避免上一对交换进来的成员改变下一对的轮数。
+    slot_max_stars = [_slot_max_stars(slot) for slot in prev_slots]
 
     for k in range(len(slots) - 1):
         team_high = slots[k]
         team_low = slots[k + 1]
+        high_max_stars = slot_max_stars[k]
+        low_max_stars = slot_max_stars[k + 1]
 
-        # 降级候选：上队 ≤ rel_max 星
+        def qualifies_for_relegation(member: dict) -> bool:
+            stars = star_data[member["account_name"]]
+            if high_max_stars:
+                return stars / high_max_stars <= rel_rate
+            return stars <= rel_max
+
+        def qualifies_for_promotion(member: dict) -> bool:
+            stars = star_data[member["account_name"]]
+            if low_max_stars:
+                return stars / low_max_stars >= prom_rate
+            return stars >= prom_min
+
+        # 降级候选：上队得星率 ≤ rel_rate；旧数据回退绝对星数。
         relegation_candidates = [
             m for m in team_high
             if m["account_name"] in star_data
             and m["account_name"] not in moved
-            and star_data[m["account_name"]] <= rel_max
+            and qualifies_for_relegation(m)
         ]
         relegation_candidates.sort(
-            key=lambda m: star_data[m["account_name"]]
+            key=lambda m: (
+                star_data[m["account_name"]] / high_max_stars
+                if high_max_stars else star_data[m["account_name"]]
+            )
         )
         relegation_candidates = relegation_candidates[:count]
 
-        # 升级候选：下队 ≥ prom_min 星
+        # 升级候选：下队得星率 ≥ prom_rate；旧数据回退绝对星数。
         promotion_candidates = [
             m for m in team_low
             if m["account_name"] in star_data
             and m["account_name"] not in moved
-            and star_data[m["account_name"]] >= prom_min
+            and qualifies_for_promotion(m)
         ]
         promotion_candidates.sort(
-            key=lambda m: star_data[m["account_name"]],
+            key=lambda m: (
+                star_data[m["account_name"]] / low_max_stars
+                if low_max_stars else star_data[m["account_name"]]
+            ),
             reverse=True,
         )
         promotion_candidates = promotion_candidates[:count]
@@ -530,6 +570,10 @@ def _apply_promotion_relegation_on_slots(
                 "player_tag": rel_member.get("player_tag"),
                 "direction": "relegation",
                 "total_stars": star_data[rel_name],
+                "max_stars": high_max_stars,
+                "performance_rate": (
+                    star_data[rel_name] / high_max_stars if high_max_stars else None
+                ),
                 "from_slot": k,
                 "to_slot": k + 1,
             })
@@ -538,6 +582,10 @@ def _apply_promotion_relegation_on_slots(
                 "player_tag": prom_member.get("player_tag"),
                 "direction": "promotion",
                 "total_stars": star_data[prom_name],
+                "max_stars": low_max_stars,
+                "performance_rate": (
+                    star_data[prom_name] / low_max_stars if low_max_stars else None
+                ),
                 "from_slot": k + 1,
                 "to_slot": k,
             })

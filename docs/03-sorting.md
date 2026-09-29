@@ -359,9 +359,10 @@ flowchart TD
 对每对相邻实战队伍执行配对交换：
 
 ```
-降级方向: 上队 → 下队（星数 ≤ 18，星数最低者优先）
-升级方向: 下队 → 上队（星数 = 21满星，星数最高者优先）
-不动区域: 19-20 星（安全区），无星数数据
+降级方向: 上队 → 下队（得星率 ≤ 18/21，得星率最低者优先）
+升级方向: 下队 → 上队（得星率 = 100%，得星率最高者优先）
+满星基数: 该队成员最大进攻次数 × 3
+不动区域: 得星率介于 18/21 和 100% 之间，或无星数数据
 每对上限: 最多交换 2 人
 ```
 
@@ -369,10 +370,14 @@ flowchart TD
 ```python
 PROMOTION_RELEGATION_CONFIG = {
     "count": 2,                  # 每对最多交换人数
-    "promotion_min_stars": 21,   # 升级门槛（满星）
-    "relegation_max_stars": 18,  # 降级门槛
+    "promotion_min_rate": 1.0,
+    "relegation_max_rate": 18 / 21,
+    "promotion_min_stars": 21,   # 旧数据兼容
+    "relegation_max_stars": 18,
 }
 ```
+
+五轮队伍满星基数为 15：12/15 及以下降级，13-14 星安全，15/15 升级。七轮队伍继续等价于原21/18星规则；旧数据没有进攻次数时回退绝对门槛。
 
 **2c. 展开为线性列表**：升降级后的 slots 展开为 `final_list`，并在成员内部记录升级/降级目标队伍，供后续稳定重排保护使用。
 
@@ -454,7 +459,7 @@ for team_index, team in enumerate(teams):
 
 ```python
 SORT_WEIGHTS = {"match_value": 0.6, "history_score": 0.4}
-PROMOTION_RELEGATION_CONFIG = {"count": 2, "promotion_min_stars": 21, "relegation_max_stars": 18}
+PROMOTION_RELEGATION_CONFIG = {"count": 2, "promotion_min_rate": 1.0, "relegation_max_rate": 18 / 21}
 NEW_COMBAT_INSERT_START = 30     # 战营新增插入位置
 NEW_NORMAL_INSERT_START = 45     # 已废弃（改为追加到实战末尾）
 ```
@@ -505,11 +510,11 @@ account_type, trophies, match_value, history_score
 
 | 标识 | 含义 |
 |------|------|
-| `↑升级(N★)` | 升级（满星21升到上一队） |
-| `↓降级(N★)` | 降级（≤18星降到下一队） |
+| `↑升级(N/M★)` | 升级（得星率100%，升到上一队） |
+| `↓降级(N/M★)` | 降级（得星率≤18/21，降到下一队） |
 | `新` | 新人（当月新增成员） |
 | `↓转壳` | 转去打壳子 |
-| 无 | 安全区（19-20星）或无星数数据 |
+| 无 | 比例安全区或无星数数据 |
 
 ---
 
@@ -558,7 +563,7 @@ registrations.team_name 回写格式：`"{team_index} {team_alias} {coc_name} {c
 | 战营排序键 | 奖杯降序 | 奖杯更能体现战营真实水平 |
 | 普通营排序键 | 综合分降序 | 匹配值+历史战绩更公平 |
 | 升降级方式 | 配对交换 | 稳定 |
-| 升降级星数门槛 | 升级21/降级18 | 19-20星安全区 |
+| 升降级门槛 | 升级100%/降级≤18÷21 | 兼容五轮与七轮队伍 |
 | 删除缺失 | 不用占位符，前移 | 高等级队不放新人 |
 | 战营新增插入点 | 编号30（第3队） | 前两队不放新人 |
 | 普通营新增插入 | 追加到实战区末尾 | 新人放后面 |

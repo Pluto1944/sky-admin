@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from modules.cwl_registration.baseline_rebuilder import (
+    _apply_promotion_relegation_on_slots,
     insert_combat_new,
     insert_normal_new,
     remove_missing,
@@ -26,6 +27,50 @@ def _combat_teams(*capacities: int) -> list[dict]:
         }
         for i, capacity in enumerate(capacities)
     ]
+
+
+def test_promotion_relegation_uses_team_round_percentage():
+    slots = [
+        [_member("A", attacks=5), _member("B", attacks=5)],
+        [_member("C", attacks=7), _member("D", attacks=7)],
+    ]
+    stars = {"A": 12, "B": 13, "C": 21, "D": 20}
+
+    result, movements = _apply_promotion_relegation_on_slots(
+        slots, stars, {"count": 1}
+    )
+
+    assert [m["account_name"] for m in movements] == ["A", "C"]
+    assert movements[0]["max_stars"] == 15
+    assert movements[0]["performance_rate"] == 12 / 15
+    assert "C" in [m["account_name"] for m in result[0]]
+    assert "B" in [m["account_name"] for m in result[0]]
+
+
+def test_promotion_relegation_falls_back_to_absolute_stars_without_attacks():
+    slots = [[_member("A")], [_member("B")]]
+    result, movements = _apply_promotion_relegation_on_slots(
+        slots, {"A": 18, "B": 21}, {"count": 1}
+    )
+
+    assert [m["account_name"] for m in movements] == ["A", "B"]
+    assert movements[0]["max_stars"] is None
+    assert [m["account_name"] for m in result[0]] == ["B"]
+
+
+def test_promotion_rate_uses_team_rounds_not_personal_attacks():
+    slots = [
+        [_member("A", attacks=7)],
+        [_member("B", attacks=5), _member("C", attacks=4)],
+    ]
+
+    _result, movements = _apply_promotion_relegation_on_slots(
+        slots, {"A": 18, "B": 15, "C": 12}, {"count": 1}
+    )
+
+    assert [m["account_name"] for m in movements] == ["A", "B"]
+    assert movements[1]["max_stars"] == 15
+    assert movements[1]["performance_rate"] == 1.0
 
 
 def test_missing_repack_does_not_pull_relegation_back_up():

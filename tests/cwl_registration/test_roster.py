@@ -1,9 +1,44 @@
-"""集成测试：生成名单（roster，v3.0 基准重建方案）。"""
+"""集成测试：生成名单（roster，v3.1 基准重建方案）。"""
 from __future__ import annotations
 
-from config import ARRANGEMENT_OUTPUT_HEADERS, LEAGUE_COMBAT, LEAGUE_SHELL, TEAMS
+from config import ARRANGEMENT_OUTPUT_HEADERS, LEAGUE_COMBAT, LEAGUE_SHELL
 from modules.cwl_registration.roster import LeagueArranger
 from tests.fakes import FakeExcelIO, seed_registrations
+
+
+def _teams(combat_capacity: int = 2) -> list[dict]:
+    """返回与生产容量解耦的小型测试队伍。"""
+    return [
+        {
+            "name": "实战测试队",
+            "clan_tag": "#TEST1",
+            "leader": "leader1",
+            "member_count": combat_capacity,
+            "league_level": "Champion League III",
+            "manager": "",
+            "category": LEAGUE_COMBAT,
+            "reserved_slots": 0,
+        },
+        {
+            "name": "壳子测试队",
+            "clan_tag": "#TEST2",
+            "leader": "leader2",
+            "member_count": 2,
+            "league_level": "Master League I",
+            "manager": "",
+            "category": LEAGUE_SHELL,
+            "reserved_slots": 0,
+        },
+    ]
+
+
+def _arranger(player_service, reg_repo, excel_io=None) -> LeagueArranger:
+    """构造不访问 COC 网络的编排器，并提供稳定的官方部落展示名。"""
+    arranger = LeagueArranger(player_service, reg_repo, excel_io or FakeExcelIO())
+    arranger._fetch_clan_info = lambda tags: {
+        tag: (f"官方部落{tag[-1]}", f"官方首领{tag[-1]}") for tag in tags
+    }
+    return arranger
 
 
 def _seed(player_service, reg_repo):
@@ -21,29 +56,54 @@ def _seed(player_service, reg_repo):
 
 
 def test_arrange_assigns_teams(player_service, reg_repo):
-    """v3.0: 验证每人被分配到队伍，且实战和壳子分开。"""
+    """容量充足时，每人应按线性名单落入对应的实战或壳子队。"""
     _seed(player_service, reg_repo)
-    arranger = LeagueArranger(player_service, reg_repo, FakeExcelIO())
+    arranger = _arranger(player_service, reg_repo)
+    teams = _teams()
 
-    ordered, team_results, _movements, _star_data = arranger.arrange("2026-08", combat_min_match_value=0)
+    ordered, team_results, _movements, _star_data = arranger.arrange(
+        "2026-08", teams=teams, combat_min_match_value=0
+    )
 
-    # 所有人应被分配到队伍（有 team_name）
-    assert all(x.get("team_name") for x in ordered if x.get("player_tag"))
+    # cur_team / team_alias 表示编排归属；team_name 是 COC 官方展示名。
+    assigned = [x for x in ordered if x.get("player_tag")]
+    assert all(x.get("cur_team") and x.get("team_alias") for x in assigned)
+    assert all(x.get("team_name") for x in assigned)
 
     # 应有 combat 和 shell 两种 league_type
-    league_types = {x["league_type"] for x in ordered if x.get("player_tag")}
-    assert LEAGUE_COMBAT in league_types
-    assert LEAGUE_SHELL in league_types
+    assert {x["league_type"] for x in assigned} == {
+        LEAGUE_COMBAT,
+        LEAGUE_SHELL,
+    }
 
-    # 返回队伍数应为 TEAMS 配置的队伍数
-    assert len(team_results) == len(TEAMS)
+    assert len(team_results) == len(teams)
+
+
+def test_arrange_fills_combat_shortage_from_shell_pool(player_service, reg_repo):
+    """现行规则：统一线性名单填队，实战容量有缺口时壳子成员向前补位。"""
+    _seed(player_service, reg_repo)
+    arranger = _arranger(player_service, reg_repo)
+
+    ordered, team_results, _movements, _star_data = arranger.arrange(
+        "2026-08", teams=_teams(combat_capacity=3), combat_min_match_value=0
+    )
+
+    assert [m["account_name"] for m in team_results[0]["members"]] == [
+        "乙",
+        "甲",
+        "丙",
+    ]
+    assert team_results[1]["members"] == []
+    assigned = {item["account_name"]: item for item in ordered}
+    assert assigned["丙"]["league_type"] == LEAGUE_COMBAT
+    assert assigned["丙"]["team_alias"] == "实战测试队"
 
 
 def test_arrange_writes_back_to_repo(player_service, reg_repo):
-    """v3.0: 验证回写 league_type / rank_order / team_info 到 registrations。"""
+    """验证回写 league_type / rank_order / team_info 到 registrations。"""
     _seed(player_service, reg_repo)
-    arranger = LeagueArranger(player_service, reg_repo, FakeExcelIO())
-    arranger.arrange("2026-08", combat_min_match_value=0)
+    arranger = _arranger(player_service, reg_repo)
+    arranger.arrange("2026-08", teams=_teams(), combat_min_match_value=0)
 
     regs = {r["player_tag"]: r for r in reg_repo.get_registrations("2026-08")}
     # 战营账号应为 combat
@@ -55,13 +115,13 @@ def test_arrange_writes_back_to_repo(player_service, reg_repo):
 
 
 def test_arrange_and_export_writes_sheet(player_service, reg_repo):
-    """v3.0: 验证 arrange_and_export 写入 sheet。"""
+    """验证 arrange_and_export 写入 sheet。"""
     _seed(player_service, reg_repo)
     fake_io = FakeExcelIO()
-    arranger = LeagueArranger(player_service, reg_repo, fake_io)
+    arranger = _arranger(player_service, reg_repo, fake_io)
 
     ordered, team_results, _movements, sheet_name = arranger.arrange_and_export(
-        "2026-08", "名单.xlsx", combat_min_match_value=0
+        "2026-08", "名单.xlsx", teams=_teams(), combat_min_match_value=0
     )
 
     assert sheet_name == "名单_2026-08"
@@ -77,12 +137,14 @@ def test_arrange_and_export_writes_sheet(player_service, reg_repo):
 
 
 def test_arrange_and_export_contains_team_sections(player_service, reg_repo):
-    """v3.0: 导出应包含队伍分配区域。"""
+    """导出应包含队伍分配区域。"""
     _seed(player_service, reg_repo)
     fake_io = FakeExcelIO()
-    arranger = LeagueArranger(player_service, reg_repo, fake_io)
+    arranger = _arranger(player_service, reg_repo, fake_io)
 
-    arranger.arrange_and_export("2026-08", "名单.xlsx", combat_min_match_value=0)
+    arranger.arrange_and_export(
+        "2026-08", "名单.xlsx", teams=_teams(), combat_min_match_value=0
+    )
 
     written_rows = fake_io.last_written_rows
     # 应有"=== 战队分配 ==="分隔行
@@ -90,15 +152,31 @@ def test_arrange_and_export_contains_team_sections(player_service, reg_repo):
     assert any("战队分配" in str(t) for t in titles if t)
 
 
-def test_arrange_and_export_contains_part3_departure(player_service, reg_repo):
-    """v3.0: 导出应包含离队情况区域（Part3）。"""
+def test_arrange_and_export_appends_part4_grid(player_service, reg_repo):
+    """Part4 应通过独立网格写入接口追加，而不是混入字典行。"""
     _seed(player_service, reg_repo)
     fake_io = FakeExcelIO()
-    arranger = LeagueArranger(player_service, reg_repo, fake_io)
+    arranger = _arranger(player_service, reg_repo, fake_io)
+    captured: dict = {}
 
-    arranger.arrange_and_export("2026-08", "名单.xlsx", combat_min_match_value=0)
+    def capture_part4(target, sheet_name, grid, title_indices):
+        captured.update(
+            target=target,
+            sheet_name=sheet_name,
+            grid=grid,
+            title_indices=title_indices,
+        )
 
-    written_rows = fake_io.last_written_rows
-    titles = [r["rank_order"] for r in written_rows]
-    # 应有 Part4 排布区域
-    assert any("联赛名单排布" in str(t) for t in titles if t)
+    arranger._append_part4_to_sheet = capture_part4
+
+    arranger.arrange_and_export(
+        "2026-08", "名单.xlsx", teams=_teams(), combat_min_match_value=0
+    )
+
+    assert captured["target"] == "名单.xlsx"
+    assert captured["sheet_name"] == "名单_2026-08"
+    assert captured["title_indices"]
+    assert all(len(row) == 5 for row in captured["grid"])
+    titles = [captured["grid"][i][0] for i in captured["title_indices"]]
+    assert any("实战: 实战测试队" in title for title in titles)
+    assert any("壳子: 壳子测试队" in title for title in titles)

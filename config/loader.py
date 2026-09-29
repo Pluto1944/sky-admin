@@ -46,6 +46,11 @@ def _validate(cfg: dict) -> None:
         if cat not in ("combat", "shell"):
             raise ConfigLoadError(f"队伍 {team.get('name')} 的 category 值非法: {cat}")
 
+    promotion = cfg.get("cwl_registration", {}).get("promotion_relegation", {})
+    for key in ("promotion_min_rate", "relegation_max_rate"):
+        if key in promotion and not 0 <= promotion[key] <= 1:
+            raise ConfigLoadError(f"{key} 必须在 0 到 1 之间")
+
     # 校验部落 category 值合法
     VALID_CLAN_CATEGORIES = {"combat", "normal", "farm", "flat"}
     for clan in cfg.get("coc_sync", {}).get("clans", []):

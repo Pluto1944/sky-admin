@@ -95,6 +95,18 @@ def _extract_total_stars(raw_metrics: dict) -> int | None:
     return None
 
 
+def _extract_attacks(raw_metrics: dict) -> int | None:
+    """从新旧战绩 raw_metrics 中提取实际进攻次数。"""
+    for key in ("total_attacks", "attacks", "offense_total"):
+        value = raw_metrics.get(key)
+        if value is not None:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
 class LeagueArranger:
     def __init__(
         self,
@@ -318,6 +330,7 @@ class LeagueArranger:
           - clan_tag: 上月所属部落 tag（展示用）
           - team_index: 队伍编号（分组用）
           - stars: 上月总星数（无则为 None）
+          - attacks: 上月实际进攻次数（旧数据无则为 None）
           - rank_order: None
         """
         # 优先读 league_results 新表
@@ -337,6 +350,7 @@ class LeagueArranger:
                     "clan_tag": r["clan_tag"],
                     "team_index": r["team_index"],
                     "stars": r["total_stars"],
+                    "attacks": r["attacks"],
                     "rank_order": None,
                 })
             return result
@@ -357,6 +371,7 @@ class LeagueArranger:
             if not account_name:
                 continue
             stars = _extract_total_stars(metrics)
+            attacks = _extract_attacks(metrics)
             result.append({
                 "account_name": account_name,
                 "player_tag": tag,
@@ -364,6 +379,7 @@ class LeagueArranger:
                 "clan_tag": metrics.get("clan_tag"),
                 "team_index": metrics.get("team_index"),
                 "stars": stars,
+                "attacks": attacks,
                 "rank_order": None,
             })
         return result
@@ -498,7 +514,11 @@ class LeagueArranger:
         if movements:
             for m in movements:
                 direction = "↑升级" if m["direction"] == "promotion" else "↓降级"
-                label = f"{direction}({m['total_stars']}★)"
+                score = (
+                    f"{m['total_stars']}/{m['max_stars']}★"
+                    if m.get("max_stars") else f"{m['total_stars']}★"
+                )
+                label = f"{direction}({score})"
                 tag = m.get("player_tag")
                 if tag:
                     movement_map[tag] = label
@@ -653,8 +673,12 @@ class LeagueArranger:
             print("\n[升降级] 本月人员调整：")
             for m in movements:
                 direction = "↑升级" if m["direction"] == "promotion" else "↓降级"
+                score = (
+                    f"{m['total_stars']}/{m['max_stars']}星"
+                    if m.get("max_stars") else f"{m['total_stars']}星"
+                )
                 print(
-                    f"  {m['account_name']} ({m['total_stars']}星) "
+                    f"  {m['account_name']} ({score}) "
                     f"{direction}: slot {m['from_slot']} → {m['to_slot']}"
                 )
 
