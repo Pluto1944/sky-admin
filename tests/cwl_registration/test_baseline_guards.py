@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from modules.cwl_registration.baseline_rebuilder import (
     _apply_promotion_relegation_on_slots,
+    build_final_list,
+    build_temp_lists,
     insert_combat_new,
     insert_normal_new,
     remove_missing,
@@ -71,6 +73,96 @@ def test_promotion_rate_uses_team_rounds_not_personal_attacks():
     assert [m["account_name"] for m in movements] == ["A", "B"]
     assert movements[1]["max_stars"] == 15
     assert movements[1]["performance_rate"] == 1.0
+
+
+def test_equal_performance_preserves_previous_team_order():
+    slots = [
+        [_member("A-first", attacks=5), _member("A-second", attacks=5)],
+        [_member("B-first", attacks=5), _member("B-second", attacks=5)],
+    ]
+
+    _result, movements = _apply_promotion_relegation_on_slots(
+        slots,
+        {"A-first": 10, "A-second": 10, "B-first": 15, "B-second": 15},
+        {"count": 2},
+    )
+
+    assert [m["account_name"] for m in movements] == [
+        "A-first",
+        "B-first",
+        "A-second",
+        "B-second",
+    ]
+
+
+def test_temp_list_uses_previous_rank_order_as_star_tiebreaker():
+    teams = _combat_teams(2)
+    previous = [
+        {
+            "account_name": "second",
+            "team_name": "T0",
+            "team_index": 0,
+            "stars": 15,
+            "attacks": 5,
+            "rank_order": 2,
+        },
+        {
+            "account_name": "first",
+            "team_name": "T0",
+            "team_index": 0,
+            "stars": 15,
+            "attacks": 5,
+            "rank_order": 1,
+        },
+    ]
+
+    lists = build_temp_lists([], previous, {}, teams, teams)
+
+    assert [m["account_name"] for m in lists["list1"]] == ["first", "second"]
+
+
+def test_missing_promotion_candidate_still_consumes_exchange():
+    teams = _combat_teams(1, 1)
+    current = [_member("A", league_type="combat")]
+    previous = [
+        _member("A", team_name="T0", team_index=0, stars=10, attacks=5),
+        _member("B", team_name="T1", team_index=1, stars=15, attacks=5),
+    ]
+
+    final_list, removed, movements, _black_hits = build_final_list(
+        current,
+        previous,
+        {"A": 10, "B": 15},
+        teams,
+        prev_teams_config=teams,
+    )
+
+    assert [m["account_name"] for m in movements] == ["A", "B"]
+    assert [m["account_name"] for m in removed] == ["B"]
+    assert [m["account_name"] for m in final_list] == ["A"]
+    assert final_list[0]["_relegation_target_team_index"] == 1
+
+
+def test_missing_relegation_candidate_still_consumes_exchange():
+    teams = _combat_teams(1, 1)
+    current = [_member("B", league_type="combat")]
+    previous = [
+        _member("A", team_name="T0", team_index=0, stars=10, attacks=5),
+        _member("B", team_name="T1", team_index=1, stars=15, attacks=5),
+    ]
+
+    final_list, removed, movements, _black_hits = build_final_list(
+        current,
+        previous,
+        {"A": 10, "B": 15},
+        teams,
+        prev_teams_config=teams,
+    )
+
+    assert [m["account_name"] for m in movements] == ["A", "B"]
+    assert [m["account_name"] for m in removed] == ["A"]
+    assert [m["account_name"] for m in final_list] == ["B"]
+    assert final_list[0]["_promotion_target_team_index"] == 0
 
 
 def test_missing_repack_does_not_pull_relegation_back_up():

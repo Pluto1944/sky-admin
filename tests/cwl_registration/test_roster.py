@@ -141,6 +141,56 @@ def test_rerun_clears_stale_assignment_for_new_blacklist(
     assert after["#B"]["team_info"] is None
 
 
+def test_load_previous_combat_includes_final_rank_order(
+    player_service, reg_repo
+):
+    """同战绩候选应能读取上月最终顺序作为稳定决胜项。"""
+    seed_registrations(
+        player_service,
+        reg_repo,
+        "2026-07",
+        [
+            {
+                "player_tag": "#A",
+                "account_name": "甲",
+                "account_type": "normal",
+                "match_value": 90,
+                "join_combat": True,
+            },
+            {
+                "player_tag": "#B",
+                "account_name": "乙",
+                "account_type": "normal",
+                "match_value": 80,
+                "join_combat": True,
+            },
+        ],
+    )
+    regs = {r["player_tag"]: r for r in reg_repo.get_registrations("2026-07")}
+    reg_repo.update_arrangement(regs["#A"]["id"], LEAGUE_COMBAT, 1)
+    reg_repo.update_arrangement(regs["#B"]["id"], LEAGUE_COMBAT, 2)
+    reg_repo.conn.executemany(
+        """
+        INSERT INTO league_results
+            (period, team_index, team_alias, category, player_tag,
+             account_name, total_stars, attacks)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            ("2026-07", 0, "T0", LEAGUE_COMBAT, "#B", "乙", 15, 5),
+            ("2026-07", 0, "T0", LEAGUE_COMBAT, "#A", "甲", 15, 5),
+        ],
+    )
+    reg_repo.conn.commit()
+
+    previous = _arranger(player_service, reg_repo)._load_prev_combat_from_results(
+        "2026-07"
+    )
+
+    ranks = {member["player_tag"]: member["rank_order"] for member in previous}
+    assert ranks == {"#A": 1, "#B": 2}
+
+
 def test_arrange_and_export_writes_sheet(player_service, reg_repo):
     """验证 arrange_and_export 写入 sheet。"""
     _seed(player_service, reg_repo)

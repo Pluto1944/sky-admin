@@ -11,7 +11,7 @@
 
 输入：
   - accounts: sort_accounts() 的输出（含 rank_score / league_type / rank_order）
-  - prev_combat_regs: 上月 registrations 表中 combat 记录（含 team_info，rank_order 固定为 None）
+  - prev_combat_regs: 上月实战记录（含队伍信息和上月最终 rank_order）
   - star_data: {account_name: total_stars}，上月实战星数
   - teams: TEAMS 配置
 
@@ -250,14 +250,14 @@ def build_temp_lists(
 
     参数:
         accounts: 当月排序后的账号列表（sort_accounts 输出）
-        prev_combat_regs: 上月 registrations combat 记录
+        prev_combat_regs: 上月实际实战记录（league_results 优先）
         star_data: {account_name: total_stars}
         teams: 当月 TEAMS 配置
         prev_teams_config: 上月 TEAMS 配置（None 时用当月配置）
 
     返回:
         {
-            "list1": 上月实战名单（按 team_index 分组，组内按星数降序）,
+            "list1": 上月实战名单（按 team_index 分组，组内按星数降序、同星沿用上月顺序）,
             "list2": 当月实战名单,
             "list3": 当月壳子名单（综合分降序）,
             "list4": 实战缺失名单,
@@ -268,7 +268,7 @@ def build_temp_lists(
     """
     # --- 名单1：上月实战名单 ---
     # 成员和队伍归属都来自 results 表（prev_combat_regs 自带 team_name 和 stars）
-    # 按 team_index（队伍编号）分组，组内按星数降序
+    # 按 team_index（队伍编号）分组，组内按星数降序、同星沿用上月顺序
     # team_index 是队伍的唯一身份标识，避免重名队伍（如 3 支"大一"）混组
     # 同时从当月 accounts 合并报名数据（match_value / rank_score 等），
     # 供后续新增人员按现有规则插入和展示使用
@@ -306,6 +306,7 @@ def build_temp_lists(
             "team_index": reg.get("team_index"),
             "stars": stars if stars is not None else -1,  # 无星数排最后
             "attacks": reg.get("attacks"),
+            "prev_rank_order": reg.get("rank_order"),
         }
         # 构建 prev_team："index name" 拼接，用于区分同名队伍
         prev_ti = reg.get("team_index")
@@ -336,16 +337,25 @@ def build_temp_lists(
                 team_name_fallback_order.append(unknown_key)
             team_name_fallback[unknown_key].append(member)
 
-    # 组内按星数降序排列
+    # 组内按星数降序排列；星数相同时沿用上月最终队内顺序。
+    # 没有历史 rank_order 的旧数据保持来源顺序。
+    def previous_order(member: dict) -> float:
+        rank = member.get("prev_rank_order")
+        return float(rank) if rank is not None else float("inf")
+
     list1: list[dict] = []
     for tidx in team_index_order:
         members = team_groups.get(tidx, [])
-        members.sort(key=lambda m: m.get("stars", -1), reverse=True)
+        members.sort(
+            key=lambda m: (-m.get("stars", -1), previous_order(m))
+        )
         list1.extend(members)
     # 追加 team_name 回退组（旧数据兼容）
     for tn in team_name_fallback_order:
         members = team_name_fallback[tn]
-        members.sort(key=lambda m: m.get("stars", -1), reverse=True)
+        members.sort(
+            key=lambda m: (-m.get("stars", -1), previous_order(m))
+        )
         list1.extend(members)
 
     # --- 名单2：当月实战名单 ---
@@ -788,7 +798,7 @@ def build_final_list(
 
     参数:
         accounts: sort_accounts() 输出的当月排序账号
-        prev_combat_regs: 上月 registrations combat 记录
+        prev_combat_regs: 上月实际实战记录（league_results 优先）
         star_data: {account_name: total_stars}
         teams: 当月 TEAMS 配置
         black_list: 黑名单

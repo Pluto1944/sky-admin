@@ -331,11 +331,41 @@ class LeagueArranger:
           - team_index: 队伍编号（分组用）
           - stars: 上月总星数（无则为 None）
           - attacks: 上月实际进攻次数（旧数据无则为 None）
-          - rank_order: None
+          - rank_order: 上月最终全局位次（用于同战绩时保持上月队内顺序）
         """
+        # 上月 registrations 保存的是当时最终编排顺序。优先按稳定的
+        # player_tag 关联，昵称仅作为旧数据/无 tag 时的回退。
+        rank_rows = self.reg_repo.conn.execute(
+            """
+            SELECT player_tag, account_name, rank_order
+            FROM registrations
+            WHERE period = ? AND league_type = ? AND rank_order IS NOT NULL
+            ORDER BY rank_order, id
+            """,
+            (cwl_period, LEAGUE_COMBAT),
+        ).fetchall()
+        rank_by_tag: dict[str, int] = {}
+        rank_by_name: dict[str, int] = {}
+        for row in rank_rows:
+            if row["player_tag"]:
+                rank_by_tag.setdefault(row["player_tag"], row["rank_order"])
+            if row["account_name"]:
+                rank_by_name.setdefault(row["account_name"], row["rank_order"])
+
+        def previous_rank(
+            player_tag: str | None,
+            account_name: str | None,
+        ) -> int | None:
+            if player_tag and player_tag in rank_by_tag:
+                return rank_by_tag[player_tag]
+            if account_name:
+                return rank_by_name.get(account_name)
+            return None
+
         # 优先读 league_results 新表
         lr_rows = self.reg_repo.conn.execute(
-            "SELECT * FROM league_results WHERE period = ? AND category = ?",
+            "SELECT * FROM league_results WHERE period = ? AND category = ? "
+            "ORDER BY team_index, id",
             (cwl_period, LEAGUE_COMBAT),
         ).fetchall()
         if lr_rows:
@@ -351,7 +381,9 @@ class LeagueArranger:
                     "team_index": r["team_index"],
                     "stars": r["total_stars"],
                     "attacks": r["attacks"],
-                    "rank_order": None,
+                    "rank_order": previous_rank(
+                        r["player_tag"], r["account_name"]
+                    ),
                 })
             return result
 
@@ -380,7 +412,7 @@ class LeagueArranger:
                 "team_index": metrics.get("team_index"),
                 "stars": stars,
                 "attacks": attacks,
-                "rank_order": None,
+                "rank_order": previous_rank(tag, account_name),
             })
         return result
 
