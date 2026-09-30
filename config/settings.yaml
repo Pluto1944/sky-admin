@@ -203,8 +203,8 @@ cwl_registration:
       category: combat
       reserved_slots: 0
     - name: 泰坦三
-      clan_tag: "#2JP8PLQLJ"
-      leader: leader11
+      clan_tag: "#2GGGGGGG"
+      leader: leader5
       member_count: 15
       league_level: "Titan League III"
       manager: ""
@@ -221,6 +221,14 @@ cwl_registration:
     - name: 冠三
       clan_tag: "#2QQQQ2G"
       leader: leader4
+      member_count: 15
+      league_level: "Champion League III"
+      manager: ""
+      category: combat
+      reserved_slots: 0
+    - name: 冠三
+      clan_tag: "#R2GGR2"
+      leader: ""
       member_count: 15
       league_level: "Champion League III"
       manager: ""
