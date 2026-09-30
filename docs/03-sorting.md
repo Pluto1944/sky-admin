@@ -11,28 +11,23 @@
 
 ```python
 TEAMS = [
-    {"name": "泰坦二",    "clan_tag": "#2QQ",  "category": "combat", "member_count": 15, ...},
-    {"name": "冠一 一队",  "clan_tag": "#2GGGGGGG", "category": "combat", ...},
-    {"name": "冠二",      "clan_tag": "#2C822CJJC", "category": "combat", ...},
-    {"name": "冠三",      "clan_tag": "#2QQQQ2G", "category": "combat", ...},
-    {"name": "大一",      "clan_tag": "#UUP2",  "category": "combat", ...},      # team_index=4
-    {"name": "大一",      "clan_tag": "#CYYL",  "category": "combat", ...},      # team_index=5
-    {"name": "大一",      "clan_tag": "#2CU9JPYU8", "category": "combat", ...},  # team_index=6
-    {"name": "大一",      "clan_tag": "#2R9Y209LY", "category": "shell", ...},   # team_index=7
-    {"name": "大三",      "clan_tag": "#2JQR89P9G", "category": "shell", ...},   # team_index=8
-    {"name": "水一",      "clan_tag": "#2JUJRYVQP", "category": "shell", ...},   # team_index=9
-    {"name": "水二",      "clan_tag": "#2GR0LPGVQ", "category": "shell", ...},   # team_index=10
+    {"name": "实战一队", "clan_tag": "#TAG1", "category": "combat", "member_count": 15, ...},
+    {"name": "实战二队", "clan_tag": "#TAG2", "category": "combat", "member_count": 15, ...},
+    # 所有 combat 必须连续放在 shell 之前
+    {"name": "壳子一队", "clan_tag": "#TAG3", "category": "shell", "member_count": 30, ...},
 ]
 ```
 
-11 支队伍：7 combat + 4 shell。`team_index` = 列表索引（0~10），**是队伍的唯一身份标识**。
-> 实际 `config/settings.yaml` 中为 11 支队伍，其中实战 7 支（泰坦二、冠一、冠二、冠三、3 支大一），壳子 4 支（1 支大一、大三、水一、水二）。
+队伍数量、别名、Tag、容量和联赛等级每月都可能变化，以安排当月执行时的
+`config/settings.yaml` 为准。`team_index` = 列表索引，**是该月队伍的唯一身份标识**；
+执行编排后会同时写入 `league_teams(period)`，供下月按历史快照还原队伍边界，不能用
+当前 YAML 替代历史月份快照。
 
 每个 team dict 字段：
 
 | 字段 | 含义 | 唯一性 |
 |------|------|--------|
-| `name` | 队伍别名 | **不唯一**（4支"大一"） |
+| `name` | 队伍别名 | 不保证唯一 |
 | `clan_tag` | COC 部落标签 | 唯一 |
 | `category` | `"combat"` / `"shell"` | — |
 | `member_count` | 队伍容量 | — |
@@ -46,8 +41,8 @@ TEAMS = [
 | 概念 | 来源 | 唯一性 | 用途 |
 |------|------|--------|------|
 | **team_index** | `enumerate(teams)` 索引 | **唯一** | 队伍身份标识、分组 key、升降级分组、DB 存储 |
-| **team_alias** | config `name` 字段 | 不唯一（4支"大一"） | 人类可读的标签、Excel 展示 |
-| **team_name** | COC API 返回 | 唯一 | 真实部落名称、Excel 新增列 |
+| **team_alias** | config `name` 字段 | 不保证唯一 | 人类可读的标签、Excel 展示 |
+| **team_name** | COC API 返回 | 不作为唯一键 | 真实部落名称、Excel 新增列 |
 
 ---
 
@@ -78,6 +73,8 @@ SORT_WEIGHTS = {"match_value": 0.6, "history_score": 0.4}
 ## 三、设计原文（用户原始需求）
 
 > 以下为用户最初提出的设计方案原文，是整个排序系统的出发点。所有后续设计均围绕此方案展开。
+> 本节保留讨论原貌，不作为操作规范；例如黑名单执行时机和普通营新人插入方式已由后文
+> “基准重建全流程”取代。
 
 联赛排序规则
 这个问题非常复杂，我们详细梳理讨论实战队伍如何排序，我自己可能也没有想清楚，我先说一下想法，你看看有什么问题
@@ -325,7 +322,7 @@ flowchart TD
 
 | 名单 | 来源 | 排序规则 |
 |------|------|----------|
-| **名单1** | `results` 表上月 combat 记录 | 按 `team_index` 分组，组内按星数降序 |
+| **名单1** | `league_results` 上月 combat 记录（为空时回退旧 `results`） | 按 `team_index` 分组，组内按星数降序 |
 | **名单2** | 当月实战人员 | 保持 `sort_accounts()` 的输出顺序 |
 | **名单3** | 当月壳子人员 | 综合分降序 |
 | **名单4** | 名单1 - 名单2 | 实战缺失（上月打了但本月没报） |
@@ -345,6 +342,8 @@ flowchart TD
 #### 阶段 0：黑名单过滤（`apply_blacklist`）
 
 黑名单从所有数据源中排除（名单1/2/3 均不含黑名单成员）。
+匹配键是 `account_name`，采用 Python 字符串精确匹配并区分大小写；若实际报名中同时可能出现
+`misi` 和 `MiSi`，配置中必须分别列出。
 
 #### 阶段 1：构建 7 个临时名单（`build_temp_lists`）
 
@@ -380,6 +379,11 @@ PROMOTION_RELEGATION_CONFIG = {
 五轮队伍满星基数为 15：12/15 及以下降级，13-14 星安全，15/15 升级。七轮队伍继续等价于原21/18星规则；旧数据没有进攻次数时回退绝对门槛。
 
 **2c. 展开为线性列表**：升降级后的 slots 展开为 `final_list`，并在成员内部记录升级/降级目标队伍，供后续稳定重排保护使用。
+
+**当前候选范围**：阶段 2 只依据上月实际实战名单和上月战绩选候选，尚未按本月是否报名过滤。
+因此，本月缺席的下队满星成员也可能先占用一个配对晋级名额，随后在阶段 3 被删除；与其配对的
+上队降级成员仍保留降级结果，空位再由后续连续填充补齐。是否应要求“本月仍参赛的下队成员”
+才能作为有效补位，尚待业务规则确认；在规则确定前，以这里描述的当前代码行为为准。
 
 升降级详情见 `04-promotion-relegation.md`。
 
@@ -467,24 +471,30 @@ NEW_NORMAL_INSERT_START = 45     # 已废弃（改为追加到实战末尾）
 ### 黑白名单
 
 ```python
-BLACK_LIST = set()                                      # 阶段0过滤
-WHITE_LIST = [("10°C✨Godwin 2", "#2QQ")]               # 阶段8强制插入
-EXCLUDED_CAMP_NAMES = {"Pluto2QQ", "落花归尘", ...}     # 双阶段过滤
+BLACK_LIST = {"账号昵称"}                         # 阶段0按 account_name 精确过滤，区分大小写
+WHITE_LIST = [("账号昵称", "#目标部落TAG")]        # 阶段8强制插入
+EXCLUDED_CAMP_NAMES = {"战营账号昵称", ...}        # 导入与排序双阶段过滤
 ```
 
 ### 编号与队伍的映射关系
 
-以当前配置（7支实战队伍）为例：
+以下仅演示容量如何映射编号；实际队伍名称和容量读取安排当月配置：
 
 ```
-泰坦二:   15人 → 编号 0~14    (第1队)
-冠一 一队: 15人 → 编号 15~29   (第2队)
-冠二:     15人 → 编号 30~44   (第3队)  ← 战营新增插入点(30)
-冠三:     15人 → 编号 45~59   (第4队)  ← 普通营新增插入点(45)
-大一_A:   15人 → 编号 60~74   (第5队)
-大一_B:   30人 → 编号 75~104  (第6队)
-大一_C:   30人 → 编号 105~134 (第7队)
+实战队0: 15人 → 编号 0~14
+实战队1: 15人 → 编号 15~29
+实战队2: 15人 → 编号 30~44  ← 战营新增默认插入点(30)
+实战队3: 15人 → 编号 45~59
+实战队4: 15人 → 编号 60~74
+实战队5: 30人 → 编号 75~104
+实战队6: 30人 → 编号 105~134
 ```
+
+### 编排重跑语义
+
+每次 `arrange(period)` 完成最终名单后，先将该月份 `registrations` 的
+`league_type`、`rank_order`、`team_info` 全部清空，再只回写本次实际分配结果。
+因此更新黑名单、排除名单或报名后重跑时，被新过滤或删除的账号不会保留上一次编排的队伍字段。
 
 ---
 

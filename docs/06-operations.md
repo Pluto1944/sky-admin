@@ -12,7 +12,7 @@
 | 每天 | 拉取部落战数据（自动） | `scheduler.py` → `war_results` |
 | 每 30 分钟 | 同步互刷统计数据（自动） | `scheduler.py` → `farm_stats` |
 | 每月 12 号 | 拉取 CWL 战绩（自动） | `scheduler.py` → `cwl` |
-| 每月底 | 报名导入 → 编排+升降级 → 发布 | `register_and_arrange.sh` |
+| 每月底 | 上月数据审计 → 报名导入 → 编排+升降级 → 发布 | 人工审计 + `register_and_arrange.sh` |
 | 日常 | 查看/管理调度任务 | `scheduler.py --list` 等 |
 
 > 周期任务统一由 `scripts/scheduler.py`（systemd 服务 `sky-scheduler`）接管，详见 [`15-scheduler.md`](./15-scheduler.md) 与 [`deploy/README.md`](../deploy/README.md)。旧的 `sky-sync-*.timer` + `manage-cron.sh` 方案已废弃。
@@ -59,7 +59,8 @@ arrange(period)
   ├─ build_final_list() 基准重建+升降级+稳定重排保护（阶段0~6）
   ├─ build_teams() 贪心填充+边界校验+白名单+管理员（阶段7~9）
   ├─ 构建 ordered_with_team + 注入 movement 标识
-  ├─ 回写 team_name → registrations
+  ├─ 清空本期旧 league_type / rank_order / team_info
+  ├─ 回写本次实际分配 → registrations
   └─ arrange_and_export() 导出 Excel（Part1-4）
 ```
 
@@ -174,9 +175,10 @@ data/
 
 ## 九、凭证管理约定
 
-- 所有凭证（`COC_API_TOKEN` / `TENCENT_DOC_ACCESS_TOKEN` / `TENCENT_DOC_CLIENT_ID` / `TENCENT_DOC_OPEN_ID` / 文档 fileId）**只放 `.env`，不写进脚本、不提交仓库**
+- 所有凭证（`COC_API_TOKEN` / `TENCENT_DOC_ACCESS_TOKEN` / `TENCENT_DOC_CLIENT_ID` / `TENCENT_DOC_CLIENT_SECRET` / `TENCENT_DOC_REFRESH_TOKEN` / `TENCENT_DOC_OPEN_ID` / 文档 fileId）**只放 `.env`，不写进脚本、不提交仓库**
 - 首次使用：`cp .env.example .env` 然后填入真实凭证
-- 腾讯文档 `access_token` 约 30 天过期，到期需手动更新
+- 腾讯文档正式 OAuth 会在授权码换取 Token 时返回 `refresh_token`；配置后，Access Token 失效会自动刷新并重试一次
+- 腾讯文档 `refresh_token` 官方有效期为 1 年，到期后需重新走一次 OAuth 授权；调试 Access Token 不包含 Refresh Token，仍需手动更新
 - 调试时可临时 `export` 覆盖 .env 中的值
 
 ---
@@ -215,13 +217,17 @@ data/
 
 ### 每月开赛前（月底）
 
+- [ ] 在修改本月配置和编排名单前，只读打印上月每支队伍：`team_index`、别名、真实部落名、Tag、实际参赛人数、战绩条数、联赛结束后的新等级
+- [ ] 对照 `league_teams(N-1)` 历史快照与 `league_results(N-1)`；确认每支实战队都有结果，Tag/实际参赛部落无误，缺口已说明或修复
+- [ ] 确认特殊赛程按实际轮次换算（例如五轮队满星 15，12/15 及以下降级），不要按固定 21 星误判
 - [ ] 确认 `coc-sync` 已执行（保持 accounts 数据最新）
 - [ ] 确认报名收集表已关闭，子表已生成
 - [ ] 检查 `.env` 中 `REG_DOC_FILE_ID`、`ROSTER_DOC_FILE_ID` 已配置
-- [ ] 检查腾讯文档 access_token 未过期（30 天有效期）
+- [ ] 检查腾讯文档 OAuth 刷新凭证已配置；如仍使用调试 Token，确认 Access Token 未过期
 - [ ] 检查 `EXCLUDED_CAMP_NAMES` 排除名单是否需要更新
 - [ ] 检查 `TEAMS` 配置是否为本月最新（队伍数、容量、reserved_slots）
 - [ ] 检查 `BLACK_LIST` 和 `WHITE_LIST` 是否需要更新
+- [ ] 黑名单按 `account_name` 精确匹配且区分大小写；同一昵称存在大小写变体时分别列出
 
 ### 执行流程
 
@@ -233,7 +239,10 @@ data/
   - Part3 缺失老兵列表准确
   - Part4 网格排布整齐
 - [ ] 确认升降级日志合理（无意外大幅波动）
+- [ ] 交叉核对升降级日志与 Part3 缺失名单；当前实现允许本月缺席者先占用上月战绩晋级名额，再在阶段3删除
+- [ ] 如本月曾修改黑名单/排除名单后重跑，确认被过滤账号不在 Part1/2/4，且数据库旧编排字段已清空
 - [ ] 运行 `publish_to_results.sh 2026-08` 发布到公示文档
+- [ ] 打开公示文档确认当月同名 Sheet 已更新，队伍数和最终人数与审核结果一致
 
 ### 每月 CWL 结束后（7号）
 
@@ -247,7 +256,7 @@ data/
 - [ ] 确认调度器正常运行：`sudo systemctl status sky-scheduler`
 - [ ] 确认各任务状态：`venv/bin/python scripts/scheduler.py --list`
 - [ ] 检查退部对账统计（退部人数是否异常）
-- [ ] 腾讯文档 access_token 到期前 3 天续期
+- [ ] 腾讯文档 Refresh Token 到期前重新授权（官方有效期 1 年）
 - [ ] 定期备份 `data/league.db`
 - [ ] 修改调度相关代码后重启：`sudo systemctl restart sky-scheduler`
 
@@ -262,6 +271,7 @@ data/
 | `coc-sync` 单部落失败 | 该部落成员本次不更新 | `FAIL_FAST` 隔离，其他部落正常；退部对账跳过失败部落 |
 | `fetch_cwl_data.py` API 失败 | 无法拉取星数 | 自动回退到本地 JSON 缓存；全部失败则编排时自动跳过升降级 |
 | `fetch_cwl_data.py` 部分队伍失败 | 缺星数队伍不参与升降级 | 相邻两队都成功才参与升降级配对 |
+| 上月部落临时更换 | 先按实际参赛 Tag 修正/补齐上月历史快照和战绩，再安排本月；不能用本月 YAML 覆盖上月事实 |
 
 ### 报名数据异常
 
@@ -284,6 +294,8 @@ data/
 | 白名单超员 | 普通成员连锁后移；无法同时满足升降级边界时保留白名单目标并打印告警 |
 | 删除或新增造成升降级边界变化 | 稳定重排；升级成员不得跌破目标，降级成员不得回到原队伍；冲突打印告警 |
 | 黑名单命中 | 阶段0 从所有数据源排除，记录到 Part3 |
+| 晋级候选本月缺席 | 当前仍先按上月名单完成配对交换，再在阶段3删除缺席者；配对降级保留并由后续人员补位，规则变更需另行确认 |
+| 修改名单后重跑 | 本期旧 `league_type` / `rank_order` / `team_info` 会先清空，再只写入当前结果 |
 
 ### 脚本运行异常
 
@@ -318,6 +330,6 @@ data/
 
 ### 腾讯文档写入失败
 
-1. 确认 access_token 未过期（30 天有效期）
+1. 如返回 `400006`，确认 `TENCENT_DOC_CLIENT_SECRET` / `TENCENT_DOC_REFRESH_TOKEN` 已配置且 Refresh Token 未超过 1 年；调试 Token 需手动更新
 2. 确认 `fileId` 正确且当前用户有写入权限
 3. 确认 sheet 名不包含非法字符

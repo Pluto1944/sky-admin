@@ -25,6 +25,7 @@
 arrange_and_export(period, target)
   │
   ├─ self.arrange(period)            # 排序 + 基准重建 + 升降级 + 队伍填充
+  │   → 清空 registrations(period) 旧编排字段，再回写本次实际分配
   │   → ordered, team_results, movements, star_data
   │
   ├─ 构建 combined_rows (dict 列表)   # Part1 + Part2 + Part3
@@ -292,6 +293,14 @@ def publish_part4_to_doc(self, period: str, publish_doc_id: str) -> str:
 - 抬头行红色字体（通过 `highlight_rows` 指定）
 - 直接写入 2D 数据，跳过 dict 转换
 
+### 重跑与重复发布
+
+- 重跑 `arrange(period)` 时，会先清空该月所有报名记录已有的 `league_type`、`rank_order`、
+  `team_info`，再回写当前结果。新增黑名单、排除名单或缺失成员不会保留旧队伍字段。
+- `publish_part4_to_doc()` 会重新执行完整编排，再生成 Part4；同名公示 Sheet 采用删后重建，
+  所以重复发布会以当次配置和数据库状态覆盖旧内容。
+- 公示仍是独立的外部可见步骤。重跑工作名单不会自动更新已经发布的公示 Sheet。
+
 ---
 
 ## 九、关键方法对照
@@ -339,3 +348,4 @@ def publish_part4_to_doc(self, period: str, publish_doc_id: str) -> str:
 | 13 | tag 格式非法 | 跳过 API 查询，不报 404 |
 | 14 | 公示发布 | 前 20 行固定公告 + Part4 网格，抬头行红色字体 |
 | 15 | 公示 sheet 已存在 | 删后重建，内容为最新 |
+| 16 | 同期重跑后新增黑名单 | 被过滤账号的三个编排字段为空，且不出现在 Part1/2/4 |
