@@ -113,6 +113,10 @@
 | 增量 | 活跃战争刷新，`warEnded` 成功缓存后停止请求；warTag 全局去重 |
 | 容错 | 单部落/单 warTag 失败隔离，保留最近成功数据 |
 
+实时功能上线前遗漏的历史月份不由调度器自动补抓；使用
+`scripts/backfill_cwl_live.py --period YYYY-MM` 先做只读完整性校验，备份数据库后再加
+`--apply` 一次性回填。历史来源、校验边界和限制见 `docs/19-cwl-live-dashboard.md`。
+
 #### `coc_sync` — 部落成员档案（`accounts`）
 
 | 项 | 内容 |

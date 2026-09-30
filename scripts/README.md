@@ -84,6 +84,28 @@ python scripts/fetch_cwl_data.py --period 2026-07
 | `load_env.sh` | 公共环境变量加载器，被其他脚本 source |
 | `sync_and_export.sh` | 长期维护：COC 同步 → 导出玩家档案 |
 | `fetch_cwl_data.sh` | `fetch_cwl_data.py` 的便捷包装 |
+| `backfill_cwl_live.py` | 从 ClashKing 历史战争日志重建指定月份的联赛看板缓存；默认 dry-run，`--apply` 才写库 |
+
+---
+
+### 历史联赛看板回填
+
+实时看板上线前缺失的月份先执行只读校验：
+
+```bash
+source scripts/load_env.sh
+venv/bin/python scripts/backfill_cwl_live.py --period 2026-09
+```
+
+确认全部月度队伍、轮次、对阵和已有历史汇总均通过，并完成 `data/league.db`
+一致性备份后，再显式写入：
+
+```bash
+venv/bin/python scripts/backfill_cwl_live.py --period 2026-09 --apply
+```
+
+脚本不会覆盖目标月份已有的 `cwl_live_group_cache` 或 `cwl_live_war_cache`。
+它是一次性运维修复工具，不替代 `scheduler.py` 的月初实时同步。
 
 ---
 
