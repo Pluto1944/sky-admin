@@ -134,7 +134,7 @@ export default {
       clanTag: '', period: '', detail: null, loading: true, loadError: '',
       activeView: 'war-day', selectedRoundNumber: null, requestedRound: null,
       refreshTimer: null,
-      openSections: { townHalls: false, standings: true, offense: false, defense: false }
+      openSections: { townHalls: false, standings: false, offense: true, defense: false }
     }
   },
   computed: {

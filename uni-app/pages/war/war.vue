@@ -36,7 +36,7 @@
             <view v-if="clan.status === 'error'" class="simple-state error-state">同步失败：{{ clan.error || '无法获取当前部落战' }}</view>
             <view v-else-if="clan.status === 'sync_pending'" class="simple-state">数据正在同步，请稍后重试</view>
             <view v-else-if="clan.status === 'not_in_war'" class="simple-state">当前无部落战</view>
-            <view v-else-if="clan.status === 'cwl'" class="simple-state cwl-state" @tap.stop="onTopTab('league')">当前正在进行联赛，点击前往“联赛 → 战斗日”</view>
+            <view v-else-if="clan.status === 'cwl'" class="simple-state cwl-state" @tap.stop="onTopTab('league')">当前正在进行联赛，点击前往“联赛数据 → 战斗日”</view>
             <view v-else class="war-summary">
               <view class="opponent-row">
                 <text class="opponent-label">对手</text>
@@ -96,10 +96,14 @@
               <text class="status-badge" :class="'league-status-' + clan.status">{{ leagueStatusLabel(clan.status) }}</text>
             </view>
 
-            <view v-if="clan.status === 'error'" class="simple-state error-state">{{ clan.error || '联赛数据同步失败' }}</view>
+            <view v-if="clan.status === 'error'" class="simple-state error-state">
+              <text>{{ clan.error || '联赛数据同步失败' }}</text>
+              <text class="detail-link state-detail-link">查看详情 ›</text>
+            </view>
             <view v-else-if="clan.status === 'waiting'" class="simple-state">
               <text class="league-alias">{{ clan.team_alias }} · {{ clan.league_level || '未定级' }}</text>
               <text class="waiting-hint">{{ clan.error || '等待联赛开启' }}</text>
+              <text class="detail-link state-detail-link">查看详情 ›</text>
             </view>
             <view v-else class="league-summary">
               <view class="league-primary-row">
@@ -170,7 +174,7 @@ export default {
     return {
       topButtons: [
         { key: 'clan-war', icon: '⚔️', text: '部落战', action: 'onTopTab' },
-        { key: 'league', icon: '🏆', text: '联赛', action: 'onTopTab' }
+        { key: 'league', icon: '🏆', text: '联赛数据', action: 'onTopTab' }
       ],
       activeTopTab: 'clan-war',
       loading: true,
@@ -345,7 +349,7 @@ export default {
       uni.navigateTo({ url: `/pages/war/current-detail?clan_tag=${encodeURIComponent(clan.clan_tag)}` })
     },
     openLeagueDetail(clan) {
-      if (!clan.clan_tag || ['waiting', 'error'].indexOf(clan.status) >= 0) return
+      if (!clan.clan_tag) return
       uni.setStorageSync('war_active_top_tab', 'league')
       uni.navigateTo({ url: `/pages/war/cwl-detail?clan_tag=${encodeURIComponent(clan.clan_tag)}&period=${encodeURIComponent(this.leaguePeriod)}&view=war-day` })
     },
@@ -414,5 +418,5 @@ export default {
 .score-row { margin-top: 18rpx; display: flex; align-items: center; }.side-score { flex: 1; display: flex; align-items: center; color: #9aa0b0; font-size: 22rpx; }.side-score text { margin-right: 10rpx; }.opponent-score { justify-content: flex-end; }.opponent-score text { margin-right: 0; margin-left: 10rpx; }.side-name { color: #66708a; }.stars { color: #f0f0f5; font-weight: 600; }.versus { margin: 0 12rpx; color: #4a90d9; font-size: 22rpx; font-weight: 600; }
 .card-footer { margin-top: 18rpx; padding-top: 14rpx; display: flex; align-items: center; border-top: 1rpx solid #252540; }.countdown { color: #747c91; font-size: 22rpx; }.card-actions { margin-left: auto; display: flex; align-items: center; }.detail-link { padding: 8rpx 12rpx; color: #5fa8ff; font-size: 23rpx; }.share-btn { margin: 0 0 0 8rpx; padding: 8rpx 12rpx; border: 0; border-radius: 6rpx; color: #aab4c8; background: #252540; font-size: 23rpx; line-height: 1.4; }.share-btn::after { border: 0; }.bottom-space { height: 120rpx; }
 .filter-mask { position: fixed; z-index: 1000; top: 0; right: 0; bottom: 0; left: 0; display: flex; align-items: flex-end; background: rgba(0,0,0,.6); }.filter-panel { width: 100%; max-height: 82vh; padding: 26rpx 30rpx 34rpx; box-sizing: border-box; border-radius: 24rpx 24rpx 0 0; background: #1a1a2e; }.filter-title { margin-bottom: 20rpx; color: #fff; font-size: 31rpx; font-weight: 600; text-align: center; }.filter-group-title { display: block; margin: 16rpx 0 10rpx; color: #8890a0; font-size: 23rpx; }.filter-options { display: flex; flex-wrap: wrap; }.filter-option { min-height: 62rpx; margin-right: 26rpx; display: flex; align-items: center; color: #d0d0dc; font-size: 25rpx; }.filter-check { width: 34rpx; height: 34rpx; margin-right: 9rpx; display: flex; align-items: center; justify-content: center; box-sizing: border-box; border: 2rpx solid #66708a; border-radius: 5rpx; color: #fff; }.filter-check.checked { border-color: #4a90d9; background: #4a90d9; }.status-filter-options { display: flex; flex-wrap: wrap; }.status-filter-option { margin: 0 12rpx 12rpx 0; padding: 10rpx 17rpx; border-radius: 8rpx; color: #9097aa; background: #252540; font-size: 23rpx; }.status-filter-option.active { color: #fff; background: #4a90d9; }.clan-options { max-height: 320rpx; border-top: 1rpx solid #2a2a4a; border-bottom: 1rpx solid #2a2a4a; }.clan-option { margin-right: 0; padding: 0 6rpx; border-bottom: 1rpx solid #252540; }.filter-actions { margin-top: 22rpx; display: flex; justify-content: flex-end; }.filter-action { min-width: 110rpx; margin-left: 14rpx; padding: 14rpx 20rpx; border-radius: 7rpx; text-align: center; font-size: 25rpx; }.reset-action { color: #74b9ff; }.cancel-action { color: #aab4c8; background: #252540; }.confirm-action { color: #fff; background: #4a90d9; }
-.period-label { color: #66708a; font-size: 22rpx; }.league-card { min-height: 150rpx; }.league-status-active { color: #ff7675; }.league-status-preparation { color: #fdcb6e; }.league-status-ended { color: #74b9ff; }.league-status-error { color: #e17055; }.league-alias, .waiting-hint { display: block; }.league-alias { color: #aab4c8; }.waiting-hint { margin-top: 8rpx; color: #66708a; font-size: 22rpx; }.league-summary { padding: 18rpx; }.league-primary-row { display: flex; align-items: center; color: #d8dce8; font-size: 25rpx; }.league-rank { margin-left: auto; color: #fdcb6e; }.league-metrics { margin-top: 18rpx; display: flex; align-items: center; justify-content: space-between; color: #9aa0b0; font-size: 23rpx; }
+.period-label { color: #66708a; font-size: 22rpx; }.league-card { min-height: 150rpx; }.league-status-active { color: #ff7675; }.league-status-preparation { color: #fdcb6e; }.league-status-ended { color: #74b9ff; }.league-status-error { color: #e17055; }.league-alias, .waiting-hint, .state-detail-link { display: block; }.league-alias { color: #aab4c8; }.waiting-hint { margin-top: 8rpx; color: #66708a; font-size: 22rpx; }.state-detail-link { margin-top: 10rpx; }.league-summary { padding: 18rpx; }.league-primary-row { display: flex; align-items: center; color: #d8dce8; font-size: 25rpx; }.league-rank { margin-left: auto; color: #fdcb6e; }.league-metrics { margin-top: 18rpx; display: flex; align-items: center; justify-content: space-between; color: #9aa0b0; font-size: 23rpx; }
 </style>
