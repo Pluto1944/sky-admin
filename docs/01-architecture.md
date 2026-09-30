@@ -206,7 +206,7 @@ flowchart TD
 - **pandas + openpyxl**：读写 Excel
 - **SQLite**（内置 `sqlite3`）：本地数据库，零配置、单文件、便于备份
 - **pytest + pytest-cov**：单元测试与覆盖率
-- **腾讯文档 OpenAPI v3**：在线文档读写（调试 access_token）
+- **腾讯文档 OpenAPI v3**：在线文档读写（调试 Token 或 OAuth 自动刷新）
 
 ---
 
@@ -298,8 +298,9 @@ sky-admin/
 ## 九、腾讯文档 API 接入
 
 - 实现：`shared/io_adapter/tencent_doc.py`，OpenAPI v3
-- **授权现状**：当前用调试 access_token，凭证仅从环境变量读取
-- ⚠️ **需 30 天手动更新一次 token**：无 `client_secret` / `refresh_token`，不做自动刷新
+- **授权方式**：凭证仅从环境变量读取；兼容调试 Access Token，也支持正式 OAuth Refresh Token
+- 配置 `TENCENT_DOC_CLIENT_SECRET` 和 `TENCENT_DOC_REFRESH_TOKEN` 后，Access Token 缺失、HTTP 401 或业务码 `400006` 时自动刷新并重试一次
+- Refresh Token 由 OAuth 授权码换取，官方有效期为 1 年；到期后需重新授权一次
 - **安全**：所有凭证仅放环境变量，绝不入库、不提交仓库
 
 ---
@@ -449,8 +450,8 @@ v2.2 把 `registrations` 升级为**自包含事实源**，从根上消除该复
 ## 十三、腾讯文档 API 接入说明
 
 - 实现：`shared/io_adapter/tencent_doc.py`，OpenAPI v3；核心接口 `get_range`（读）、`batchupdate`（写）、`get_sheet`（元数据）
-- **授权现状**：当前用调试 access_token，凭证仅从环境变量读取（`TENCENT_DOC_ACCESS_TOKEN` / `TENCENT_DOC_CLIENT_ID` / `TENCENT_DOC_OPEN_ID`）
-- ⚠️ **需 30 天手动更新一次 token**：因当前无 `client_secret` / `refresh_token`，不做自动刷新；access_token 约 30 天过期，到期回开放平台复制新 token 重新 export
+- **授权方式**：兼容调试 Access Token；正式运行推荐同时配置 `TENCENT_DOC_CLIENT_SECRET` / `TENCENT_DOC_REFRESH_TOKEN`
+- Access Token 缺失或失效时自动刷新并重试一次；Refresh Token 官方有效期为 1 年，到期后重新授权
 - **安全**：所有凭证仅放环境变量，绝不入库、不提交仓库
 - **接入方式**：仅新增 `io_adapter/tencent_doc.py` 实现 `ExcelIO`，业务层零改动
 

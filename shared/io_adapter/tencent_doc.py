@@ -5,11 +5,12 @@
 
 鉴权（B 方案 · 调试 token）：
     凭证只从**环境变量**读取，绝不写入代码或提交仓库（安全底线）：
-      - TENCENT_DOC_ACCESS_TOKEN   访问令牌（约 30 天）
+      - TENCENT_DOC_ACCESS_TOKEN   访问令牌
       - TENCENT_DOC_CLIENT_ID      应用 ID
       - TENCENT_DOC_OPEN_ID        用户标识
-    因当前无 client_secret / refresh_token，**不做自动刷新**；token 过期后回
-    开放平台"开发者信息"复制新 token 重新 export 即可。
+      - TENCENT_DOC_CLIENT_SECRET  应用密钥（可选，与 refresh_token 成对配置）
+      - TENCENT_DOC_REFRESH_TOKEN  刷新令牌（可选，官方有效期 1 年）
+    配置后，Access Token 缺失或接口返回鉴权失效时自动刷新并重试一次。
 
 安全设计：
     - SSRF 防护：**硬编码只允许** docs.qq.com，请求前再校验 scheme/host。
@@ -55,12 +56,20 @@ class TencentDocAdapter(ExcelIO):
         access_token: str | None = None,
         client_id: str | None = None,
         open_id: str | None = None,
+        client_secret: str | None = None,
+        refresh_token: str | None = None,
         timeout: int = DEFAULT_TIMEOUT,
     ):
         # 凭证仅来自环境变量，绝不硬编码；构造时不强制读取，避免无凭证环境导入即失败
         self._access_token = access_token or os.environ.get("TENCENT_DOC_ACCESS_TOKEN")
         self._client_id = client_id or os.environ.get("TENCENT_DOC_CLIENT_ID")
         self._open_id = open_id or os.environ.get("TENCENT_DOC_OPEN_ID")
+        self._client_secret = client_secret or os.environ.get(
+            "TENCENT_DOC_CLIENT_SECRET"
+        )
+        self._refresh_token = refresh_token or os.environ.get(
+            "TENCENT_DOC_REFRESH_TOKEN"
+        )
         self._timeout = timeout
 
     # ------------------------------------------------------------------
@@ -323,11 +332,20 @@ class TencentDocAdapter(ExcelIO):
         query: dict | None = None,
         body: dict | None = None,
     ) -> dict:
-        if not (self._access_token and self._client_id and self._open_id):
+        if not (self._client_id and self._open_id):
             raise TencentDocError(
-                "缺少腾讯文档凭证，请先设置环境变量 TENCENT_DOC_ACCESS_TOKEN / "
-                "TENCENT_DOC_CLIENT_ID / TENCENT_DOC_OPEN_ID（切勿硬编码）。"
+                "缺少腾讯文档凭证，请先设置 TENCENT_DOC_CLIENT_ID / "
+                "TENCENT_DOC_OPEN_ID（切勿硬编码）。"
             )
+        if not self._access_token:
+            if self._can_refresh_token():
+                self._refresh_access_token()
+            else:
+                raise TencentDocError(
+                    "缺少腾讯文档 Access Token；请设置 TENCENT_DOC_ACCESS_TOKEN，"
+                    "或同时设置 TENCENT_DOC_CLIENT_SECRET / "
+                    "TENCENT_DOC_REFRESH_TOKEN 以自动刷新。"
+                )
 
         url = f"{BASE_URL}{path}"
         if query:
@@ -338,36 +356,107 @@ class TencentDocAdapter(ExcelIO):
         if parsed.scheme != "https" or parsed.hostname != ALLOWED_HOST:
             raise TencentDocError(f"非法请求目标，仅允许 https://{ALLOWED_HOST}")
 
-        headers = {
-            "Access-Token": self._access_token,
-            "Client-Id": self._client_id,
-            "Open-Id": self._open_id,
-            "Accept": "application/json",
-        }
         data_bytes = None
         if body is not None:
             data_bytes = json.dumps(body, ensure_ascii=False).encode("utf-8")
-            headers["Content-Type"] = "application/json"
 
-        req = Request(url, data=data_bytes, headers=headers, method=method)
+        for attempt in range(2):
+            headers = {
+                "Access-Token": self._access_token,
+                "Client-Id": self._client_id,
+                "Open-Id": self._open_id,
+                "Accept": "application/json",
+            }
+            if body is not None:
+                headers["Content-Type"] = "application/json"
+
+            req = Request(url, data=data_bytes, headers=headers, method=method)
+            try:
+                with urlopen(req, timeout=self._timeout) as resp:
+                    raw = resp.read().decode("utf-8")
+            except HTTPError as e:
+                if e.code == 401 and attempt == 0 and self._can_refresh_token():
+                    self._refresh_access_token()
+                    continue
+                detail = e.read().decode("utf-8", errors="replace") if e.fp else ""
+                raise TencentDocError(
+                    f"腾讯文档 API 返回 HTTP {e.code}: {detail}"
+                ) from e
+            except URLError as e:
+                raise TencentDocError(f"请求腾讯文档 API 失败：{e.reason}") from e
+
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError as e:
+                raise TencentDocError("腾讯文档 API 响应不是合法 JSON") from e
+
+            if (
+                self._is_auth_error(data)
+                and attempt == 0
+                and self._can_refresh_token()
+            ):
+                self._refresh_access_token()
+                continue
+            self._check_business_error(data)
+            return data
+
+        raise TencentDocError("腾讯文档 Access Token 刷新后仍未通过鉴权")
+
+    def _can_refresh_token(self) -> bool:
+        return bool(
+            self._client_id and self._client_secret and self._refresh_token
+        )
+
+    def _refresh_access_token(self) -> None:
+        """使用官方 OAuth refresh_token 流程刷新内存中的 Access Token。"""
+        if not self._can_refresh_token():
+            raise TencentDocError(
+                "自动刷新需要 TENCENT_DOC_CLIENT_ID / "
+                "TENCENT_DOC_CLIENT_SECRET / TENCENT_DOC_REFRESH_TOKEN"
+            )
+
+        query = urlencode(
+            {
+                "client_id": self._client_id,
+                "client_secret": self._client_secret,
+                "grant_type": "refresh_token",
+                "refresh_token": self._refresh_token,
+            }
+        )
+        url = f"{BASE_URL}/oauth/v2/token?{query}"
+        parsed = urlparse(url)
+        if parsed.scheme != "https" or parsed.hostname != ALLOWED_HOST:
+            raise TencentDocError(f"非法请求目标，仅允许 https://{ALLOWED_HOST}")
+
+        req = Request(url, headers={"Accept": "application/json"}, method="GET")
         try:
             with urlopen(req, timeout=self._timeout) as resp:
                 raw = resp.read().decode("utf-8")
         except HTTPError as e:
-            detail = e.read().decode("utf-8", errors="replace") if e.fp else ""
             raise TencentDocError(
-                f"腾讯文档 API 返回 HTTP {e.code}: {detail}"
+                f"刷新腾讯文档 Access Token 失败：HTTP {e.code}"
             ) from e
         except URLError as e:
-            raise TencentDocError(f"请求腾讯文档 API 失败：{e.reason}") from e
+            raise TencentDocError(
+                f"刷新腾讯文档 Access Token 失败：{e.reason}"
+            ) from e
 
         try:
             data = json.loads(raw)
         except json.JSONDecodeError as e:
-            raise TencentDocError("腾讯文档 API 响应不是合法 JSON") from e
-
+            raise TencentDocError("腾讯文档刷新 Token 响应不是合法 JSON") from e
         self._check_business_error(data)
-        return data
+
+        access_token = data.get("access_token")
+        if not access_token:
+            raise TencentDocError("腾讯文档刷新 Token 响应缺少 access_token")
+        self._access_token = access_token
+        if data.get("user_id"):
+            self._open_id = data["user_id"]
+
+    @staticmethod
+    def _is_auth_error(data: dict) -> bool:
+        return str(data.get("code")) == "400006"
 
     @staticmethod
     def _check_business_error(data: dict) -> None:

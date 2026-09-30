@@ -10,9 +10,11 @@
 # 凭证与文档 ID 一律从项目根 .env 读取（不写进脚本、不提交仓库）：
 #   cp .env.example .env  然后填入：
 #     COC_API_TOKEN               COC 官方 API（拉成员）
-#     TENCENT_DOC_ACCESS_TOKEN    腾讯文档 OpenAPI（写表格，约 30 天过期需手动更新）
+#     TENCENT_DOC_ACCESS_TOKEN    腾讯文档 OpenAPI（写表格）
 #     TENCENT_DOC_CLIENT_ID
 #     TENCENT_DOC_OPEN_ID
+#     TENCENT_DOC_CLIENT_SECRET  可选；与 refresh_token 配置后自动刷新
+#     TENCENT_DOC_REFRESH_TOKEN
 #     ROSTER_DOC_FILE_ID          目标在线文档 fileId（导出玩家档案）
 #
 
@@ -23,9 +25,12 @@ cd "$(dirname "$0")/.."
 source "$(dirname "$0")/load_env.sh"
 
 : "${COC_API_TOKEN:?请在 .env 设置 COC_API_TOKEN}"
-: "${TENCENT_DOC_ACCESS_TOKEN:?请在 .env 设置 TENCENT_DOC_ACCESS_TOKEN}"
 : "${TENCENT_DOC_CLIENT_ID:?请在 .env 设置 TENCENT_DOC_CLIENT_ID}"
 : "${TENCENT_DOC_OPEN_ID:?请在 .env 设置 TENCENT_DOC_OPEN_ID}"
+if [[ -z "${TENCENT_DOC_ACCESS_TOKEN:-}" ]]; then
+  : "${TENCENT_DOC_CLIENT_SECRET:?缺少 Access Token 时请设置 TENCENT_DOC_CLIENT_SECRET}"
+  : "${TENCENT_DOC_REFRESH_TOKEN:?缺少 Access Token 时请设置 TENCENT_DOC_REFRESH_TOKEN}"
+fi
 
 # 导出目标文档 fileId：优先 ROSTER_DOC_FILE_ID，回退到 TENCENT_DOC_FILE_ID
 FILE_ID="${ROSTER_DOC_FILE_ID:-${TENCENT_DOC_FILE_ID:-}}"
