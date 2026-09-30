@@ -131,7 +131,7 @@ GET /api/clan/current-wars/{clan_tag}
 
 无需认证，但 `clan_tag` 必须属于已启用自有部落，否则返回 `404`。详情包含战争概要和按 `mapPosition` 对齐的 `rows`。每位成员包含按官方 `order` 排序的第一/第二刀、最佳防守，以及 `three_star_count / total_attacks` 防守次数数据。
 
-这两个接口的数据由调度器 `current_wars` 任务每 2 分钟从 COC 刷新；小程序停留在页面时每 1 分钟读取一次缓存。完整设计见 [18-current-war-dashboard.md](18-current-war-dashboard.md)。
+这两个接口的数据由调度器 `current_wars` 每 2 分钟检查：战斗日每 2 分钟，准备日通常每 30 分钟且开战前 30 分钟内提升为每 2 分钟，无战争 / 已结束每 5 分钟，CWL 跳转状态每 30 分钟从 COC 刷新；小程序停留在页面时每 1 分钟读取一次缓存。完整设计见 [18-current-war-dashboard.md](18-current-war-dashboard.md)。
 
 ### 2.3 CWL 参赛部落汇总
 

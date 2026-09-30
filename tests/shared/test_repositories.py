@@ -110,7 +110,10 @@ def test_current_war_cache_table_is_created(db):
     columns = {
         row[1] for row in db.conn.execute("PRAGMA table_info(current_war_cache)")
     }
-    assert {"clan_tag", "clan_name", "category", "status", "data_json", "error", "updated_at"} <= columns
+    assert {
+        "clan_tag", "clan_name", "category", "status", "data_json", "error",
+        "updated_at", "attempted_at", "failure_count",
+    } <= columns
 
 
 def test_cwl_live_cache_tables_are_created(db):

@@ -3,7 +3,7 @@
 
 统一管理 7 类需要周期性执行的任务，状态落 `sync_jobs` 表：
 
-    current_wars 全部自有部落当前战争（每 2 分钟）
+    current_wars 全部自有部落当前战争（战斗日 2 分钟，准备日动态 30/2 分钟）
     cwl_live    当月 CWL 联赛组与逐场战争（活跃期每 2 分钟）
     farm_stats  互刷部落统计（每 30 分钟）
     coc_sync    COC 玩家档案（每 6 小时）
@@ -97,30 +97,118 @@ def _run_farm_stats() -> dict:
     return {"status": "success", "reason": f"同步 {success} 个互刷部落"}
 
 
-def _run_current_wars() -> dict:
-    """拉取全部已启用自有部落的当前战争，写入缓存表。"""
-    from modules.coc_sync.service import CocSyncService
+CURRENT_WAR_REFRESH_MINUTES = {
+    "in_war": 2,
+    "not_in_war": 5,
+    "war_ended": 5,
+    "cwl": 30,
+}
+CURRENT_WAR_ERROR_BACKOFF_MINUTES = (5, 10, 20, 30)
+CURRENT_WAR_PREPARATION_MINUTES = 30
+CURRENT_WAR_PREPARATION_NEAR_START_MINUTES = 2
+CURRENT_WAR_PREPARATION_NEAR_START_WINDOW_MINUTES = 30
 
-    items = CocSyncService().fetch_current_wars()
-    if not items:
+
+def _parse_coc_time(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    for fmt in ("%Y%m%dT%H%M%S.%fZ", "%Y%m%dT%H%M%SZ"):
+        try:
+            return datetime.strptime(value, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def _current_war_refresh_minutes(cache: dict, now: datetime) -> int:
+    """根据缓存状态返回单部落的下次官方 API 重试间隔。"""
+    if cache.get("status") == "error":
+        failures = max(1, int(cache.get("failure_count") or 0))
+        index = min(failures - 1, len(CURRENT_WAR_ERROR_BACKOFF_MINUTES) - 1)
+        return CURRENT_WAR_ERROR_BACKOFF_MINUTES[index]
+    if cache.get("status") == "preparation":
+        try:
+            payload = json.loads(cache.get("data_json") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            payload = {}
+        start_time = _parse_coc_time(payload.get("start_time"))
+        if start_time is not None:
+            minutes_until_start = (
+                start_time - now.astimezone(timezone.utc)
+            ).total_seconds() / 60
+            if minutes_until_start <= CURRENT_WAR_PREPARATION_NEAR_START_WINDOW_MINUTES:
+                return CURRENT_WAR_PREPARATION_NEAR_START_MINUTES
+        return CURRENT_WAR_PREPARATION_MINUTES
+    return CURRENT_WAR_REFRESH_MINUTES.get(cache.get("status"), 30)
+
+
+def _run_current_wars(force: bool = False, now: datetime | None = None) -> dict:
+    """按战争状态增量拉取已启用自有部落，写入当前战争缓存。"""
+    from modules.coc_sync.service import CocSyncService
+    from modules.coc_sync.official.mapper import normalize_tag
+
+    clans = [
+        {
+            "tag": normalize_tag(clan["tag"]),
+            "name": clan.get("name"),
+            "category": clan.get("category", "normal"),
+        }
+        for clan in config.CLANS
+        if clan.get("enabled", True)
+    ]
+    if not clans:
         return {"status": "skipped", "reason": "没有配置已启用部落"}
 
+    current_time = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    attempted_at = current_time.isoformat(timespec="seconds")
     db = Database(config.DB_PATH)
     db.init_schema()
+    cached_by_tag = {
+        row["clan_tag"]: dict(row)
+        for row in db.conn.execute("SELECT * FROM current_war_cache").fetchall()
+    }
+    due_clans = []
+    for clan in clans:
+        cached = cached_by_tag.get(clan["tag"])
+        if force or cached is None:
+            due_clans.append(clan)
+            continue
+        age = _minutes_since(cached.get("attempted_at") or cached.get("updated_at"), current_time)
+        if age is None or age >= _current_war_refresh_minutes(cached, current_time):
+            due_clans.append(clan)
+
+    if not due_clans:
+        db.close()
+        return {"status": "skipped", "reason": f"{len(clans)} 个部落均未到刷新时间"}
+
+    items = CocSyncService().fetch_current_wars(due_clans)
     success = 0
     failed = 0
     for item in items:
+        previous = cached_by_tag.get(item["clan_tag"], {})
+        failure_count = (
+            int(previous.get("failure_count") or 0) + 1
+            if item["status"] == "error"
+            else 0
+        )
         db.conn.execute(
             """INSERT INTO current_war_cache
-               (clan_tag, clan_name, category, status, data_json, error, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)
+               (clan_tag, clan_name, category, status, data_json, error, updated_at,
+                attempted_at, failure_count)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(clan_tag) DO UPDATE SET
                    clan_name = excluded.clan_name,
                    category = excluded.category,
                    status = excluded.status,
                    data_json = excluded.data_json,
                    error = excluded.error,
-                   updated_at = excluded.updated_at""",
+                   updated_at = excluded.updated_at,
+                   attempted_at = excluded.attempted_at,
+                   failure_count = excluded.failure_count""",
             (
                 item["clan_tag"],
                 item["clan_name"],
@@ -129,6 +217,8 @@ def _run_current_wars() -> dict:
                 json.dumps(item, ensure_ascii=False),
                 item.get("error"),
                 item["synced_at"],
+                attempted_at,
+                failure_count,
             ),
         )
         if item["status"] == "error":
@@ -141,6 +231,9 @@ def _run_current_wars() -> dict:
     if not success:
         return {"status": "failed", "reason": f"全部 {failed} 个部落同步失败"}
     suffix = f"，失败 {failed}" if failed else ""
+    skipped = len(clans) - len(due_clans)
+    if skipped:
+        suffix += f"，按状态跳过 {skipped}"
     return {"status": "success", "reason": f"同步 {success} 个部落{suffix}"}
 
 
@@ -587,7 +680,7 @@ def run_one(db: Database, job_id: str, force: bool = False) -> dict:
     start = time.monotonic()
     try:
         run_fn = job["run"]
-        if job_id in {"cwl", "cwl_live"}:
+        if job_id in {"current_wars", "cwl", "cwl_live"}:
             result = run_fn(force=force)
         else:
             result = run_fn()
@@ -691,7 +784,8 @@ def cmd_once(job_id: str, force: bool) -> None:
         if jid not in JOBS:
             print(f"未知任务: {jid}", file=sys.stderr)
             continue
-        result = run_one(db, jid, force=force)
+        # 手动执行 current_wars 的语义是立即全量刷新，不受状态限频影响。
+        result = run_one(db, jid, force=(force or jid == "current_wars"))
         print(f"{JOBS[jid]['name']}({jid}): {result.get('status')} {result.get('reason', '')}")
     db.close()
 

@@ -24,7 +24,7 @@
 | `wechat_users` | 微信用户和游戏账号绑定 | `openid` | 活跃 |
 | `sync_jobs` | 周期调度任务状态 | `job_id` | 活跃 |
 
-`current_war_cache` 每个已启用自有部落一行，保存标准化后的当前战争 JSON、状态、错误和同步时间。它由 `current_wars` 调度任务每 2 分钟覆盖更新，API 只读缓存，不在页面请求中直接调用 COC。
+`current_war_cache` 每个已启用自有部落一行，保存标准化后的当前战争 JSON、状态、错误、同步时间、最近尝试时间和连续失败次数。`current_wars` 调度任务每 2 分钟检查一次：战斗日每 2 分钟，准备日通常每 30 分钟且开战前 30 分钟内提升为每 2 分钟，无战争 / 已结束每 5 分钟，CWL 跳转状态每 30 分钟调用 COC；失败按 5～30 分钟退避。API 只读缓存，不在页面请求中直接调用 COC。
 
 `cwl_live_group_cache` 以当月 `league_teams` 为部落范围，保存官方联赛组和轮次 warTag；`cwl_live_war_cache` 以 `war_tag` 去重保存完整逐场攻防数据。两表由 `cwl_live` 增量更新，页面 API 只读缓存。已结束战争不再重复拉取。
 

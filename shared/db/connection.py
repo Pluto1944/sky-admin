@@ -171,13 +171,15 @@ CREATE TABLE IF NOT EXISTS farm_stats (
 
 _CURRENT_WAR_CACHE_DDL = """
 CREATE TABLE IF NOT EXISTS current_war_cache (
-    clan_tag    TEXT PRIMARY KEY,
-    clan_name   TEXT NOT NULL,
-    category    TEXT NOT NULL,
-    status      TEXT NOT NULL,
-    data_json   TEXT NOT NULL,
-    error       TEXT,
-    updated_at  TEXT NOT NULL
+    clan_tag     TEXT PRIMARY KEY,
+    clan_name    TEXT NOT NULL,
+    category     TEXT NOT NULL,
+    status       TEXT NOT NULL,
+    data_json    TEXT NOT NULL,
+    error        TEXT,
+    updated_at   TEXT NOT NULL,
+    attempted_at TEXT,
+    failure_count INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -356,6 +358,13 @@ class Database:
         cw_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(current_war_cache)")}
         if not cw_cols:
             self.conn.execute(_CURRENT_WAR_CACHE_DDL)
+        else:
+            if "attempted_at" not in cw_cols:
+                self.conn.execute("ALTER TABLE current_war_cache ADD COLUMN attempted_at TEXT")
+            if "failure_count" not in cw_cols:
+                self.conn.execute(
+                    "ALTER TABLE current_war_cache ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0"
+                )
 
         # CWL 实时联赛组与逐场战争缓存
         cwl_group_cols = {
