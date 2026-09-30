@@ -114,6 +114,33 @@ def test_arrange_writes_back_to_repo(player_service, reg_repo):
     assert regs["#C"]["team_info"] is not None
 
 
+def test_rerun_clears_stale_assignment_for_new_blacklist(
+    player_service, reg_repo, monkeypatch
+):
+    """重跑新增黑名单时，被过滤账号不应保留上一次的队伍信息。"""
+    _seed(player_service, reg_repo)
+    arranger = _arranger(player_service, reg_repo)
+    arranger.arrange("2026-08", teams=_teams(), combat_min_match_value=0)
+
+    before = {
+        r["player_tag"]: r for r in reg_repo.get_registrations("2026-08")
+    }
+    assert before["#B"]["team_info"] is not None
+
+    monkeypatch.setattr("modules.cwl_registration.roster.BLACK_LIST", {"乙"})
+    ordered, _teams_result, _movements, _stars = arranger.arrange(
+        "2026-08", teams=_teams(), combat_min_match_value=0
+    )
+
+    after = {
+        r["player_tag"]: r for r in reg_repo.get_registrations("2026-08")
+    }
+    assert "乙" not in {item["account_name"] for item in ordered}
+    assert after["#B"]["league_type"] is None
+    assert after["#B"]["rank_order"] is None
+    assert after["#B"]["team_info"] is None
+
+
 def test_arrange_and_export_writes_sheet(player_service, reg_repo):
     """验证 arrange_and_export 写入 sheet。"""
     _seed(player_service, reg_repo)

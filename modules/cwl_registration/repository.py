@@ -88,6 +88,19 @@ class RegistrationRepository:
         )
         self.conn.commit()
 
+    def clear_arrangements(self, period: str) -> int:
+        """清空本期旧编排，避免重跑后被过滤账号保留历史队伍。"""
+        cur = self.conn.execute(
+            """
+            UPDATE registrations
+            SET league_type = NULL, rank_order = NULL, team_info = NULL
+            WHERE period = ?
+            """,
+            (period,),
+        )
+        self.conn.commit()
+        return cur.rowcount
+
     def update_team_info(self, reg_id: int, team_info: str) -> None:
         """回写该报名记录分配到哪个队伍。"""
         self.conn.execute(
@@ -95,4 +108,3 @@ class RegistrationRepository:
             (team_info, reg_id),
         )
         self.conn.commit()
-

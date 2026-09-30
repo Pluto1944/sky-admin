@@ -652,6 +652,10 @@ class LeagueArranger:
         for idx, item in enumerate(ordered_with_team, start=1):
             item["rank_order"] = idx
 
+        # 重跑时先清空本期旧结果，确保新黑名单、排除名单和缺失人员不会
+        # 残留上一次的 league_type / rank_order / team_info。
+        self.reg_repo.clear_arrangements(period)
+
         # 回写最终 rank_order 到 DB（此前 update_arrangement 写入的是初次排序的位次）
         for item in ordered_with_team:
             if item.get("reg_id") is not None:
