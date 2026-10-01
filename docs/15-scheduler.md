@@ -38,7 +38,7 @@
 
 | 表名 | 职责 | 主键 | 数据来源 | 刷新方式 |
 |------|------|------|----------|----------|
-| `accounts` | 玩家档案（COC 权威） | `player_tag` | COC 官方 API | **周期**（每天） |
+| `accounts` | 玩家档案（COC 权威） | `player_tag` | COC 官方 API | **周期**（每 6 小时） |
 | `registrations` | 月度报名（自包含事实源） | `id` 自增 | 腾讯文档报名表 | 人工（每月） |
 | `results` | 月度战绩（旧表，过渡） | `id` 自增 | `fetch_cwl_data` 双写 | 周期（每月） |
 | `league_teams` | 队伍配置快照 | `id` 自增 | `arrange()` 幂等写入 | 人工（每月） |
@@ -47,6 +47,7 @@
 | `wechat_users` | 微信用户绑定 | `openid` | 微信小程序 | 实时（用户登录） |
 | `farm_stats` | 互刷部落统计缓存 | `clan_tag` | COC 官方 API | **周期**（每 30 分钟） |
 | `current_war_cache` | 自有部落当前战争缓存 | `clan_tag` | COC 官方 API | **周期**（每 2 分钟检查，按状态限频） |
+| `clan_profile_cache` | 自有部落官方资料缓存 | `clan_tag` | COC 官方 API | **周期**（每 6 小时） |
 | `cwl_live_group_cache` | 当月联赛组缓存 | `(period, clan_tag)` | COC 官方 API | **周期**（联赛窗口） |
 | `cwl_live_war_cache` | CWL 逐场战争缓存 | `war_tag` | COC 官方 API | **周期**（活跃战争每 2 分钟） |
 | `sync_jobs` | 调度器任务状态 | `job_id` | `scheduler.py` | 实时（调度器维护） |
@@ -67,6 +68,7 @@
 | `wechat_users` | `api_server`（登录/绑定） | `api_server` |
 | `farm_stats` | `sync_farm_stats` | `api_server`（farm-config） |
 | `current_war_cache` | `current_wars` | `api_server`（current-wars） |
+| `clan_profile_cache` | `coc_sync` | `api_server`（clan overview 详情） |
 | `cwl_live_group_cache` | `cwl_live` | `api_server`（cwl-live） |
 | `cwl_live_war_cache` | `cwl_live` | `api_server`（cwl-live） |
 | `sync_jobs` | `scheduler.py` | `scheduler.py`（`--list`） |
@@ -77,7 +79,7 @@
 |--------|--------|------|--------|------|----------|
 | `current_wars` | `current_war_cache` | `scheduler.py` | COC 官方 API | 每 2 分钟检查，按状态和开战时间限频 | `/api/clan/current-wars` |
 | `cwl_live` | `cwl_live_group_cache` + `cwl_live_war_cache` | `scheduler.py` | COC 官方 API | 活跃期每 2 分钟 | `/api/clan/cwl-live` |
-| `coc_sync` | `accounts` | `cli.py coc-sync` | COC 官方 API | 每天 | `/api/members` |
+| `coc_sync` | `accounts`、`clan_profile_cache` | `CocSyncService` | COC 官方 API | 每 6 小时 | `/api/members`、`/api/clan/overview/{tag}` |
 | `farm_stats` | `farm_stats` | `sync_farm_stats.py` | COC 官方 API | 每 30 分钟 | `/api/clan/farm-config` |
 | `war_results` | `war_results` | `fetch_war_data.py` | ClashKing API | 每天 | `/api/clan/war-stats` |
 | `cwl` | `league_results`+`results` | `fetch_cwl_data.py` | ClashKing API | 每月 12 号 | `/api/clan/league-stats` |
@@ -117,14 +119,19 @@
 `scripts/backfill_cwl_live.py --period YYYY-MM` 先做只读完整性校验，备份数据库后再加
 `--apply` 一次性回填。历史来源、校验边界和限制见 `docs/19-cwl-live-dashboard.md`。
 
-#### `coc_sync` — 部落成员档案（`accounts`）
+#### `coc_sync` — 部落成员与官方资料（`accounts`、`clan_profile_cache`）
 
 | 项 | 内容 |
 |----|------|
-| 入口 | `cli.py coc-sync` → `modules/coc_sync/service.py::CocSyncService.sync_clans()` |
-| 数据源 | Supercell 官方 COC API `/clans/{tag}/members` |
-| 建议频率 | 每天（`interval_min=360`，即每 6 小时兜底一次） |
-| 逻辑 | 遍历联盟部落拉成员 → 写 `accounts` → 退部对账（标记 `membership_status=left`） |
+| 入口 | `scripts/scheduler.py::_run_coc_sync()` |
+| 数据源 | Supercell 官方 COC API `/clans/{tag}/members` 与 `/clans/{tag}` |
+| 建议频率 | `interval_min=360`，即每 6 小时一次 |
+| 逻辑 | 遍历联盟部落拉成员 → 写 `accounts` → 退部对账；再拉官方部落资料 → 写 `clan_profile_cache`，失败保留上次成功值 |
+
+COC API Key 按请求出口 IP 校验。生产 `sky-scheduler.service` 保持直连，不设置
+`HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY`。手工读取或补同步时，若当前 Shell 存在代理环境变量，
+应仅对该次命令使用 `env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY` 及对应小写变量直连；
+不要修改或打印 `COC_API_TOKEN`。
 
 #### `farm_stats` — 互刷部落大本配置（`farm_stats`）
 
@@ -258,7 +265,7 @@ CREATE TABLE IF NOT EXISTS sync_jobs (
 | job_id | job_name | interval_min | 说明 |
 |--------|----------|-------------|------|
 | `farm_stats` | 互刷部落统计 | 30 | 拉 8 个互刷部落成员+战争，计算 TH 分布 |
-| `coc_sync` | COC 玩家档案 | 360 | 同步联盟成员到 `accounts`（每天 6 小时一次） |
+| `coc_sync` | COC 玩家与部落资料 | 360 | 同步联盟成员到 `accounts`，并更新 `clan_profile_cache`（每 6 小时一次） |
 | `war_results` | 普通部落战战绩 | 1440 | 拉取战营 `#2QQ` 部落战，写 `war_results` |
 | `cwl` | CWL 联赛战绩 | 1440 | 每天触发，`day==12` 才真正拉当月 CWL |
 

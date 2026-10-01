@@ -183,6 +183,19 @@ CREATE TABLE IF NOT EXISTS current_war_cache (
 );
 """
 
+_CLAN_PROFILE_CACHE_DDL = """
+CREATE TABLE IF NOT EXISTS clan_profile_cache (
+    clan_tag     TEXT PRIMARY KEY,
+    clan_name    TEXT NOT NULL,
+    category     TEXT NOT NULL,
+    status       TEXT NOT NULL,
+    data_json    TEXT,
+    error        TEXT,
+    updated_at   TEXT,
+    attempted_at TEXT NOT NULL
+);
+"""
+
 _CWL_LIVE_GROUP_CACHE_DDL = """
 CREATE TABLE IF NOT EXISTS cwl_live_group_cache (
     period        TEXT NOT NULL,
@@ -244,6 +257,7 @@ _CHILDREN_DDL = (
     + _WAR_RESULTS_DDL
     + _FARM_STATS_DDL
     + _CURRENT_WAR_CACHE_DDL
+    + _CLAN_PROFILE_CACHE_DDL
     + _CWL_LIVE_GROUP_CACHE_DDL
     + _CWL_LIVE_WAR_CACHE_DDL
     + _SYNC_JOBS_DDL
@@ -366,6 +380,11 @@ class Database:
                     "ALTER TABLE current_war_cache ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0"
                 )
 
+        # clan_profile_cache 表迁移（自有部落官方资料缓存）
+        cp_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(clan_profile_cache)")}
+        if not cp_cols:
+            self.conn.execute(_CLAN_PROFILE_CACHE_DDL)
+
         # CWL 实时联赛组与逐场战争缓存
         cwl_group_cols = {
             row[1] for row in self.conn.execute("PRAGMA table_info(cwl_live_group_cache)")
@@ -445,6 +464,7 @@ class Database:
         self.conn.execute("PRAGMA foreign_keys = OFF")
         for table in (
             "cwl_live_war_cache", "cwl_live_group_cache", "current_war_cache",
+            "clan_profile_cache",
             "war_results", "league_results", "league_teams", "results",
             "registrations", "accounts", "sync_jobs",
         ):

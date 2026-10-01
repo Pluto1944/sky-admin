@@ -3,6 +3,7 @@
 当前提供：
 - GET /api/ping            健康检查
 - GET /api/members          成员列表（读取 accounts 表）
+- GET /api/clan/overview    自有部落概览（读取 accounts 缓存）
 - GET /api/clan/league-stats  联赛战绩统计（滚动窗口三星率）
 - POST /api/wechat/login    微信登录
 - GET /api/wechat/me        当前用户信息
@@ -74,6 +75,152 @@ def list_members(repo: PlayerRepository = Depends(get_repo)):
 
 def _enabled_clans() -> list[dict]:
     return [clan for clan in CLANS if clan.get("enabled", True)]
+
+
+def _safe_coc_raw(value: str | None) -> dict:
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+        return parsed if isinstance(parsed, dict) else {}
+    except (TypeError, json.JSONDecodeError):
+        return {}
+
+
+def _safe_number(value) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _clan_overview_items(db: Database) -> list[dict]:
+    """从本地 accounts 快照聚合自有部落概览。
+
+    请求路径不访问 COC API；每个配置部落始终占一个固定顺序的卡片，
+    即使尚未同步到成员数据，也返回空聚合而不影响其他部落。
+    """
+    rows = db.conn.execute(
+        """SELECT account_name, town_hall_level, trophies, clan_tag, clan_role,
+                  coc_raw, last_synced_at
+           FROM accounts
+           WHERE membership_status = 'member'"""
+    ).fetchall()
+    grouped: dict[str, list] = defaultdict(list)
+    for row in rows:
+        tag = normalize_tag(row["clan_tag"])
+        if tag:
+            grouped[tag].append(row)
+
+    result = []
+    for order, configured in enumerate(_enabled_clans()):
+        tag = normalize_tag(configured["tag"])
+        members = grouped.get(tag, [])
+        town_halls: dict[int, int] = defaultdict(int)
+        roles: dict[str, int] = defaultdict(int)
+        leaders = []
+        total_donations = 0
+        total_received = 0
+        synced_at = []
+        town_hall_total = 0
+        trophies_total = 0
+        trophies_count = 0
+
+        for member in members:
+            town_hall = _safe_number(member["town_hall_level"])
+            if town_hall > 0:
+                town_halls[town_hall] += 1
+                town_hall_total += town_hall
+            trophies = _safe_number(member["trophies"])
+            if trophies > 0:
+                trophies_total += trophies
+                trophies_count += 1
+            role = member["clan_role"] or "member"
+            roles[role] += 1
+            if role == "leader" and member["account_name"]:
+                leaders.append(member["account_name"])
+            raw = _safe_coc_raw(member["coc_raw"])
+            total_donations += _safe_number(raw.get("donations"))
+            total_received += _safe_number(raw.get("donationsReceived"))
+            if member["last_synced_at"]:
+                synced_at.append(member["last_synced_at"])
+
+        member_count = len(members)
+        town_hall_count = sum(town_halls.values())
+        result.append({
+            "clan_tag": tag,
+            "clan_name": configured.get("name") or configured["tag"],
+            "category": configured.get("category", "normal"),
+            "category_label": CLAN_CATEGORY_LABELS.get(
+                configured.get("category", "normal"),
+                configured.get("category", "normal"),
+            ),
+            "config_order": order,
+            "member_count": member_count,
+            "capacity": 50,
+            "leader_name": " / ".join(leaders) if leaders else None,
+            "average_town_hall": round(town_hall_total / town_hall_count, 1) if town_hall_count else 0,
+            "average_trophies": round(trophies_total / trophies_count) if trophies_count else 0,
+            "total_donations": total_donations,
+            "total_donations_received": total_received,
+            "average_donations": round(total_donations / member_count, 1) if member_count else 0,
+            "town_hall_distribution": [
+                {"level": level, "count": town_halls[level]}
+                for level in sorted(town_halls, reverse=True)
+            ],
+            "role_distribution": {
+                role: roles[role]
+                for role in ("leader", "coLeader", "admin", "member")
+                if roles[role]
+            },
+            "updated_at": max(synced_at) if synced_at else None,
+        })
+    return result
+
+
+@router.get("/clan/overview")
+def clan_overview(db: Database = Depends(get_db)):
+    """返回全部已启用自有部落的轻量概览卡片。"""
+    details = _clan_overview_items(db)
+    summary_fields = (
+        "clan_tag", "clan_name", "category", "category_label", "config_order",
+        "member_count", "capacity", "leader_name", "average_town_hall", "average_trophies",
+        "total_donations", "updated_at",
+    )
+    clans = [{key: item[key] for key in summary_fields} for item in details]
+    updated = [item["updated_at"] for item in clans if item["updated_at"]]
+    return {
+        "updated_at": max(updated) if updated else None,
+        "clans": clans,
+    }
+
+
+@router.get("/clan/overview/{clan_tag}")
+def clan_overview_detail(clan_tag: str, db: Database = Depends(get_db)):
+    """返回单个已启用自有部落的聚合详情。"""
+    normalized = normalize_tag(clan_tag)
+    item = next(
+        (item for item in _clan_overview_items(db) if item["clan_tag"] == normalized),
+        None,
+    )
+    if item is None:
+        raise HTTPException(status_code=404, detail="部落不在允许查询的自有部落列表中")
+    profile_row = db.conn.execute(
+        """SELECT status, data_json, updated_at
+           FROM clan_profile_cache WHERE clan_tag = ?""",
+        (normalized,),
+    ).fetchone()
+    profile = None
+    if profile_row and profile_row["data_json"]:
+        try:
+            loaded = json.loads(profile_row["data_json"])
+            profile = loaded if isinstance(loaded, dict) else None
+        except (TypeError, json.JSONDecodeError):
+            profile = None
+    item["profile"] = profile
+    item["profile_status"] = profile_row["status"] if profile_row else "pending"
+    item["profile_updated_at"] = profile_row["updated_at"] if profile_row else None
+    return item
 
 
 def _pending_current_war(clan: dict) -> dict:

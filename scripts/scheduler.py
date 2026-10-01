@@ -469,8 +469,71 @@ def _run_cwl_live(force: bool = False, now: datetime | None = None) -> dict:
     }
 
 
+def _sync_clan_profiles(db: Database, service) -> dict:
+    """同步已启用自有部落官方资料，失败时保留上次成功缓存。"""
+    profiles = service.fetch_clan_profiles()
+    success = 0
+    failed = 0
+    for result in profiles:
+        if result["status"] == "success":
+            profile = result["data"]
+            db.conn.execute(
+                """INSERT INTO clan_profile_cache
+                   (clan_tag, clan_name, category, status, data_json, error,
+                    updated_at, attempted_at)
+                   VALUES (?, ?, ?, 'success', ?, NULL, ?, ?)
+                   ON CONFLICT(clan_tag) DO UPDATE SET
+                       clan_name = excluded.clan_name,
+                       category = excluded.category,
+                       status = 'success',
+                       data_json = excluded.data_json,
+                       error = NULL,
+                       updated_at = excluded.updated_at,
+                       attempted_at = excluded.attempted_at""",
+                (
+                    profile["clan_tag"], profile["name"], profile["category"],
+                    json.dumps(profile, ensure_ascii=False), profile["synced_at"],
+                    result["attempted_at"],
+                ),
+            )
+            success += 1
+            continue
+
+        existing = db.conn.execute(
+            "SELECT data_json FROM clan_profile_cache WHERE clan_tag = ?",
+            (result["clan_tag"],),
+        ).fetchone()
+        if existing and existing["data_json"]:
+            db.conn.execute(
+                """UPDATE clan_profile_cache
+                   SET status = 'stale', error = ?, attempted_at = ?
+                   WHERE clan_tag = ?""",
+                (result["error"], result["attempted_at"], result["clan_tag"]),
+            )
+        else:
+            db.conn.execute(
+                """INSERT INTO clan_profile_cache
+                   (clan_tag, clan_name, category, status, data_json, error,
+                    updated_at, attempted_at)
+                   VALUES (?, ?, ?, 'error', NULL, ?, NULL, ?)
+                   ON CONFLICT(clan_tag) DO UPDATE SET
+                       clan_name = excluded.clan_name,
+                       category = excluded.category,
+                       status = 'error',
+                       error = excluded.error,
+                       attempted_at = excluded.attempted_at""",
+                (
+                    result["clan_tag"], result["clan_name"], result["category"],
+                    result["error"], result["attempted_at"],
+                ),
+            )
+        failed += 1
+    db.conn.commit()
+    return {"success": success, "failed": failed}
+
+
 def _run_coc_sync() -> dict:
-    """同步联盟部落成员到 accounts 表。"""
+    """同步联盟部落成员和部落官方资料。"""
     from modules.coc_sync.service import CocSyncService
     from modules.player.repository import PlayerRepository
     from modules.player.service import PlayerService
@@ -480,14 +543,19 @@ def _run_coc_sync() -> dict:
     player_service = PlayerService(PlayerRepository(db.conn))
     svc = CocSyncService(player_service)
     stats = svc.sync_clans()
+    profile_stats = _sync_clan_profiles(db, svc)
     db.close()
 
     reason = (
         f"部落 {stats['clans']}，成员 {stats['members']}，"
-        f"新增 {stats['created']}，更新 {stats['updated']}，退部 {stats['left']}"
+        f"新增 {stats['created']}，更新 {stats['updated']}，退部 {stats['left']}，"
+        f"部落资料 {profile_stats['success']}/{profile_stats['success'] + profile_stats['failed']}"
     )
-    if stats["failed_clans"]:
-        return {"status": "failed", "reason": reason + f"，失败部落 {stats['failed_clans']}"}
+    if stats["failed_clans"] or profile_stats["failed"]:
+        suffix = f"，成员失败部落 {stats['failed_clans']}" if stats["failed_clans"] else ""
+        if profile_stats["failed"]:
+            suffix += f"，资料失败 {profile_stats['failed']} 个"
+        return {"status": "failed", "reason": reason + suffix}
     return {"status": "success", "reason": reason}
 
 

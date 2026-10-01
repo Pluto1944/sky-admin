@@ -113,7 +113,20 @@ GET /api/members
 
 ---
 
-### 2.1 当前部落战汇总
+### 2.1 自有部落概览
+
+```
+GET /api/clan/overview
+GET /api/clan/overview/{clan_tag}
+```
+
+无需认证。汇总接口按 `config/settings.yaml` 中已启用部落的顺序返回卡片，包含类别、成员数、平均大本、人均奖杯、首领、当前赛季捐兵和最后同步时间。单部落详情额外返回大本分布、职位分布、捐出/收到/人均捐兵，以及 `profile`、`profile_status`、`profile_updated_at`。
+
+两个接口只读本地缓存，不在 HTTP 请求中调用 COC API。成员聚合来自 `accounts` 中 `membership_status = 'member'` 的当前快照，捐兵数从 `coc_raw` 读取；官方资料来自 `clan_profile_cache`，包含徽章、等级、加入方式、战争胜平负/连胜、战争与都城联赛、三类积分、地区、开战频率、加入门槛、官方标签和描述。资料同步失败但有旧缓存时 `profile_status=stale`。
+
+`clan_profile_cache` 跟随 `coc_sync` 每 6 小时刷新。未同步的配置部落仍返回空卡片，不影响其他部落；详情标签不属于已启用自有部落时返回 `404`。
+
+### 2.2 当前部落战汇总
 
 ```
 GET /api/clan/current-wars
@@ -123,7 +136,7 @@ GET /api/clan/current-wars
 
 每个部落的 `status` 为 `preparation`、`in_war`、`war_ended`、`cwl`、`not_in_war`、`sync_pending` 或 `error`。汇总响应不包含成员宽表 `rows`。
 
-### 2.2 单个部落当前战争详情
+### 2.3 单个部落当前战争详情
 
 ```
 GET /api/clan/current-wars/{clan_tag}
@@ -133,7 +146,7 @@ GET /api/clan/current-wars/{clan_tag}
 
 这两个接口的数据由调度器 `current_wars` 每 2 分钟检查：战斗日每 2 分钟，准备日通常每 30 分钟且开战前 30 分钟内提升为每 2 分钟，无战争 / 已结束每 5 分钟，CWL 跳转状态每 30 分钟从 COC 刷新；小程序停留在页面时每 1 分钟读取一次缓存。完整设计见 [18-current-war-dashboard.md](18-current-war-dashboard.md)。
 
-### 2.3 CWL 参赛部落汇总
+### 2.4 CWL 参赛部落汇总
 
 ```
 GET /api/clan/cwl-live?period=YYYY-MM
@@ -141,7 +154,7 @@ GET /api/clan/cwl-live?period=YYYY-MM
 
 无需认证。`period` 可选，默认北京时间当前月份。部落范围只读当月 `league_teams` 中的 `combat` 和 `shell` 队伍，返回队伍类别、轮次、排名、胜负、星数、摧毁率、缓存状态和更新时间。
 
-### 2.4 单个 CWL 部落详情
+### 2.5 单个 CWL 部落详情
 
 ```
 GET /api/clan/cwl-live/{clan_tag}?period=YYYY-MM&round=4

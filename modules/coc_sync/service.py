@@ -16,6 +16,7 @@ import sys
 from datetime import datetime, timezone
 
 import config
+from modules.coc_sync.clan_profile import normalize_clan_profile
 from modules.coc_sync.current_war import failed_current_war, normalize_current_war
 from modules.coc_sync.cwl_live import normalize_cwl_group, normalize_cwl_war
 from modules.coc_sync.official.api_client import CocApiClient, CocApiError
@@ -59,6 +60,36 @@ class CocSyncService:
             "members": raw.get("members"),
             "league_level": (raw.get("warLeague") or {}).get("name", ""),
         }
+
+    def fetch_clan_profiles(self, clans: list | None = None) -> list[dict]:
+        """拉取多个自有部落的完整概要，逐部落隔离失败。"""
+        clan_list = self._resolve_clans(clans)
+        synced_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        result = []
+        for clan in clan_list:
+            try:
+                raw = self.api_client.get_clan(clan["tag"])
+                result.append({
+                    "status": "success",
+                    "data": normalize_clan_profile(raw, clan, synced_at),
+                    "error": None,
+                    "attempted_at": synced_at,
+                })
+            except Exception as exc:  # noqa: BLE001 - 单部落失败不得中断其他部落
+                print(
+                    f"[warn] 部落 {clan.get('name') or clan['tag']} 官方资料同步失败：{exc}",
+                    file=sys.stderr,
+                )
+                result.append({
+                    "status": "error",
+                    "clan_tag": normalize_tag(clan["tag"]),
+                    "clan_name": clan.get("name") or clan["tag"],
+                    "category": clan.get("category", "normal"),
+                    "data": None,
+                    "error": str(exc),
+                    "attempted_at": synced_at,
+                })
+        return result
 
     def fetch_current_wars(self, clans: list | None = None) -> list[dict]:
         """拉取并标准化多个自有部落的当前战争，逐部落隔离失败。"""

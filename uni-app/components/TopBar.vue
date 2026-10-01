@@ -10,6 +10,7 @@
           v-for="btn in buttons"
           :key="btn.key"
           class="top-btn"
+          :class="{ active: btn.active }"
           @tap="$emit(btn.action, btn.key)"
         >{{ btn.icon }}{{ btn.text || '' }}</text>
       </view>
@@ -115,5 +116,12 @@ export default {
 
 .top-btn:active {
   background: rgba(255, 255, 255, 0.1);
+}
+
+.top-btn.active {
+  color: #5fa8ff;
+  background: rgba(74, 144, 217, 0.16);
+  border-radius: 10rpx;
+  font-weight: 600;
 }
 </style>

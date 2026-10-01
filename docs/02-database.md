@@ -7,7 +7,7 @@
 
 ## 一、数据库概览
 
-系统当前包含 **12 张业务与运行状态表**：
+系统当前包含 **13 张业务与运行状态表**：
 
 | 表名 | 职责 | 主键 | 状态 |
 |------|------|------|------|
@@ -19,12 +19,15 @@
 | `war_results` | 普通部落战历史统计 | `id` (自增) | 活跃 |
 | `farm_stats` | 互刷部落统计缓存 | `clan_tag` | 活跃 |
 | `current_war_cache` | 自有部落当前战争缓存 | `clan_tag` | 活跃 |
+| `clan_profile_cache` | 自有部落官方资料缓存 | `clan_tag` | 活跃 |
 | `cwl_live_group_cache` | 当月 CWL 联赛组缓存 | `(period, clan_tag)` | 活跃 |
 | `cwl_live_war_cache` | CWL 单场战争缓存 | `war_tag` | 活跃 |
 | `wechat_users` | 微信用户和游戏账号绑定 | `openid` | 活跃 |
 | `sync_jobs` | 周期调度任务状态 | `job_id` | 活跃 |
 
 `current_war_cache` 每个已启用自有部落一行，保存标准化后的当前战争 JSON、状态、错误、同步时间、最近尝试时间和连续失败次数。`current_wars` 调度任务每 2 分钟检查一次：战斗日每 2 分钟，准备日通常每 30 分钟且开战前 30 分钟内提升为每 2 分钟，无战争 / 已结束每 5 分钟，CWL 跳转状态每 30 分钟调用 COC；失败按 5～30 分钟退避。API 只读缓存，不在页面请求中直接调用 COC。
+
+`clan_profile_cache` 每个已启用自有部落一行，保存 `/clans/{tag}` 规范化后的徽章、等级、战争战绩、联赛、三类积分、地区、标签、门槛和描述。跟随 `coc_sync` 每 6 小时更新；单部落失败时保留上次成功 JSON 并标记 `stale`。
 
 `cwl_live_group_cache` 以当月 `league_teams` 为部落范围，保存官方联赛组和轮次 warTag；`cwl_live_war_cache` 以 `war_tag` 去重保存完整逐场攻防数据。两表由 `cwl_live` 增量更新，页面 API 只读缓存。已结束战争不再重复拉取。
 
@@ -247,7 +250,7 @@ CREATE TABLE league_results (
 
 | 表 | 写入者 | 读取者 |
 |----|--------|--------|
-| `accounts` | `coc_sync`, `war_result`, `cwl_registration` | `player-export`, `import-reg`, `arrange`, `fetch_cwl_data` |
+| `accounts` | `coc_sync`, `war_result`, `cwl_registration` | `player-export`, `import-reg`, `arrange`, `fetch_cwl_data`, `api_server`（members 与 clan overview） |
 | `registrations` | `import-reg`, `arrange`（回写） | `arrange`, `refresh_status` |
 | `league_teams` | `arrange`（幂等写入） | `arrange`（读上月配置+team_name） |
 | `league_results` | `fetch_cwl_data` | `arrange`（读星数+队伍归属） |
@@ -255,6 +258,7 @@ CREATE TABLE league_results (
 | `war_results` | `fetch_war_data` | `api_server`（war-stats） |
 | `farm_stats` | `scheduler.py`（farm_stats） | `api_server`（farm-config） |
 | `current_war_cache` | `scheduler.py`（current_wars） | `api_server`（current-wars 汇总/详情） |
+| `clan_profile_cache` | `scheduler.py`（coc_sync） | `api_server`（clan overview 详情） |
 | `cwl_live_group_cache` | `scheduler.py`（cwl_live） | `api_server`（cwl-live 汇总/详情） |
 | `cwl_live_war_cache` | `scheduler.py`（cwl_live） | `api_server`（cwl-live 详情与总览） |
 | `wechat_users` | `api_server`（登录/绑定） | `api_server` |
