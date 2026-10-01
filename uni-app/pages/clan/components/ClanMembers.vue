@@ -1,18 +1,31 @@
 <template>
   <view class="clan-members-root">
     <view class="clan-members-toolbar">
-      <text class="clan-members-tool" @tap="onFilter">⏬ 筛选</text>
-      <text class="clan-members-tool" @tap="onSearch">🔍 搜索</text>
+      <view class="clan-members-overview">
+        <view class="clan-members-overview-main">
+          <text class="clan-members-count">{{ sortedMembers.length }}</text>
+          <text class="clan-members-count-label">位成员</text>
+          <text v-if="updatedAt" class="clan-members-update">更新 {{ updatedAt }}</text>
+        </view>
+        <view class="clan-members-overview-meta">
+          <text class="clan-members-filter-summary">{{ filterSummary }}</text>
+          <text v-if="hasActiveFilters" class="clan-members-reset" @tap="clearFilters">重置</text>
+        </view>
+      </view>
+      <view class="clan-members-tools">
+        <view class="clan-members-tool" :class="{ active: activeFilterCount }" @tap="onFilter">
+          <text class="clan-members-tool-icon">⏬</text><text>筛选</text>
+          <text v-if="activeFilterCount" class="clan-members-tool-badge">{{ activeFilterCount }}</text>
+        </view>
+        <view class="clan-members-tool" :class="{ active: searchText }" @tap="onSearch">
+          <text class="clan-members-tool-icon">🔍</text><text>搜索</text>
+        </view>
+      </view>
     </view>
     <view v-if="loading" class="clan-members-state"><text>加载成员...</text></view>
     <view v-else-if="!members.length" class="clan-members-state"><text>暂无成员数据</text></view>
     <scroll-view v-else scroll-x scroll-y class="clan-members-table-scroll">
       <view class="clan-members-table-wrap">
-        <view v-if="updatedAt" class="clan-members-update">数据更新于 {{ updatedAt }}</view>
-        <view v-if="searchText || memberFilter !== 'all' || clanFilters.length" class="clan-members-summary">
-          <text>当前：{{ filterLabel }}{{ searchText ? ' · “' + searchText + '”' : '' }} · {{ sortedMembers.length }} 人</text>
-          <text class="clan-members-clear" @tap="clearFilters">清除</text>
-        </view>
         <view class="clan-members-tr clan-members-head">
           <view class="clan-members-td cm-name" @tap="onSort('account_name')">昵称{{ sortMark('account_name') }}</view><view class="clan-members-td cm-owner">归属人</view><view class="clan-members-td cm-clan" @tap="onSort('clan_tag')">部落{{ sortMark('clan_tag') }}</view><view class="clan-members-td cm-role">职位</view><view class="clan-members-td cm-th" @tap="onSort('town_hall_level')">本{{ sortMark('town_hall_level') }}</view><view class="clan-members-td cm-exp" @tap="onSort('exp_level')">经验{{ sortMark('exp_level') }}</view><view class="clan-members-td cm-trophy" @tap="onSort('trophies')">奖杯{{ sortMark('trophies') }}</view><view class="clan-members-td cm-league">联赛</view><view class="clan-members-td cm-score" @tap="onSort('history_score')">历史分{{ sortMark('history_score') }}</view><view class="clan-members-td cm-status">报名状态</view><view class="clan-members-td cm-member">成员状态</view><view class="clan-members-td cm-reg">最近报名</view><view class="clan-members-td cm-sync">最近同步</view>
         </view>
@@ -63,10 +76,22 @@ export default {
   computed: {
     memberFilterOptions() { return [{ key: 'all', label: '全部成员' }, { key: 'member', label: '仅在部落' }, { key: 'left', label: '已离开' }] },
     clanOptions() { return this.allowedClans },
-    filterLabel() {
+    activeFilterCount() {
+      return (this.memberFilter !== 'all' ? 1 : 0) + this.clanFilters.length
+    },
+    hasActiveFilters() {
+      return Boolean(this.searchText || this.activeFilterCount)
+    },
+    filterSummary() {
       const labels = []
       if (this.memberFilter !== 'all') labels.push(({ member: '仅在部落', left: '已离开' }[this.memberFilter] || '全部成员'))
-      if (this.clanFilters.length) labels.push(`部落 ${this.clanFilters.length}个`)
+      if (this.clanFilters.length === 1) {
+        const clan = this.clanOptions.find(item => item.tag === this.clanFilters[0])
+        labels.push(clan ? clan.name : this.clanFilters[0])
+      } else if (this.clanFilters.length > 1) {
+        labels.push(`${this.clanFilters.length}个部落`)
+      }
+      if (this.searchText) labels.push(`“${this.searchText}”`)
       return labels.length ? labels.join(' · ') : '全部成员'
     },
     sortedMembers() {
@@ -152,14 +177,23 @@ export default {
 
 <style>
 .clan-members-root { flex: 1; min-height: 0; display: flex; flex-direction: column; background: #0f0f23; }
-.clan-members-toolbar { display: flex; flex-shrink: 0; justify-content: flex-end; min-height: 72rpx; align-items: center; padding: 0 18rpx; background: #141428; border-bottom: 1rpx solid #252540; }
-.clan-members-tool { margin-left: 12rpx; padding: 12rpx 18rpx; color: #aab4c8; background: #1d1d35; border-radius: 10rpx; font-size: 25rpx; }
+.clan-members-toolbar { display: flex; flex-shrink: 0; align-items: center; min-height: 112rpx; padding: 12rpx 18rpx; box-sizing: border-box; background: #141428; border-bottom: 1rpx solid #252540; }
+.clan-members-overview { min-width: 0; flex: 1; }
+.clan-members-overview-main { display: flex; align-items: baseline; min-width: 0; white-space: nowrap; }
+.clan-members-count { color: #5fa8ff; font-size: 34rpx; font-weight: 700; }
+.clan-members-count-label { margin-left: 6rpx; color: #d0d0dc; font-size: 25rpx; font-weight: 600; }
+.clan-members-update { min-width: 0; margin-left: 14rpx; overflow: hidden; color: #596178; font-size: 20rpx; text-overflow: ellipsis; white-space: nowrap; }
+.clan-members-overview-meta { display: flex; align-items: center; min-width: 0; margin-top: 6rpx; }
+.clan-members-filter-summary { min-width: 0; overflow: hidden; color: #7d859d; font-size: 22rpx; text-overflow: ellipsis; white-space: nowrap; }
+.clan-members-reset { flex-shrink: 0; margin-left: 10rpx; padding: 6rpx 4rpx; color: #5fa8ff; font-size: 21rpx; }
+.clan-members-tools { display: flex; flex-shrink: 0; align-items: center; margin-left: 14rpx; }
+.clan-members-tool { position: relative; display: flex; align-items: center; justify-content: center; min-width: 112rpx; min-height: 80rpx; margin-left: 10rpx; padding: 0 14rpx; box-sizing: border-box; color: #aab4c8; background: #1d1d35; border: 1rpx solid #292947; border-radius: 12rpx; font-size: 24rpx; }
+.clan-members-tool.active { color: #73b6ff; background: #1c2c4f; border-color: #315386; }
+.clan-members-tool-icon { margin-right: 6rpx; font-size: 25rpx; }
+.clan-members-tool-badge { position: absolute; top: -9rpx; right: -7rpx; display: flex; align-items: center; justify-content: center; min-width: 32rpx; height: 32rpx; padding: 0 5rpx; box-sizing: border-box; color: #fff; background: #4a90d9; border: 3rpx solid #141428; border-radius: 18rpx; font-size: 18rpx; font-weight: 700; }
 .clan-members-state { flex: 1; display: flex; align-items: center; justify-content: center; color: #8890a0; font-size: 28rpx; }
 .clan-members-table-scroll { flex: 1; min-height: 0; width: 100%; }
 .clan-members-table-wrap { width: 1570rpx; padding-bottom: 100rpx; }
-.clan-members-update { padding: 12rpx 0 8rpx; color: #66708a; font-size: 22rpx; text-align: center; }
-.clan-members-summary { height: 56rpx; display: flex; align-items: center; justify-content: center; color: #9aa0b0; font-size: 22rpx; background: #15152a; }
-.clan-members-clear { color: #5fa8ff; margin-left: 18rpx; padding: 8rpx; }
 .clan-members-tr { display: flex; flex-direction: row; width: 1570rpx; height: 72rpx; align-items: center; border-bottom: 2rpx solid #33334d; }
 .clan-members-head { height: 88rpx; background: #262644; border-top: 2rpx solid #4a4a70; }
 .clan-members-even { background: #19192f; }
