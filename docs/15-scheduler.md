@@ -71,8 +71,8 @@
 | `current_war_cache` | `current_wars` | `api_server`（current-wars） |
 | `war_history_cache` | `current_wars` / 手工回填 | `api_server`（war-history） |
 | `clan_profile_cache` | `coc_sync` | `api_server`（clan overview 详情） |
-| `cwl_live_group_cache` | `cwl_live` | `api_server`（cwl-live） |
-| `cwl_live_war_cache` | `cwl_live` | `api_server`（cwl-live） |
+| `cwl_live_group_cache` | `cwl_live` | `api_server`（cwl-live、cwl-check-in） |
+| `cwl_live_war_cache` | `cwl_live` | `api_server`（cwl-live、cwl-check-in） |
 | `sync_jobs` | `scheduler.py` | `scheduler.py`（`--list`） |
 
 ### 2.3 需要周期性执行的任务（7 类）
@@ -80,7 +80,7 @@
 | job_id | 数据表 | 脚本 | 数据源 | 频率 | 前端接口 |
 |--------|--------|------|--------|------|----------|
 | `current_wars` | `current_war_cache` + `war_history_cache` | `scheduler.py` | COC 官方 API | 每 2 分钟检查，按状态和开战时间限频 | `/api/clan/current-wars`、`/api/clan/war-history` |
-| `cwl_live` | `cwl_live_group_cache` + `cwl_live_war_cache` | `scheduler.py` | COC 官方 API | 活跃期每 2 分钟 | `/api/clan/cwl-live` |
+| `cwl_live` | `cwl_live_group_cache` + `cwl_live_war_cache` | `scheduler.py` | COC 官方 API | 活跃期每 2 分钟 | `/api/clan/cwl-live`、`/api/clan/cwl-check-in` |
 | `coc_sync` | `accounts`、`clan_profile_cache` | `CocSyncService` | COC 官方 API | 每 6 小时 | `/api/members`、`/api/clan/overview/{tag}` |
 | `farm_stats` | `farm_stats` | `sync_farm_stats.py` | COC 官方 API | 每 30 分钟 | `/api/clan/farm-config` |
 | `war_results` | `war_results` | `fetch_war_data.py` | ClashKing API | 每天 | `/api/clan/war-stats` |

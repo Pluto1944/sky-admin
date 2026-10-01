@@ -118,7 +118,7 @@
       </scroll-view>
     </view>
 
-    <view v-else class="war-pane">
+    <view v-else-if="activeTopTab === 'league'" class="war-pane">
       <view class="war-toolbar">
         <view class="toolbar-title-wrap">
           <text class="toolbar-title">联赛参赛部落</text>
@@ -182,6 +182,8 @@
       </scroll-view>
     </view>
 
+    <CwlCheckIn v-else ref="checkIn" :initial-view="checkInView" @view-change="onCheckInViewChange" />
+
     <view v-if="filterVisible" class="filter-mask" @tap="closeFilter">
       <view class="filter-panel" @tap.stop>
         <view class="filter-title">{{ warView === 'history' ? '筛选最近部落战' : '筛选当前部落战' }}</view>
@@ -215,6 +217,7 @@
 
 <script>
 import TopBar from '@/components/TopBar.vue'
+import CwlCheckIn from './check-in.vue'
 import { getCurrentWars, getWarHistory, getCwlLive } from '@/utils/api.js'
 
 const CACHE_REFRESH_INTERVAL_MS = 60 * 1000
@@ -226,10 +229,11 @@ function currentBusinessPeriod() {
 }
 
 export default {
-  components: { TopBar },
+  components: { TopBar, CwlCheckIn },
   data() {
     return {
       activeTopTab: 'clan-war',
+      checkInView: 'attack',
       warView: 'current',
       selectedHistoryClanTag: '',
       loading: true,
@@ -277,7 +281,8 @@ export default {
     topButtons() {
       return [
         { key: 'clan-war', icon: '⚔️', text: '部落战', action: 'onTopTab', active: this.activeTopTab === 'clan-war' },
-        { key: 'league', icon: '🏆', text: '联赛数据', action: 'onTopTab', active: this.activeTopTab === 'league' }
+        { key: 'league', icon: '🏆', text: '联赛数据', action: 'onTopTab', active: this.activeTopTab === 'league' },
+        { key: 'check-in', icon: '📋', text: '联赛点名', action: 'onTopTab', active: this.activeTopTab === 'check-in' }
       ]
     },
     filteredClans() {
@@ -336,28 +341,37 @@ export default {
     isCurrentLeaguePeriod() { return !this.leaguePeriod || this.leaguePeriod === currentBusinessPeriod() }
   },
   onLoad(options) {
-    if (options && options.tab === 'league') this.activeTopTab = 'league'
+    if (options && ['league', 'check-in'].indexOf(options.tab) >= 0) this.activeTopTab = options.tab
+    if (options && options.check_in_view === 'arrival') this.checkInView = 'arrival'
     if (options && options.view === 'history') {
       this.warView = 'history'
       try { this.selectedHistoryClanTag = decodeURIComponent(options.clan_tag || '') } catch (e) { this.selectedHistoryClanTag = options.clan_tag || '' }
     }
     if (options && options.period) this.leaguePeriod = options.period
     if (this.activeTopTab === 'league') this.fetchCwlLive(this.leaguePeriod)
+    else if (this.activeTopTab === 'check-in') return
     else if (this.warView === 'history') this.fetchWarHistory()
     else this.fetchCurrentWars()
   },
   onShow() {
     const storedTab = uni.getStorageSync('war_active_top_tab')
-    if (storedTab === 'league') {
-      this.activeTopTab = 'league'
+    if (['clan-war', 'league', 'check-in'].indexOf(storedTab) >= 0) {
+      this.activeTopTab = storedTab
       uni.removeStorageSync('war_active_top_tab')
     }
     this.startTimers()
+    if (this.activeTopTab === 'check-in') this.$nextTick(() => { if (this.$refs.checkIn) this.$refs.checkIn.startTimers() })
     if (this.activeTopTab === 'league' && this.leagueClans.length && this.isCurrentLeaguePeriod) this.fetchCwlLive(this.leaguePeriod)
     else if (this.activeTopTab === 'clan-war' && this.warView === 'current' && this.clans.length) this.fetchCurrentWars()
   },
-  onHide() { this.stopTimers() },
-  onUnload() { this.stopTimers() },
+  onHide() {
+    this.stopTimers()
+    if (this.$refs.checkIn) this.$refs.checkIn.stopTimers()
+  },
+  onUnload() {
+    this.stopTimers()
+    if (this.$refs.checkIn) this.$refs.checkIn.stopTimers()
+  },
   onShareAppMessage(options) {
     const dataset = options && options.target && options.target.dataset
     if (dataset && dataset.shareType === 'cwl' && dataset.clanTag) {
@@ -370,11 +384,13 @@ export default {
       return { title: `苍穹联赛助手｜${dataset.clanName || '当前部落战'}`, path: `/pages/war/current-detail?clan_tag=${encodeURIComponent(dataset.clanTag)}` }
     }
     if (this.activeTopTab === 'league') return { title: `苍穹联赛助手｜${this.leaguePeriodLabel}联赛`, path: `/pages/war/war?tab=league&period=${encodeURIComponent(this.leaguePeriod)}` }
+    if (this.activeTopTab === 'check-in') return { title: '苍穹联赛助手｜联赛点名', path: `/pages/war/war?tab=check-in&check_in_view=${this.checkInView}` }
     if (this.warView === 'history') return { title: `苍穹联赛助手｜${this.selectedHistoryClan ? this.selectedHistoryClan.clan_name : '历史部落战'}`, path: `/pages/war/war?view=history&clan_tag=${encodeURIComponent(this.selectedHistoryClanTag)}` }
     return { title: '苍穹联赛助手｜当前部落战', path: '/pages/war/war' }
   },
   onShareTimeline() {
     if (this.activeTopTab === 'league') return { title: `苍穹联赛助手｜${this.leaguePeriodLabel}联赛`, query: `tab=league&period=${encodeURIComponent(this.leaguePeriod)}` }
+    if (this.activeTopTab === 'check-in') return { title: '苍穹联赛助手｜联赛点名', query: `tab=check-in&check_in_view=${this.checkInView}` }
     return { title: this.warView === 'history' ? `苍穹联赛助手｜${this.selectedHistoryClan ? this.selectedHistoryClan.clan_name : '历史部落战'}` : '苍穹联赛助手｜当前部落战', query: this.warView === 'history' ? `view=history&clan_tag=${encodeURIComponent(this.selectedHistoryClanTag)}` : '' }
   },
   methods: {
@@ -385,6 +401,7 @@ export default {
       if (tab === 'clan-war' && this.warView === 'history' && !this.historyWars.length) this.fetchWarHistory()
       if (tab === 'clan-war' && this.warView === 'current') this.fetchCurrentWars()
     },
+    onCheckInViewChange(view) { this.checkInView = view },
     switchWarView(option) {
       if (!option) return
       if (option.view === this.warView && (option.view !== 'history' || option.clanTag === this.selectedHistoryClanTag)) return
@@ -467,7 +484,7 @@ export default {
       this.refreshTimer = setInterval(() => {
         if (this.activeTopTab === 'league') {
           if (this.isCurrentLeaguePeriod) this.fetchCwlLive(this.leaguePeriod)
-        } else if (this.warView === 'current') this.fetchCurrentWars()
+        } else if (this.activeTopTab === 'clan-war' && this.warView === 'current') this.fetchCurrentWars()
       }, CACHE_REFRESH_INTERVAL_MS)
     },
     stopTimers() {

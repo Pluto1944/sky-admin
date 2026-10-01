@@ -65,6 +65,27 @@ def test_cwl_live_summary_and_detail_read_cache(db):
     assert detail["available_teams"][0]["clan_tag"] == "#AAA"
 
 
+def test_cwl_check_in_aggregates_active_teams_and_pending_attacks(db, monkeypatch):
+    _seed(db)
+    monkeypatch.setattr(routes, "_current_cwl_live_period", lambda: "2026-09")
+
+    result = routes.cwl_check_in(db)
+
+    assert result["period"] == "2026-09"
+    assert result["summary"] == {
+        "team_count": 1,
+        "active_team_count": 1,
+        "preparation_team_count": 0,
+        "pending_attack_count": 1,
+    }
+    assert len(result["teams"]) == 1
+    team_item = result["teams"][0]
+    assert team_item["status"] == "in_war"
+    assert team_item["round"] == 1
+    assert team_item["attacked_count"] == 1
+    assert team_item["pending_members"][0]["player_tag"] == "#A2"
+
+
 def test_cwl_live_detail_rejects_clan_outside_month_snapshot(db):
     _seed(db)
 

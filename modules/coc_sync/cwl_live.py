@@ -316,6 +316,71 @@ def build_team_rounds(group: dict, wars_by_tag: dict[str, dict], clan_tag: str) 
     return rounds
 
 
+def build_cwl_attack_reminder(group: dict, wars_by_tag: dict[str, dict]) -> dict:
+    """生成单支联赛队伍的当前战斗日提醒。
+
+    只有当前实际上阵的成员才参与“未出刀”判定；准备日和已结束
+    轮次不产生未出刀成员。
+    """
+    clan_tag = group.get("clan_tag")
+    rounds = build_team_rounds(group, wars_by_tag, clan_tag)
+    active = next((item for item in rounds if item.get("status") == "in_war"), None)
+    preparing = next((item for item in rounds if item.get("status") == "preparation"), None)
+    selected = active or preparing
+
+    if active:
+        status = "in_war"
+    elif preparing:
+        status = "preparation"
+    elif rounds and all(item.get("status") in {"war_ended", "bye"} for item in rounds):
+        status = "ended"
+    elif group.get("state") == "ended":
+        status = "ended"
+    else:
+        status = "waiting"
+
+    members = []
+    pending_members = []
+    if active:
+        members = [
+            row.get("clan_member")
+            for row in active.get("rows") or []
+            if row.get("clan_member")
+        ]
+        pending_members = [
+            {
+                "player_tag": member.get("player_tag"),
+                "name": member.get("name"),
+                "town_hall_level": member.get("town_hall_level"),
+                "position": member.get("position"),
+            }
+            for member in members
+            if not member.get("attack")
+        ]
+        pending_members.sort(key=lambda member: member.get("position") or 999)
+
+    team_size = int((selected or {}).get("team_size") or len(members) or 0)
+    return {
+        "period": group.get("period"),
+        "team_index": group.get("team_index"),
+        "team_alias": group.get("team_alias"),
+        "team_name": group.get("team_name") or group.get("team_alias") or clan_tag,
+        "clan_tag": clan_tag,
+        "category": group.get("category"),
+        "league_level": group.get("league_level"),
+        "status": status,
+        "round": (selected or {}).get("round"),
+        "opponent": (selected or {}).get("opponent"),
+        "start_time": (selected or {}).get("start_time"),
+        "end_time": (selected or {}).get("end_time"),
+        "team_size": team_size,
+        "attacked_count": len(members) - len(pending_members) if active else 0,
+        "pending_count": len(pending_members),
+        "pending_members": pending_members,
+        "updated_at": (selected or {}).get("synced_at") or group.get("synced_at"),
+    }
+
+
 def _current_round(rounds: list[dict]) -> int | None:
     for status in ("in_war", "preparation"):
         found = next((item for item in rounds if item.get("status") == status), None)

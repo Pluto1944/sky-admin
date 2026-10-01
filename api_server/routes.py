@@ -24,7 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from modules.player.repository import PlayerRepository
 from modules.coc_sync.current_war import current_war_summary
-from modules.coc_sync.cwl_live import build_cwl_dashboard, group_war_tags
+from modules.coc_sync.cwl_live import build_cwl_attack_reminder, build_cwl_dashboard, group_war_tags
 from modules.coc_sync.official.mapper import normalize_tag
 from modules.coc_sync.war_history import war_history_summary
 from .deps import get_repo, get_db
@@ -595,6 +595,65 @@ def cwl_live(period: Optional[str] = None, db: Database = Depends(get_db)):
     if not _valid_period(selected_period):
         raise HTTPException(status_code=400, detail="period 必须为 YYYY-MM")
     return _build_cwl_live_summary(db, selected_period)
+
+
+@router.get("/clan/cwl-check-in")
+def cwl_check_in(db: Database = Depends(get_db)):
+    """返回当月各联赛队伍的当前战斗日和未出刀成员。"""
+    period = _current_cwl_live_period()
+    teams = _cwl_live_teams(db, period)
+    items = []
+    updated = []
+    for team in teams:
+        clan_tag = team.get("clan_tag")
+        cache = _cwl_live_group_row(db, period, clan_tag) if clan_tag else None
+        group = _load_json((cache or {}).get("data_json"))
+        if group and group.get("season") == period:
+            item = build_cwl_attack_reminder(group, _cwl_live_wars(db, group))
+            item["error"] = (cache or {}).get("error")
+        else:
+            item = {
+                "period": period,
+                "team_index": team.get("team_index"),
+                "team_alias": team.get("team_alias"),
+                "team_name": team.get("team_name") or team.get("team_alias") or clan_tag,
+                "clan_tag": clan_tag,
+                "category": team.get("category"),
+                "league_level": team.get("league_level"),
+                "status": "error" if not clan_tag or (cache or {}).get("status") == "error" else "waiting",
+                "round": None,
+                "opponent": None,
+                "start_time": None,
+                "end_time": None,
+                "team_size": 0,
+                "attacked_count": 0,
+                "pending_count": 0,
+                "pending_members": [],
+                "updated_at": (cache or {}).get("updated_at"),
+                "error": "联赛队伍缺少部落标签" if not clan_tag else (cache or {}).get("error"),
+            }
+        if item.get("updated_at"):
+            updated.append(item["updated_at"])
+        items.append(item)
+
+    status_order = {"in_war": 0, "preparation": 1, "waiting": 2, "ended": 3, "error": 4}
+    items.sort(key=lambda item: (
+        status_order.get(item.get("status"), 9),
+        item.get("end_time") or item.get("start_time") or "99999999",
+        item.get("team_index") if item.get("team_index") is not None else 999,
+    ))
+    return {
+        "period": period,
+        "server_time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "updated_at": max(updated) if updated else None,
+        "summary": {
+            "team_count": len(items),
+            "active_team_count": sum(item["status"] == "in_war" for item in items),
+            "preparation_team_count": sum(item["status"] == "preparation" for item in items),
+            "pending_attack_count": sum(item["pending_count"] for item in items),
+        },
+        "teams": items,
+    }
 
 
 @router.get("/clan/cwl-live/{clan_tag}")

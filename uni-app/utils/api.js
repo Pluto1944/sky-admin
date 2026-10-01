@@ -160,6 +160,11 @@ export function getCwlLive(period) {
   return request(`/api/clan/cwl-live${query}`)
 }
 
+/** 获取当月各联赛队伍的当前战斗日和未出刀成员。 */
+export function getCwlCheckIn() {
+  return request('/api/clan/cwl-check-in')
+}
+
 /** 获取单个联赛部落的战斗日与联赛总览。 */
 export function getCwlLiveDetail(clanTag, period, round) {
   const query = []
@@ -183,5 +188,6 @@ export default {
   getWarHistory,
   getWarHistoryDetail,
   getCwlLive,
+  getCwlCheckIn,
   getCwlLiveDetail
 }

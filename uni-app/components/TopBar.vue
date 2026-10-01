@@ -6,13 +6,16 @@
         <text class="title">{{ title }}</text>
       </view>
       <view class="top-bar-right">
-        <text
+        <view
           v-for="btn in buttons"
           :key="btn.key"
           class="top-btn"
           :class="{ active: btn.active }"
           @tap="$emit(btn.action, btn.key)"
-        >{{ btn.icon }}{{ btn.text || '' }}</text>
+        >
+          <text v-if="btn.icon" class="top-btn-icon">{{ btn.icon }}</text>
+          <text class="top-btn-label">{{ btn.text || '' }}</text>
+        </view>
       </view>
     </view>
   </view>
@@ -100,14 +103,32 @@ export default {
 .top-bar-right {
   float: right;
   height: 88rpx;
-  line-height: 88rpx;
+  display: flex;
+  align-items: center;
 }
 
 .top-btn {
+  height: 56rpx;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: 26rpx;
   color: #c0c0c0;
   padding: 8rpx 12rpx;
   margin-left: 12rpx;
+  white-space: nowrap;
+}
+
+.top-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.top-btn-label {
+  line-height: 1;
 }
 
 .top-btn:first-child {

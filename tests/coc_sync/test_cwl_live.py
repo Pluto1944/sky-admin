@@ -1,4 +1,5 @@
 from modules.coc_sync.cwl_live import (
+    build_cwl_attack_reminder,
     build_cwl_dashboard,
     normalize_cwl_group,
     normalize_cwl_season,
@@ -73,3 +74,25 @@ def test_member_states_distinguish_not_attacked_and_unattacked():
     assert [item["status"] for item in offense["rounds"]] == ["not_attacked", "not_attacked"]
     assert [item["status"] for item in defense["rounds"]] == ["defended", "unattacked"]
     assert defense["successful_defenses"] == 0
+
+
+def test_attack_reminder_only_counts_current_lineup_members_without_attack():
+    group = normalize_cwl_group(league_group(), team(), "2026-09-03T00:00:00+00:00")
+    wars = {
+        "#W1": normalize_cwl_war(league_war_one(), "#W1", "2026-09-03T00:00:00+00:00"),
+        "#W2": normalize_cwl_war(league_war_two(), "#W2", "2026-09-05T00:00:00+00:00"),
+    }
+
+    reminder = build_cwl_attack_reminder(group, wars)
+
+    assert reminder["status"] == "in_war"
+    assert reminder["round"] == 1
+    assert reminder["team_size"] == 2
+    assert reminder["attacked_count"] == 1
+    assert reminder["pending_count"] == 1
+    assert reminder["pending_members"] == [{
+        "player_tag": "#A2",
+        "name": "乙",
+        "town_hall_level": 17,
+        "position": 2,
+    }]
