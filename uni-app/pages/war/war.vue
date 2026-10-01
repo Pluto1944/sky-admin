@@ -3,17 +3,17 @@
     <TopBar title="战斗" :buttons="topButtons" @onTopTab="onTopTab" />
 
     <view v-if="activeTopTab === 'clan-war'" class="war-pane">
-      <view class="inner-tab-bar">
-        <view class="inner-tab" :class="{ active: warView === 'current' }" @tap="switchWarView('current')">当前部落战</view>
-        <view class="inner-tab" :class="{ active: warView === 'history' }" @tap="switchWarView('history')">最近15场</view>
-      </view>
-
-      <view v-if="warView === 'current'" class="war-toolbar">
+      <view class="war-toolbar">
         <view class="toolbar-title-wrap">
-          <text class="toolbar-title">当前部落战</text>
-          <text class="toolbar-count">{{ filteredClans.length }}/{{ clans.length }}</text>
+          <text class="toolbar-title">部落战</text>
+          <text class="toolbar-count">{{ activeWarCount }}/{{ activeWarTotal }}</text>
         </view>
-        <text class="filter-trigger" @tap="openFilter">⏬筛选</text>
+        <view class="toolbar-actions">
+          <picker :range="warViewOptions" range-key="label" :value="warViewIndex" @change="onWarViewChange">
+            <text class="period-selector war-view-selector">{{ warViewLabel }}⌄</text>
+          </picker>
+          <text class="filter-trigger" @tap="openFilter">⏬筛选</text>
+        </view>
       </view>
 
       <view v-if="warView === 'current' && loading" class="state-box"><text class="state-text">加载当前部落战...</text></view>
@@ -43,6 +43,7 @@
             <view v-else-if="clan.status === 'not_in_war'" class="simple-state">当前无部落战</view>
             <view v-else-if="clan.status === 'cwl'" class="simple-state cwl-state" @tap.stop="onTopTab('league')">当前正在进行联赛，点击前往“联赛数据 → 战斗日”</view>
             <view v-else class="war-summary">
+              <view v-if="clan.is_stale" class="sync-warning">本次更新失败，当前显示 {{ formatTime(clan.synced_at) }} 的缓存数据，系统将自动重试</view>
               <view class="opponent-row">
                 <text class="opponent-label">对手</text>
                 <text class="opponent-name">{{ clan.opponent ? clan.opponent.name : '-' }}</text>
@@ -73,13 +74,6 @@
         </view>
       </scroll-view>
 
-      <view v-if="warView === 'history'" class="war-toolbar">
-        <view class="toolbar-title-wrap">
-          <text class="toolbar-title">已结束普通部落战</text>
-          <text class="toolbar-count">{{ filteredHistoryWars.length }}/{{ historyWars.length }}</text>
-        </view>
-        <text class="filter-trigger" @tap="openFilter">⏬筛选</text>
-      </view>
       <view v-if="warView === 'history' && historyLoading" class="state-box"><text class="state-text">加载最近部落战...</text></view>
       <view v-else-if="warView === 'history' && historyError && !historyWars.length" class="state-box">
         <text class="error-text">{{ historyError }}</text>
@@ -88,6 +82,10 @@
       <scroll-view v-else-if="warView === 'history'" scroll-y class="war-list-scroll">
         <view class="war-list-inner">
           <view v-if="historyUpdatedAt" class="update-time">数据更新于 {{ formatTime(historyUpdatedAt) }}</view>
+          <view v-if="selectedHistoryClan" class="history-scope">
+            <text class="history-scope-name">{{ selectedHistoryClan.clan_name }}</text>
+            <text class="history-scope-meta">{{ categoryLabel(selectedHistoryClan.category) }} · {{ selectedHistoryClan.clan_tag }} · 最近15场</text>
+          </view>
           <view v-if="isFiltered" class="filter-summary">
             <text>{{ filterLabel }}</text><text class="clear-filter" @tap="resetFilters">重置</text>
           </view>
@@ -187,8 +185,8 @@
     <view v-if="filterVisible" class="filter-mask" @tap="closeFilter">
       <view class="filter-panel" @tap.stop>
         <view class="filter-title">{{ warView === 'history' ? '筛选最近部落战' : '筛选当前部落战' }}</view>
-        <text class="filter-group-title">部落分类（可多选）</text>
-        <view class="filter-options">
+        <text v-if="warView !== 'history'" class="filter-group-title">部落分类（可多选）</text>
+        <view v-if="warView !== 'history'" class="filter-options">
           <view v-for="category in activeCategories" :key="category.key" class="filter-option" @tap="toggleDraftCategory(category.key)">
             <text class="filter-check" :class="{ checked: draftCategories.indexOf(category.key) >= 0 }">{{ draftCategories.indexOf(category.key) >= 0 ? '✓' : '' }}</text>
             <text>{{ category.label }}</text>
@@ -198,8 +196,8 @@
         <view class="status-filter-options">
           <text v-for="option in activeFilterOptions" :key="option.key" class="status-filter-option" :class="{ active: draftStatus === option.key }" @tap="draftStatus = option.key">{{ option.label }}</text>
         </view>
-        <text class="filter-group-title">具体部落（可多选）</text>
-        <scroll-view scroll-y class="clan-options">
+        <text v-if="warView !== 'history'" class="filter-group-title">具体部落（可多选）</text>
+        <scroll-view v-if="warView !== 'history'" scroll-y class="clan-options">
           <view v-for="clan in activeClanOptions" :key="clan.clan_tag" class="filter-option clan-option" @tap="toggleDraftClan(clan.clan_tag)">
             <text class="filter-check" :class="{ checked: draftClans.indexOf(clan.clan_tag) >= 0 }">{{ draftClans.indexOf(clan.clan_tag) >= 0 ? '✓' : '' }}</text>
             <text>{{ clan.clan_name }}（{{ clan.clan_tag }}）</text>
@@ -221,17 +219,20 @@ import { getCurrentWars, getWarHistory, getCwlLive } from '@/utils/api.js'
 
 const STATUS_ORDER = { in_war: 0, preparation: 1, war_ended: 2, cwl: 3, not_in_war: 4, sync_pending: 5, error: 6 }
 const CACHE_REFRESH_INTERVAL_MS = 60 * 1000
+const BUSINESS_TIMEZONE_OFFSET_MS = 8 * 60 * 60 * 1000
+
+function currentBusinessPeriod() {
+  const date = new Date(Date.now() + BUSINESS_TIMEZONE_OFFSET_MS)
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`
+}
 
 export default {
   components: { TopBar },
   data() {
     return {
-      topButtons: [
-        { key: 'clan-war', icon: '⚔️', text: '部落战', action: 'onTopTab' },
-        { key: 'league', icon: '🏆', text: '联赛数据', action: 'onTopTab' }
-      ],
       activeTopTab: 'clan-war',
       warView: 'current',
+      selectedHistoryClanTag: '',
       loading: true,
       loadError: '',
       clans: [],
@@ -274,6 +275,12 @@ export default {
     }
   },
   computed: {
+    topButtons() {
+      return [
+        { key: 'clan-war', icon: '⚔️', text: '部落战', action: 'onTopTab', active: this.activeTopTab === 'clan-war' },
+        { key: 'league', icon: '🏆', text: '联赛数据', action: 'onTopTab', active: this.activeTopTab === 'league' }
+      ]
+    },
     filteredClans() {
       return this.clans
         .filter(clan => this.selectedCategories.indexOf(clan.category) >= 0)
@@ -287,38 +294,61 @@ export default {
     },
     filteredHistoryWars() {
       return this.historyWars
-        .filter(war => this.selectedCategories.indexOf(war.category) >= 0)
-        .filter(war => this.selectedClans.indexOf(war.clan_tag) >= 0)
+        .filter(war => war.clan_tag === this.selectedHistoryClanTag)
         .filter(war => this.historyResultFilter === 'all' || war.result === this.historyResultFilter)
     },
-    activeCategories() { return this.warView === 'history' && this.historyCategories.length ? this.historyCategories : this.categories },
-    activeClanOptions() { return this.warView === 'history' && this.historyClans.length ? this.historyClans : this.clans },
+    selectedHistoryClan() { return this.historyClans.find(clan => clan.clan_tag === this.selectedHistoryClanTag) || null },
+    selectedHistoryWarTotal() { return this.historyWars.filter(war => war.clan_tag === this.selectedHistoryClanTag).length },
+    warViewOptions() {
+      const clans = this.historyClans.length ? this.historyClans : this.clans
+      return [{ key: 'current', view: 'current', label: '当前部落战' }].concat(clans.map(clan => ({
+        key: `history:${clan.clan_tag}`,
+        view: 'history',
+        clanTag: clan.clan_tag,
+        label: `${clan.clan_name} · ${this.categoryLabel(clan.category)} · 最近15场`
+      })))
+    },
+    activeCategories() { return this.categories },
+    activeClanOptions() { return this.clans },
     activeFilterOptions() { return this.warView === 'history' ? this.resultOptions : this.statusOptions },
+    activeWarCount() { return this.warView === 'history' ? this.filteredHistoryWars.length : this.filteredClans.length },
+    activeWarTotal() { return this.warView === 'history' ? this.selectedHistoryWarTotal : this.clans.length },
+    warViewIndex() {
+      const key = this.warView === 'history' ? `history:${this.selectedHistoryClanTag}` : 'current'
+      const index = this.warViewOptions.findIndex(item => item.key === key)
+      return index < 0 ? 0 : index
+    },
+    warViewLabel() { const item = this.warViewOptions[this.warViewIndex]; return item ? item.label : '当前部落战' },
     isFiltered() {
-      const stateFiltered = this.warView === 'history' ? this.historyResultFilter !== 'all' : this.statusFilter !== 'all'
+      if (this.warView === 'history') return this.historyResultFilter !== 'all'
+      const stateFiltered = this.statusFilter !== 'all'
       return this.selectedCategories.length !== this.activeCategories.length || this.selectedClans.length !== this.activeClanOptions.length || stateFiltered
     },
     filterLabel() {
       const labels = []
+      if (this.warView === 'history') {
+        if (this.historyResultFilter !== 'all') labels.push(this.resultLabel(this.historyResultFilter))
+        return labels.length ? `当前：${labels.join(' · ')}` : '全部结果'
+      }
       if (this.selectedCategories.length !== this.activeCategories.length) labels.push(`分类 ${this.selectedCategories.length}项`)
       if (this.selectedClans.length !== this.activeClanOptions.length) labels.push(`部落 ${this.selectedClans.length}个`)
-      if (this.warView === 'history' && this.historyResultFilter !== 'all') labels.push(this.resultLabel(this.historyResultFilter))
-      if (this.warView !== 'history' && this.statusFilter !== 'all') labels.push(this.statusLabel(this.statusFilter))
+      if (this.statusFilter !== 'all') labels.push(this.statusLabel(this.statusFilter))
       return labels.length ? `当前：${labels.join(' · ')}` : '全部部落'
     },
     leaguePeriodIndex() { const index = this.leaguePeriods.findIndex(item => item.period === this.leaguePeriod); return index < 0 ? 0 : index },
     leaguePeriodLabel() { const item = this.leaguePeriods[this.leaguePeriodIndex]; return item ? item.label : (this.leaguePeriod || '-') },
-    selectedLeaguePeriodInfo() { return this.leaguePeriods.find(item => item.period === this.leaguePeriod) || null }
+    isCurrentLeaguePeriod() { return !this.leaguePeriod || this.leaguePeriod === currentBusinessPeriod() }
   },
   onLoad(options) {
     if (options && options.tab === 'league') this.activeTopTab = 'league'
-    if (options && options.view === 'history') this.warView = 'history'
+    if (options && options.view === 'history') {
+      this.warView = 'history'
+      try { this.selectedHistoryClanTag = decodeURIComponent(options.clan_tag || '') } catch (e) { this.selectedHistoryClanTag = options.clan_tag || '' }
+    }
     if (options && options.period) this.leaguePeriod = options.period
     if (this.activeTopTab === 'league') this.fetchCwlLive(this.leaguePeriod)
-    else {
-      this.fetchCurrentWars()
-      if (this.warView === 'history') this.fetchWarHistory()
-    }
+    else if (this.warView === 'history') this.fetchWarHistory()
+    else this.fetchCurrentWars()
   },
   onShow() {
     const storedTab = uni.getStorageSync('war_active_top_tab')
@@ -327,7 +357,7 @@ export default {
       uni.removeStorageSync('war_active_top_tab')
     }
     this.startTimers()
-    if (this.activeTopTab === 'league' && this.leagueClans.length) this.fetchCwlLive(this.leaguePeriod)
+    if (this.activeTopTab === 'league' && this.leagueClans.length && this.isCurrentLeaguePeriod) this.fetchCwlLive(this.leaguePeriod)
     else if (this.activeTopTab === 'clan-war' && this.warView === 'current' && this.clans.length) this.fetchCurrentWars()
   },
   onHide() { this.stopTimers() },
@@ -344,25 +374,36 @@ export default {
       return { title: `苍穹联赛助手｜${dataset.clanName || '当前部落战'}`, path: `/pages/war/current-detail?clan_tag=${encodeURIComponent(dataset.clanTag)}` }
     }
     if (this.activeTopTab === 'league') return { title: `苍穹联赛助手｜${this.leaguePeriodLabel}联赛`, path: `/pages/war/war?tab=league&period=${encodeURIComponent(this.leaguePeriod)}` }
-    if (this.warView === 'history') return { title: '苍穹联赛助手｜最近部落战', path: '/pages/war/war?view=history' }
+    if (this.warView === 'history') return { title: `苍穹联赛助手｜${this.selectedHistoryClan ? this.selectedHistoryClan.clan_name : '历史部落战'}`, path: `/pages/war/war?view=history&clan_tag=${encodeURIComponent(this.selectedHistoryClanTag)}` }
     return { title: '苍穹联赛助手｜当前部落战', path: '/pages/war/war' }
   },
   onShareTimeline() {
     if (this.activeTopTab === 'league') return { title: `苍穹联赛助手｜${this.leaguePeriodLabel}联赛`, query: `tab=league&period=${encodeURIComponent(this.leaguePeriod)}` }
-    return { title: this.warView === 'history' ? '苍穹联赛助手｜最近部落战' : '苍穹联赛助手｜当前部落战', query: this.warView === 'history' ? 'view=history' : '' }
+    return { title: this.warView === 'history' ? `苍穹联赛助手｜${this.selectedHistoryClan ? this.selectedHistoryClan.clan_name : '历史部落战'}` : '苍穹联赛助手｜当前部落战', query: this.warView === 'history' ? `view=history&clan_tag=${encodeURIComponent(this.selectedHistoryClanTag)}` : '' }
   },
   methods: {
     onTopTab(tab) {
       this.activeTopTab = tab
       this.filterVisible = false
       if (tab === 'league' && !this.leagueClans.length) this.fetchCwlLive()
-      if (tab === 'clan-war' && !this.clans.length) this.fetchCurrentWars()
+      if (tab === 'clan-war' && this.warView === 'history' && !this.historyWars.length) this.fetchWarHistory()
+      if (tab === 'clan-war' && this.warView === 'current') this.fetchCurrentWars()
     },
-    switchWarView(view) {
-      this.warView = view
+    switchWarView(option) {
+      if (!option) return
+      if (option.view === this.warView && (option.view !== 'history' || option.clanTag === this.selectedHistoryClanTag)) return
+      this.warView = option.view
+      this.selectedHistoryClanTag = option.clanTag || ''
       this.filterVisible = false
-      this.resetFilters()
-      if (view === 'history' && !this.historyWars.length) this.fetchWarHistory()
+      if (option.view === 'history' && !this.historyWars.length) this.fetchWarHistory()
+      else {
+        this.resetFilters()
+        if (option.view === 'current') this.fetchCurrentWars()
+      }
+    },
+    onWarViewChange(event) {
+      const selected = this.warViewOptions[Number(event.detail.value)]
+      if (selected) this.switchWarView(selected)
     },
     async fetchCurrentWars() {
       if (!this.clans.length) this.loading = true
@@ -391,6 +432,11 @@ export default {
         this.historyCategories = res.categories || []
         this.historyClans = res.clans || []
         this.historyUpdatedAt = res.updated_at || ''
+        if (!this.historyClans.some(clan => clan.clan_tag === this.selectedHistoryClanTag)) {
+          const firstWithHistory = this.historyClans.find(clan => this.historyWars.some(war => war.clan_tag === clan.clan_tag))
+          this.selectedHistoryClanTag = firstWithHistory ? firstWithHistory.clan_tag : (this.historyClans[0] ? this.historyClans[0].clan_tag : '')
+        }
+        if (this.warView === 'history') this.resetFilters()
       } catch (e) {
         this.historyError = e.message || '历史部落战加载失败'
         if (this.historyWars.length) uni.showToast({ title: this.historyError, icon: 'none' })
@@ -424,7 +470,7 @@ export default {
       this.clockTimer = setInterval(() => { this.nowMs = Date.now() }, 1000)
       this.refreshTimer = setInterval(() => {
         if (this.activeTopTab === 'league') {
-          if (!this.selectedLeaguePeriodInfo || this.selectedLeaguePeriodInfo.current) this.fetchCwlLive(this.leaguePeriod)
+          if (this.isCurrentLeaguePeriod) this.fetchCwlLive(this.leaguePeriod)
         } else if (this.warView === 'current') this.fetchCurrentWars()
       }, CACHE_REFRESH_INTERVAL_MS)
     },
@@ -452,21 +498,30 @@ export default {
       else this.draftClans.push(tag)
     },
     resetDraftFilters() {
+      if (this.warView === 'history') {
+        this.draftStatus = 'all'
+        return
+      }
       this.draftCategories = this.activeCategories.map(item => item.key)
       this.draftClans = this.activeClanOptions.map(item => item.clan_tag)
       this.draftStatus = 'all'
     },
     resetFilters() {
+      if (this.warView === 'history') {
+        this.historyResultFilter = 'all'
+        return
+      }
       this.selectedCategories = this.activeCategories.map(item => item.key)
       this.selectedClans = this.activeClanOptions.map(item => item.clan_tag)
-      if (this.warView === 'history') this.historyResultFilter = 'all'
-      else this.statusFilter = 'all'
+      this.statusFilter = 'all'
     },
     applyFilters() {
-      this.selectedCategories = this.draftCategories.slice()
-      this.selectedClans = this.draftClans.slice()
       if (this.warView === 'history') this.historyResultFilter = this.draftStatus
-      else this.statusFilter = this.draftStatus
+      else {
+        this.selectedCategories = this.draftCategories.slice()
+        this.selectedClans = this.draftClans.slice()
+        this.statusFilter = this.draftStatus
+      }
       this.filterVisible = false
     },
     openDetail(clan) {
@@ -482,7 +537,7 @@ export default {
       uni.navigateTo({ url: `/pages/war/cwl-detail?clan_tag=${encodeURIComponent(clan.clan_tag)}&period=${encodeURIComponent(this.leaguePeriod)}&view=war-day` })
     },
     categoryLabel(key) {
-      const item = this.activeCategories.find(category => category.key === key) || this.categories.find(category => category.key === key)
+      const item = this.historyCategories.find(category => category.key === key) || this.categories.find(category => category.key === key)
       return item ? item.label : key
     },
     leagueCategoryLabel(key) { return key === 'shell' ? '壳子' : '实战' },
@@ -543,17 +598,16 @@ export default {
 <style>
 .page-container { height: 100vh; display: flex; flex-direction: column; background: #0f0f23; }
 .war-pane, .content-area { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.inner-tab-bar { flex-shrink: 0; height: 72rpx; display: flex; background: #121226; border-bottom: 1rpx solid #252540; }.inner-tab { flex: 1; display: flex; align-items: center; justify-content: center; color: #737b90; font-size: 26rpx; }.inner-tab.active { color: #5fa8ff; font-weight: 600; border-bottom: 4rpx solid #4a90d9; background: rgba(74,144,217,.08); }
 .war-toolbar { flex-shrink: 0; height: 72rpx; padding: 0 24rpx; display: flex; align-items: center; justify-content: space-between; background: #141428; border-bottom: 1rpx solid #2a2a4a; }
-.toolbar-title-wrap { display: flex; align-items: center; }.toolbar-title { color: #d8dce8; font-size: 28rpx; font-weight: 600; }.toolbar-count { margin-left: 12rpx; color: #66708a; font-size: 22rpx; }.filter-trigger { padding: 12rpx; color: #aab4c8; font-size: 25rpx; }
+.toolbar-title-wrap, .toolbar-actions { display: flex; align-items: center; }.toolbar-title { color: #d8dce8; font-size: 28rpx; font-weight: 600; }.toolbar-count { margin-left: 12rpx; color: #66708a; font-size: 22rpx; }.filter-trigger { padding: 12rpx; color: #aab4c8; font-size: 25rpx; }
 .state-box { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }.state-text { color: #8890a0; font-size: 28rpx; }.error-text { margin: 0 32rpx 20rpx; color: #e17055; font-size: 26rpx; text-align: center; }.retry-btn { color: #5fa8ff; font-size: 26rpx; }
 .war-list-scroll { flex: 1; height: 0; }.war-list-inner { padding: 18rpx 24rpx 0; }.update-time { margin-bottom: 14rpx; color: #596178; font-size: 22rpx; text-align: center; }.filter-summary { display: flex; align-items: center; justify-content: center; margin-bottom: 16rpx; padding: 12rpx; color: #9aa0b0; font-size: 22rpx; background: #15152a; border-radius: 8rpx; }.clear-filter { margin-left: 18rpx; color: #5fa8ff; }.empty-list { padding: 100rpx 0; color: #66708a; font-size: 26rpx; text-align: center; }
 .war-card { margin-bottom: 20rpx; overflow: hidden; border: 1rpx solid #2a2a4a; border-radius: 14rpx; background: #18182d; box-sizing: border-box; }.card-header { min-height: 68rpx; padding: 14rpx 18rpx; display: flex; align-items: center; box-sizing: border-box; border-bottom: 1rpx solid #282844; }.category-badge { flex-shrink: 0; margin-right: 10rpx; padding: 3rpx 9rpx; border-radius: 6rpx; color: #9fc9ff; background: rgba(74,144,217,.18); font-size: 20rpx; }.category-farm { color: #7fd8a8; background: rgba(0,184,148,.15); }.category-flat { color: #d9b8ff; background: rgba(162,111,212,.16); }.clan-name { min-width: 0; overflow: hidden; color: #f0f0f5; font-size: 28rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.clan-tag { flex-shrink: 0; margin-left: 8rpx; color: #66708a; font-size: 20rpx; }.status-badge { flex-shrink: 0; margin-left: auto; padding-left: 12rpx; color: #8890a0; font-size: 22rpx; }.status-in_war { color: #ff7675; }.status-preparation { color: #fdcb6e; }.status-war_ended { color: #74b9ff; }.status-error { color: #e17055; }
-.simple-state { padding: 28rpx 20rpx; color: #7d8498; font-size: 25rpx; text-align: center; }.error-state { color: #e17055; }.cwl-state { color: #74b9ff; }
+.simple-state { padding: 28rpx 20rpx; color: #7d8498; font-size: 25rpx; text-align: center; }.error-state { color: #e17055; }.cwl-state { color: #74b9ff; }.sync-warning { margin-bottom: 16rpx; padding: 12rpx 14rpx; border-radius: 8rpx; color: #fdcb6e; background: rgba(253,203,110,.1); font-size: 21rpx; line-height: 1.5; }
 .war-summary { padding: 18rpx; }.opponent-row { display: flex; align-items: center; }.opponent-label { margin-right: 10rpx; color: #66708a; font-size: 22rpx; }.opponent-name { max-width: 280rpx; overflow: hidden; color: #d8dce8; font-size: 26rpx; text-overflow: ellipsis; white-space: nowrap; }.opponent-tag { margin-left: 8rpx; color: #596178; font-size: 20rpx; }.result-label { margin-left: auto; font-size: 23rpx; font-weight: 600; }.result-win { color: #00b894; }.result-loss { color: #e17055; }.result-tied { color: #fdcb6e; }
 .score-row { margin-top: 18rpx; display: flex; align-items: center; }.side-score { flex: 1; display: flex; align-items: center; color: #9aa0b0; font-size: 22rpx; }.side-score text { margin-right: 10rpx; }.opponent-score { justify-content: flex-end; }.opponent-score text { margin-right: 0; margin-left: 10rpx; }.side-name { color: #66708a; }.stars { color: #f0f0f5; font-weight: 600; }.versus { margin: 0 12rpx; color: #4a90d9; font-size: 22rpx; font-weight: 600; }
 .card-footer { margin-top: 18rpx; padding-top: 14rpx; display: flex; align-items: center; border-top: 1rpx solid #252540; }.countdown { color: #747c91; font-size: 22rpx; }.card-actions { margin-left: auto; display: flex; align-items: center; }.detail-link { padding: 8rpx 12rpx; color: #5fa8ff; font-size: 23rpx; }.share-btn { margin: 0 0 0 8rpx; padding: 8rpx 12rpx; border: 0; border-radius: 6rpx; color: #aab4c8; background: #252540; font-size: 23rpx; line-height: 1.4; }.share-btn::after { border: 0; }.bottom-space { height: 120rpx; }
 .filter-mask { position: fixed; z-index: 1000; top: 0; right: 0; bottom: 0; left: 0; display: flex; align-items: flex-end; background: rgba(0,0,0,.6); }.filter-panel { width: 100%; max-height: 82vh; padding: 26rpx 30rpx 34rpx; box-sizing: border-box; border-radius: 24rpx 24rpx 0 0; background: #1a1a2e; }.filter-title { margin-bottom: 20rpx; color: #fff; font-size: 31rpx; font-weight: 600; text-align: center; }.filter-group-title { display: block; margin: 16rpx 0 10rpx; color: #8890a0; font-size: 23rpx; }.filter-options { display: flex; flex-wrap: wrap; }.filter-option { min-height: 62rpx; margin-right: 26rpx; display: flex; align-items: center; color: #d0d0dc; font-size: 25rpx; }.filter-check { width: 34rpx; height: 34rpx; margin-right: 9rpx; display: flex; align-items: center; justify-content: center; box-sizing: border-box; border: 2rpx solid #66708a; border-radius: 5rpx; color: #fff; }.filter-check.checked { border-color: #4a90d9; background: #4a90d9; }.status-filter-options { display: flex; flex-wrap: wrap; }.status-filter-option { margin: 0 12rpx 12rpx 0; padding: 10rpx 17rpx; border-radius: 8rpx; color: #9097aa; background: #252540; font-size: 23rpx; }.status-filter-option.active { color: #fff; background: #4a90d9; }.clan-options { max-height: 320rpx; border-top: 1rpx solid #2a2a4a; border-bottom: 1rpx solid #2a2a4a; }.clan-option { margin-right: 0; padding: 0 6rpx; border-bottom: 1rpx solid #252540; }.filter-actions { margin-top: 22rpx; display: flex; justify-content: flex-end; }.filter-action { min-width: 110rpx; margin-left: 14rpx; padding: 14rpx 20rpx; border-radius: 7rpx; text-align: center; font-size: 25rpx; }.reset-action { color: #74b9ff; }.cancel-action { color: #aab4c8; background: #252540; }.confirm-action { color: #fff; background: #4a90d9; }
-.period-label, .period-selector { color: #74b9ff; font-size: 23rpx; }.period-selector { padding: 14rpx 8rpx; }.league-card { min-height: 150rpx; }.league-status-active { color: #ff7675; }.league-status-preparation { color: #fdcb6e; }.league-status-ended { color: #74b9ff; }.league-status-error { color: #e17055; }.league-alias, .waiting-hint, .state-detail-link { display: block; }.league-alias { color: #aab4c8; }.waiting-hint { margin-top: 8rpx; color: #66708a; font-size: 22rpx; }.state-detail-link { margin-top: 10rpx; }.league-summary { padding: 18rpx; }.league-primary-row { display: flex; align-items: center; color: #d8dce8; font-size: 25rpx; }.league-rank { margin-left: auto; color: #fdcb6e; }.league-metrics { margin-top: 18rpx; display: flex; align-items: center; justify-content: space-between; color: #9aa0b0; font-size: 23rpx; }
+.period-label, .period-selector { color: #74b9ff; font-size: 23rpx; }.period-selector { padding: 14rpx 8rpx; }.war-view-selector { display: block; max-width: 410rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.history-scope { margin-bottom: 16rpx; padding: 16rpx 18rpx; border: 1rpx solid #2a2a4a; border-radius: 10rpx; background: #15152a; }.history-scope-name, .history-scope-meta { display: block; }.history-scope-name { overflow: hidden; color: #d8dce8; font-size: 26rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.history-scope-meta { margin-top: 6rpx; color: #747c91; font-size: 21rpx; }.league-card { min-height: 150rpx; }.league-status-active { color: #ff7675; }.league-status-preparation { color: #fdcb6e; }.league-status-ended { color: #74b9ff; }.league-status-error { color: #e17055; }.league-alias, .waiting-hint, .state-detail-link { display: block; }.league-alias { color: #aab4c8; }.waiting-hint { margin-top: 8rpx; color: #66708a; font-size: 22rpx; }.state-detail-link { margin-top: 10rpx; }.league-summary { padding: 18rpx; }.league-primary-row { display: flex; align-items: center; color: #d8dce8; font-size: 25rpx; }.league-rank { margin-left: auto; color: #fdcb6e; }.league-metrics { margin-top: 18rpx; display: flex; align-items: center; justify-content: space-between; color: #9aa0b0; font-size: 23rpx; }
 .history-card .result-label { margin-left: auto; }.history-opponent-row { padding: 15rpx 18rpx 0; }.history-score-row { padding: 14rpx 18rpx 4rpx; }.history-score-row .side-score { justify-content: space-around; }
 </style>

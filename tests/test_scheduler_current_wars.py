@@ -89,6 +89,50 @@ def test_non_active_current_war_states_use_configured_intervals():
         })},
         now,
     ) == 2
+    assert _current_war_refresh_minutes(
+        {"status": "in_war", "failure_count": 2}, now,
+    ) == 10
+
+
+def test_scheduler_keeps_last_successful_snapshot_on_transient_error(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "stale-current-war.sqlite3")
+    monkeypatch.setattr(config, "DB_PATH", db_path)
+    monkeypatch.setattr(config, "CLANS", [
+        {"tag": "#STALE", "name": "保留快照部落", "category": "combat", "enabled": True},
+    ])
+    db = Database(db_path)
+    db.init_schema()
+    _seed_cache(db, "#STALE", "in_war", "2026-09-30T00:00:00+00:00")
+    db.close()
+
+    class FakeService:
+        def fetch_current_wars(self, clans):
+            return [{
+                "clan_tag": "#STALE", "clan_name": "保留快照部落", "category": "combat",
+                "status": "error", "rows": [], "error": "The read operation timed out",
+                "synced_at": "2026-09-30T00:02:00+00:00",
+            }]
+
+    monkeypatch.setattr(service_module, "CocSyncService", FakeService)
+
+    result = _run_current_wars(
+        force=True,
+        now=datetime(2026, 9, 30, 0, 2, tzinfo=timezone.utc),
+    )
+
+    assert result == {"status": "failed", "reason": "全部 1 个部落同步失败"}
+    db = Database(db_path)
+    row = db.conn.execute(
+        """SELECT status, data_json, error, updated_at, attempted_at, failure_count
+           FROM current_war_cache WHERE clan_tag = '#STALE'"""
+    ).fetchone()
+    assert row["status"] == "in_war"
+    assert json.loads(row["data_json"])["status"] == "in_war"
+    assert row["error"] == "The read operation timed out"
+    assert row["updated_at"] == "2026-09-30T00:00:00+00:00"
+    assert row["attempted_at"] == "2026-09-30T00:02:00+00:00"
+    assert row["failure_count"] == 1
+    db.close()
 
 
 def test_scheduler_refreshes_each_clan_by_cached_state(tmp_path, monkeypatch):

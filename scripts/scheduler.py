@@ -126,8 +126,9 @@ def _parse_coc_time(value: str | None) -> datetime | None:
 
 def _current_war_refresh_minutes(cache: dict, now: datetime) -> int:
     """根据缓存状态返回单部落的下次官方 API 重试间隔。"""
-    if cache.get("status") == "error":
-        failures = max(1, int(cache.get("failure_count") or 0))
+    failures = int(cache.get("failure_count") or 0)
+    if cache.get("status") == "error" or failures > 0:
+        failures = max(1, failures)
         index = min(failures - 1, len(CURRENT_WAR_ERROR_BACKOFF_MINUTES) - 1)
         return CURRENT_WAR_ERROR_BACKOFF_MINUTES[index]
     if cache.get("status") == "preparation":
@@ -253,6 +254,21 @@ def _run_current_wars(force: bool = False, now: datetime | None = None) -> dict:
             if item["status"] == "error"
             else 0
         )
+        if item["status"] == "error" and previous.get("data_json") and previous.get("status") != "error":
+            # 短暂网络异常不应抹掉上一次成功的战争快照。仅记录本次失败，
+            # API 继续返回可用快照，并通过 sync_error 告知前端数据可能陈旧。
+            db.conn.execute(
+                """UPDATE current_war_cache
+                   SET clan_name = ?, category = ?, error = ?, attempted_at = ?, failure_count = ?
+                   WHERE clan_tag = ?""",
+                (
+                    item["clan_name"], item["category"], item.get("error"),
+                    attempted_at, failure_count, item["clan_tag"],
+                ),
+            )
+            failed += 1
+            continue
+
         db.conn.execute(
             """INSERT INTO current_war_cache
                (clan_tag, clan_name, category, status, data_json, error, updated_at,
@@ -279,7 +295,8 @@ def _run_current_wars(force: bool = False, now: datetime | None = None) -> dict:
                 failure_count,
             ),
         )
-        _archive_current_war(db, item)
+        if item["status"] != "error":
+            _archive_current_war(db, item)
         if item["status"] == "error":
             failed += 1
         else:

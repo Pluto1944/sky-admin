@@ -43,6 +43,31 @@ def test_current_wars_returns_configured_summary_and_pending_clan(db, monkeypatc
     ]
 
 
+def test_current_wars_marks_stale_snapshot_without_hiding_it(db, monkeypatch):
+    monkeypatch.setattr(routes, "CLANS", [
+        {"tag": "#AAA", "name": "我方", "category": "combat", "enabled": True},
+    ])
+    _seed(db)
+    db.conn.execute(
+        """UPDATE current_war_cache
+           SET error = ?, attempted_at = ?, failure_count = 1
+           WHERE clan_tag = '#AAA'""",
+        ("The read operation timed out", "2026-09-27T01:02:00+00:00"),
+    )
+    db.conn.commit()
+
+    summary = routes.current_wars(db)["clans"][0]
+    detail = routes.current_war_detail("#AAA", db)
+
+    assert summary["status"] == "in_war"
+    assert summary["is_stale"] is True
+    assert summary["sync_error"] == "The read operation timed out"
+    assert summary["sync_failure_count"] == 1
+    assert detail["status"] == "in_war"
+    assert detail["is_stale"] is True
+    assert len(detail["rows"]) == 2
+
+
 def test_current_war_detail_returns_rows_and_rejects_external_clan(db, monkeypatch):
     monkeypatch.setattr(routes, "CLANS", [
         {"tag": "#AAA", "name": "我方", "category": "combat", "enabled": True},

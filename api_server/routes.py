@@ -248,12 +248,21 @@ def _pending_current_war(clan: dict) -> dict:
 
 def _cached_current_wars(db: Database) -> dict[str, dict]:
     rows = db.conn.execute(
-        "SELECT clan_tag, data_json FROM current_war_cache"
+        """SELECT clan_tag, status, data_json, error, updated_at, attempted_at,
+                  failure_count
+           FROM current_war_cache"""
     ).fetchall()
     result = {}
     for row in rows:
         try:
-            result[normalize_tag(row["clan_tag"])] = json.loads(row["data_json"])
+            item = json.loads(row["data_json"])
+            item.update({
+                "sync_error": row["error"],
+                "sync_attempted_at": row["attempted_at"],
+                "sync_failure_count": int(row["failure_count"] or 0),
+                "is_stale": bool(row["error"] and row["status"] != "error"),
+            })
+            result[normalize_tag(row["clan_tag"])] = item
         except (TypeError, json.JSONDecodeError):
             continue
     return result

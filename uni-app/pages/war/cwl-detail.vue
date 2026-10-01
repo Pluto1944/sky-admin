@@ -126,6 +126,12 @@ import TopBar from '@/components/TopBar.vue'
 import { getCwlLiveDetail } from '@/utils/api.js'
 
 const CACHE_REFRESH_INTERVAL_MS = 60 * 1000
+const BUSINESS_TIMEZONE_OFFSET_MS = 8 * 60 * 60 * 1000
+
+function currentBusinessPeriod() {
+  const date = new Date(Date.now() + BUSINESS_TIMEZONE_OFFSET_MS)
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`
+}
 
 export default {
   components: { TopBar },
@@ -134,11 +140,12 @@ export default {
       clanTag: '', period: '', detail: null, loading: true, loadError: '',
       activeView: 'war-day', selectedRoundNumber: null, requestedRound: null,
       refreshTimer: null,
-      openSections: { townHalls: false, standings: false, offense: true, defense: false }
+      openSections: { townHalls: false, standings: true, offense: true, defense: false }
     }
   },
   computed: {
     listFallback() { return `/pages/war/war?tab=league&period=${encodeURIComponent(this.period || '')}` },
+    isCurrentPeriod() { return !this.period || this.period === currentBusinessPeriod() },
     rounds() { return this.detail && this.detail.rounds ? this.detail.rounds : [] },
     selectedRound() { return this.rounds.find(item => item.round === this.selectedRoundNumber) || this.rounds[0] || null },
     availableTeams() { return this.detail && this.detail.available_teams ? this.detail.available_teams : [] },
@@ -164,7 +171,7 @@ export default {
   onShow() {
     uni.setStorageSync('war_active_top_tab', 'league')
     this.stopTimer()
-    this.refreshTimer = setInterval(() => { this.fetchDetail() }, CACHE_REFRESH_INTERVAL_MS)
+    if (this.isCurrentPeriod) this.refreshTimer = setInterval(() => { this.fetchDetail() }, CACHE_REFRESH_INTERVAL_MS)
   },
   onHide() { this.stopTimer() },
   onUnload() { this.stopTimer() },

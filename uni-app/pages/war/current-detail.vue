@@ -1,6 +1,6 @@
 <template>
   <view class="detail-page">
-    <TopBar :title="isHistory ? '历史部落战' : '当前部落战'" :showBack="true" :backFallback="isHistory ? '/pages/war/war?view=history' : '/pages/war/war'" />
+    <TopBar :title="isHistory ? '历史部落战' : '当前部落战'" :showBack="true" :backFallback="historyListFallback" />
 
     <view v-if="loading" class="state-box"><text class="state-text">加载战争详情...</text></view>
     <view v-else-if="loadError" class="state-box">
@@ -18,6 +18,7 @@
     </view>
 
     <view v-else class="detail-content">
+      <view v-if="war.is_stale" class="sync-warning">本次更新失败，当前显示 {{ formatFullTime(war.synced_at) }} 的缓存数据，系统将自动重试</view>
       <view class="war-overview">
         <view class="overview-title-row">
           <text class="overview-title">部落战 · {{ statusLabel(war.status) }}</text>
@@ -90,7 +91,10 @@ export default {
   data() {
     return { clanTag: '', warKey: '', war: null, loading: true, loadError: '', nowMs: Date.now(), clockTimer: null, refreshTimer: null }
   },
-  computed: { isHistory() { return !!this.warKey } },
+  computed: {
+    isHistory() { return !!this.warKey },
+    historyListFallback() { return this.isHistory ? `/pages/war/war?view=history&clan_tag=${encodeURIComponent(this.clanTag)}` : '/pages/war/war' }
+  },
   onLoad(options) {
     try { this.clanTag = decodeURIComponent((options && options.clan_tag) || '') } catch (e) { this.clanTag = (options && options.clan_tag) || '' }
     try { this.warKey = decodeURIComponent((options && options.war_key) || '') } catch (e) { this.warKey = (options && options.war_key) || '' }
@@ -190,7 +194,7 @@ export default {
 
 <style>
 .detail-page { min-height: 100vh; background: #0f0f23; color: #d8dce8; }.state-box { min-height: 70vh; padding: 40rpx; display: flex; flex-direction: column; align-items: center; justify-content: center; box-sizing: border-box; }.state-icon { margin-bottom: 20rpx; font-size: 70rpx; }.state-text { color: #aab4c8; font-size: 29rpx; }.state-hint { margin-top: 12rpx; color: #66708a; font-size: 24rpx; }.error-text { margin-bottom: 18rpx; color: #e17055; font-size: 26rpx; text-align: center; }.retry-btn { color: #5fa8ff; font-size: 25rpx; }
-.detail-content { padding-bottom: 40rpx; }.war-overview { margin: 20rpx 24rpx; padding: 22rpx; border: 1rpx solid #2a2a4a; border-radius: 14rpx; background: #18182d; }.overview-title-row { display: flex; align-items: center; }.overview-title { color: #fff; font-size: 29rpx; font-weight: 600; }.result-label { margin-left: 12rpx; font-size: 23rpx; font-weight: 600; }.result-win { color: #00b894; }.result-loss { color: #e17055; }.result-tied { color: #fdcb6e; }.share-btn { margin: 0 0 0 auto; padding: 7rpx 16rpx; border: 0; border-radius: 6rpx; color: #aab4c8; background: #252540; font-size: 22rpx; line-height: 1.5; }.share-btn::after { border: 0; }
+.detail-content { padding-bottom: 40rpx; }.sync-warning { margin: 20rpx 24rpx 0; padding: 14rpx 18rpx; border-radius: 9rpx; color: #fdcb6e; background: rgba(253,203,110,.1); font-size: 22rpx; line-height: 1.5; }.war-overview { margin: 20rpx 24rpx; padding: 22rpx; border: 1rpx solid #2a2a4a; border-radius: 14rpx; background: #18182d; }.overview-title-row { display: flex; align-items: center; }.overview-title { color: #fff; font-size: 29rpx; font-weight: 600; }.result-label { margin-left: 12rpx; font-size: 23rpx; font-weight: 600; }.result-win { color: #00b894; }.result-loss { color: #e17055; }.result-tied { color: #fdcb6e; }.share-btn { margin: 0 0 0 auto; padding: 7rpx 16rpx; border: 0; border-radius: 6rpx; color: #aab4c8; background: #252540; font-size: 22rpx; line-height: 1.5; }.share-btn::after { border: 0; }
 .match-row { margin-top: 22rpx; display: flex; align-items: center; }.match-side { flex: 1; display: flex; flex-direction: column; }.enemy-side { align-items: flex-end; }.match-name { max-width: 270rpx; overflow: hidden; color: #f0f0f5; font-size: 27rpx; text-overflow: ellipsis; white-space: nowrap; }.match-tag { margin-top: 5rpx; color: #66708a; font-size: 20rpx; }.versus { margin: 0 18rpx; color: #4a90d9; font-size: 24rpx; font-weight: 600; }.time-info { margin-top: 20rpx; display: flex; flex-direction: column; color: #747c91; font-size: 22rpx; line-height: 1.7; }.countdown { color: #fdcb6e; }.score-summary { margin-top: 18rpx; padding-top: 16rpx; display: flex; align-items: center; border-top: 1rpx solid #252540; }.score-side { flex: 1; display: flex; justify-content: space-between; color: #d8dce8; font-size: 23rpx; }.enemy-score { text-align: right; }.score-divider { margin: 0 16rpx; color: #4a90d9; }.updated-at { display: block; margin-top: 14rpx; color: #596178; font-size: 20rpx; text-align: center; }
 .table-note { margin: 20rpx 24rpx 10rpx; color: #66708a; font-size: 22rpx; }.war-table-scroll { width: 100%; }.table-inner, .group-row, .tr { width: 1648rpx; }.table-inner { margin: 0; border-top: 1rpx solid #343452; border-bottom: 1rpx solid #343452; background: #15152a; }.group-row, .tr { display: flex; flex-direction: row; box-sizing: border-box; }.group-row { height: 64rpx; color: #fff; font-size: 23rpx; font-weight: 600; }.group-seq { width: 56rpx; display: flex; align-items: center; justify-content: center; box-sizing: border-box; border-right: 1rpx solid #3a3a5a; background: #242440; }.side-group { width: 796rpx; display: flex; align-items: center; justify-content: center; box-sizing: border-box; border-right: 1rpx solid #3a3a5a; }.own-group { color: #9fc9ff; background: #202846; }.enemy-group { color: #f7ba83; background: #422d2b; }
 .tr { min-height: 68rpx; align-items: stretch; border-bottom: 1rpx solid #2a2a44; }.tr-head { min-height: 78rpx; color: #dfe5f0; background: #242440; font-weight: 600; }.even { background: #19192f; }.td { flex-shrink: 0; min-height: 68rpx; padding: 5rpx; display: flex; align-items: center; justify-content: center; box-sizing: border-box; border-right: 1rpx solid #30304a; color: #c9cfda; font-size: 21rpx; text-align: center; white-space: nowrap; overflow: hidden; }.tr-head .td { min-height: 78rpx; font-size: 20rpx; }.enemy-head { background: #332b3b; }.enemy-cell { background: rgba(74,45,45,.12); }.w-seq { width: 56rpx; }.w-name { width: 170rpx; }.w-th { width: 54rpx; }.w-attack { width: 110rpx; }.w-pos { width: 54rpx; }.w-count { width: 80rpx; }.seq-cell { color: #74b9ff; font-weight: 600; }.name-cell { padding: 0 10rpx; justify-content: flex-start; text-overflow: ellipsis; }.th-cell { color: #74b9ff; font-weight: 600; }.attack-good { color: #00b894; }.attack-mid { color: #fdcb6e; }.attack-bad { color: #e17055; }.attack-empty { color: #596178; }.bottom-space { height: 80rpx; }
