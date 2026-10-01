@@ -146,15 +146,24 @@ GET /api/clan/current-wars/{clan_tag}
 
 这两个接口的数据由调度器 `current_wars` 每 2 分钟检查：战斗日每 2 分钟，准备日通常每 30 分钟且开战前 30 分钟内提升为每 2 分钟，无战争 / 已结束每 5 分钟，CWL 跳转状态每 30 分钟从 COC 刷新；小程序停留在页面时每 1 分钟读取一次缓存。完整设计见 [18-current-war-dashboard.md](18-current-war-dashboard.md)。
 
-### 2.4 CWL 参赛部落汇总
+### 2.4 普通部落战历史
+
+```
+GET /api/clan/war-history?clan_tag=%232QQ
+GET /api/clan/war-history/{clan_tag}/{war_key}
+```
+
+无需认证。汇总接口返回每个已启用自有部落最近 15 场已结束普通战争的轻量摘要、分类和部落筛选元数据；详情接口返回单场完整阵容与攻防宽表。接口只读 `war_history_cache`，不直接调用外部 API。CWL、未结束战争和外部部落标签不会出现在历史列表。
+
+### 2.5 CWL 参赛部落汇总
 
 ```
 GET /api/clan/cwl-live?period=YYYY-MM
 ```
 
-无需认证。`period` 可选，默认北京时间当前月份。部落范围只读当月 `league_teams` 中的 `combat` 和 `shell` 队伍，返回队伍类别、轮次、排名、胜负、星数、摧毁率、缓存状态和更新时间。
+无需认证。`period` 可选，默认北京时间当前月份。部落范围只读当月 `league_teams` 中的 `combat` 和 `shell` 队伍，返回队伍类别、轮次、排名、胜负、星数、摧毁率、缓存状态和更新时间。响应中的 `available_periods` 始终包含当前月，并只加入联赛组和逐场战争均完整的历史月份。
 
-### 2.5 单个 CWL 部落详情
+### 2.6 单个 CWL 部落详情
 
 ```
 GET /api/clan/cwl-live/{clan_tag}?period=YYYY-MM&round=4

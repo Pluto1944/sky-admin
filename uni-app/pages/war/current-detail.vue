@@ -1,6 +1,6 @@
 <template>
   <view class="detail-page">
-    <TopBar title="当前部落战" :showBack="true" backFallback="/pages/war/war" />
+    <TopBar :title="isHistory ? '历史部落战' : '当前部落战'" :showBack="true" :backFallback="isHistory ? '/pages/war/war?view=history' : '/pages/war/war'" />
 
     <view v-if="loading" class="state-box"><text class="state-text">加载战争详情...</text></view>
     <view v-else-if="loadError" class="state-box">
@@ -81,20 +81,22 @@
 
 <script>
 import TopBar from '@/components/TopBar.vue'
-import { getCurrentWar } from '@/utils/api.js'
+import { getCurrentWar, getWarHistoryDetail } from '@/utils/api.js'
 
 const CACHE_REFRESH_INTERVAL_MS = 60 * 1000
 
 export default {
   components: { TopBar },
   data() {
-    return { clanTag: '', war: null, loading: true, loadError: '', nowMs: Date.now(), clockTimer: null, refreshTimer: null }
+    return { clanTag: '', warKey: '', war: null, loading: true, loadError: '', nowMs: Date.now(), clockTimer: null, refreshTimer: null }
   },
+  computed: { isHistory() { return !!this.warKey } },
   onLoad(options) {
     try { this.clanTag = decodeURIComponent((options && options.clan_tag) || '') } catch (e) { this.clanTag = (options && options.clan_tag) || '' }
+    try { this.warKey = decodeURIComponent((options && options.war_key) || '') } catch (e) { this.warKey = (options && options.war_key) || '' }
     this.fetchDetail()
   },
-  onShow() { this.startTimers() },
+  onShow() { if (!this.isHistory) this.startTimers() },
   onHide() { this.stopTimers() },
   onUnload() { this.stopTimers() },
   async onPullDownRefresh() {
@@ -102,17 +104,19 @@ export default {
     uni.stopPullDownRefresh()
   },
   onShareAppMessage() {
-    return { title: `苍穹联赛助手｜${this.war ? this.war.clan_name : '当前部落战'}`, path: `/pages/war/current-detail?clan_tag=${encodeURIComponent(this.clanTag)}` }
+    const history = this.isHistory ? `&war_key=${encodeURIComponent(this.warKey)}` : ''
+    return { title: `苍穹联赛助手｜${this.war ? this.war.clan_name : (this.isHistory ? '历史部落战' : '当前部落战')}`, path: `/pages/war/current-detail?clan_tag=${encodeURIComponent(this.clanTag)}${history}` }
   },
   onShareTimeline() {
-    return { title: `苍穹联赛助手｜${this.war ? this.war.clan_name : '当前部落战'}`, query: `clan_tag=${encodeURIComponent(this.clanTag)}` }
+    const history = this.isHistory ? `&war_key=${encodeURIComponent(this.warKey)}` : ''
+    return { title: `苍穹联赛助手｜${this.war ? this.war.clan_name : (this.isHistory ? '历史部落战' : '当前部落战')}`, query: `clan_tag=${encodeURIComponent(this.clanTag)}${history}` }
   },
   methods: {
     async fetchDetail() {
       if (!this.clanTag) { this.loadError = '缺少部落标签'; this.loading = false; return }
       if (!this.war) this.loading = true
       this.loadError = ''
-      try { this.war = await getCurrentWar(this.clanTag) }
+      try { this.war = this.isHistory ? await getWarHistoryDetail(this.clanTag, this.warKey) : await getCurrentWar(this.clanTag) }
       catch (e) { this.loadError = e.message || '战争详情加载失败' }
       finally { this.loading = false }
     },

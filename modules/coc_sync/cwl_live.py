@@ -48,6 +48,19 @@ def _war_tag(value: Any) -> str | None:
     return None if tag in PLACEHOLDER_WAR_TAGS else tag
 
 
+def normalize_cwl_season(value: Any) -> str | None:
+    """把官方 ``YYYY-MM-DD`` 或历史 ``YYYY-MM`` 赛季统一为月份。"""
+    if value is None:
+        return None
+    text = str(value).strip()
+    for fmt in ("%Y-%m", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text, fmt).strftime("%Y-%m")
+        except ValueError:
+            pass
+    return text or None
+
+
 def normalize_cwl_group(raw: dict, team: dict, synced_at: str | None = None) -> dict:
     """规范化官方 leaguegroup 响应，同时保留月度队伍身份。"""
     clans = []
@@ -85,7 +98,7 @@ def normalize_cwl_group(raw: dict, team: dict, synced_at: str | None = None) -> 
         "category": team.get("category") or "combat",
         "member_count": _int(team.get("member_count")),
         "league_level": team.get("league_level") or "-",
-        "season": raw.get("season"),
+        "season": normalize_cwl_season(raw.get("season")),
         "state": raw.get("state") or "unknown",
         "clans": clans,
         "rounds": rounds,

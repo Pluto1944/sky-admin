@@ -41,8 +41,10 @@ def test_cwl_live_scheduler_writes_group_and_war_cache_incrementally(tmp_path, m
             calls["group"] += 1
             if state["fail_group"]:
                 raise RuntimeError("模拟联赛组失败")
+            raw_group = league_group()
+            raw_group["season"] = "2026-09-01"
             return normalize_cwl_group(
-                league_group(), selected_team, "2026-09-03T00:00:00+00:00"
+                raw_group, selected_team, "2026-09-03T00:00:00+00:00"
             )
 
         def fetch_cwl_war(self, war_tag):
@@ -90,3 +92,37 @@ def test_cwl_live_scheduler_skips_outside_month_window(tmp_path, monkeypatch):
         "status": "skipped",
         "reason": "2026-09 已过联赛实时窗口（今天13号）",
     }
+
+
+def test_cwl_live_scheduler_labels_not_in_war_as_waiting(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "cwl-waiting.sqlite3")
+    monkeypatch.setattr(config, "DB_PATH", db_path)
+    db = Database(db_path)
+    db.init_schema()
+    _seed_team(db)
+    db.close()
+
+    class FakeService:
+        def fetch_cwl_group(self, selected_team):
+            return normalize_cwl_group(
+                {"state": "notInWar"},
+                selected_team,
+                "2026-09-01T00:00:00+00:00",
+            )
+
+    monkeypatch.setattr(service_module, "CocSyncService", FakeService)
+    result = _run_cwl_live(
+        force=True,
+        now=datetime(2026, 9, 1, 12, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+    )
+
+    assert result == {
+        "status": "success",
+        "reason": "2026-09 队伍 1（更新 0、等待 1），战争更新 0、跳过 0",
+    }
+    db = Database(db_path)
+    row = db.conn.execute(
+        "SELECT status, error FROM cwl_live_group_cache WHERE period='2026-09'"
+    ).fetchone()
+    assert dict(row) == {"status": "waiting", "error": "等待联赛开启"}
+    db.close()

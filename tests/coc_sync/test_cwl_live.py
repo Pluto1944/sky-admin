@@ -1,6 +1,7 @@
 from modules.coc_sync.cwl_live import (
     build_cwl_dashboard,
     normalize_cwl_group,
+    normalize_cwl_season,
     normalize_cwl_war,
     orient_cwl_war,
 )
@@ -15,6 +16,17 @@ def _dashboard():
         "#W2": normalize_cwl_war(league_war_two(), "#W2", "2026-09-05T00:00:00+00:00"),
     }
     return build_cwl_dashboard(group, wars)
+
+
+def test_cwl_season_accepts_official_date_and_legacy_month_formats():
+    assert normalize_cwl_season("2026-10-01") == "2026-10"
+    assert normalize_cwl_season("2026-10") == "2026-10"
+    assert normalize_cwl_season(None) is None
+
+    raw = league_group()
+    raw["season"] = "2026-10-01"
+    selected_team = {**team(), "period": "2026-10"}
+    assert normalize_cwl_group(raw, selected_team)["season"] == "2026-10"
 
 
 def test_normalize_and_orient_cwl_war_keeps_single_attack_and_best_defense():

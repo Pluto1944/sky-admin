@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 import config
 import modules.coc_sync.service as service_module
-from scripts.scheduler import _current_war_refresh_minutes, _run_current_wars
+from scripts.scheduler import _archive_current_war, _current_war_refresh_minutes, _run_current_wars
 from shared.db.connection import Database
 
 
@@ -179,4 +179,57 @@ def test_scheduler_uses_error_backoff_and_force_override(tmp_path, monkeypatch):
     ).fetchone()
     assert row["failure_count"] == 0
     assert row["attempted_at"] == "2026-09-30T00:05:00+00:00"
+    db.close()
+
+
+def test_archive_current_war_keeps_latest_fifteen_ended_wars(tmp_path):
+    db = Database(str(tmp_path / "history.sqlite3"))
+    db.init_schema()
+    for day in range(1, 18):
+        item = {
+            "clan_tag": "#AAA", "clan_name": "我方", "category": "combat",
+            "status": "war_ended", "state": "warEnded", "war_type": "random",
+            "attacks_per_member": 2, "preparation_start_time": f"202609{day:02d}T000000.000Z",
+            "start_time": f"202609{day:02d}T230000.000Z",
+            "end_time": f"202609{day + 1:02d}T230000.000Z", "result": "victory",
+            "opponent": {"tag": f"#B{day}", "name": f"对手{day}"},
+            "rows": [], "synced_at": "2026-10-01T00:00:00+00:00",
+        }
+        assert _archive_current_war(db, item)
+    db.conn.commit()
+
+    rows = db.conn.execute(
+        "SELECT end_time FROM war_history_cache WHERE clan_tag='#AAA' ORDER BY end_time"
+    ).fetchall()
+    assert len(rows) == 15
+    assert rows[0]["end_time"] == "20260904T230000.000Z"
+    db.close()
+
+
+def test_historical_backfill_does_not_remove_active_snapshot(tmp_path):
+    db = Database(str(tmp_path / "history-active.sqlite3"))
+    db.init_schema()
+    active = {
+        "clan_tag": "#AAA", "clan_name": "我方", "category": "combat",
+        "status": "in_war", "state": "inWar", "war_type": "random",
+        "attacks_per_member": 2, "preparation_start_time": "20261001T000000.000Z",
+        "start_time": "20261002T000000.000Z", "end_time": "20261003T000000.000Z",
+        "result": "leading", "opponent": {"tag": "#ACTIVE", "name": "当前对手"},
+        "rows": [], "synced_at": "2026-10-02T01:00:00+00:00",
+    }
+    ended = {
+        **active,
+        "status": "war_ended", "state": "warEnded",
+        "preparation_start_time": "20260920T000000.000Z",
+        "start_time": "20260921T000000.000Z", "end_time": "20260922T000000.000Z",
+        "result": "victory", "opponent": {"tag": "#ENDED", "name": "历史对手"},
+    }
+    assert _archive_current_war(db, active)
+    assert _archive_current_war(db, ended, cleanup_active=False)
+    db.conn.commit()
+
+    rows = db.conn.execute(
+        "SELECT status FROM war_history_cache WHERE clan_tag='#AAA' ORDER BY status"
+    ).fetchall()
+    assert [row["status"] for row in rows] == ["in_war", "war_ended"]
     db.close()

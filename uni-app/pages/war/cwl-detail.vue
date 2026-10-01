@@ -1,6 +1,6 @@
 <template>
   <view class="detail-page">
-    <TopBar title="返回参赛部落" :showBack="true" backFallback="/pages/war/war" />
+    <TopBar title="返回参赛部落" :showBack="true" :backFallback="listFallback" />
 
     <view v-if="loading" class="state-box"><text class="state-text">加载联赛数据...</text></view>
     <view v-else-if="loadError && !detail" class="state-box">
@@ -138,6 +138,7 @@ export default {
     }
   },
   computed: {
+    listFallback() { return `/pages/war/war?tab=league&period=${encodeURIComponent(this.period || '')}` },
     rounds() { return this.detail && this.detail.rounds ? this.detail.rounds : [] },
     selectedRound() { return this.rounds.find(item => item.round === this.selectedRoundNumber) || this.rounds[0] || null },
     availableTeams() { return this.detail && this.detail.available_teams ? this.detail.available_teams : [] },

@@ -116,6 +116,16 @@ def test_current_war_cache_table_is_created(db):
     } <= columns
 
 
+def test_war_history_cache_table_is_created(db):
+    columns = {
+        row[1] for row in db.conn.execute("PRAGMA table_info(war_history_cache)")
+    }
+    assert {
+        "clan_tag", "war_key", "opponent_tag", "status", "result",
+        "preparation_start_time", "start_time", "end_time", "data_json", "updated_at",
+    } <= columns
+
+
 def test_cwl_live_cache_tables_are_created(db):
     group_columns = {
         row[1] for row in db.conn.execute("PRAGMA table_info(cwl_live_group_cache)")

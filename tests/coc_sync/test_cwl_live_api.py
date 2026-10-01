@@ -91,3 +91,37 @@ def test_cwl_live_summary_keeps_team_when_group_not_synced(db):
     summary = routes.cwl_live("2026-09", db)
     assert summary["clans"][0]["status"] == "waiting"
     assert summary["clans"][0]["category"] == "shell"
+
+
+def test_cwl_available_periods_include_current_and_only_complete_history(db, monkeypatch):
+    monkeypatch.setattr(routes, "_current_cwl_live_period", lambda: "2026-10")
+    _seed(db)
+
+    incomplete = routes.cwl_live("2026-09", db)
+    assert incomplete["available_periods"] == [
+        {"period": "2026-10", "label": "2026年10月", "current": True},
+    ]
+
+    group = json.loads(db.conn.execute(
+        "SELECT data_json FROM cwl_live_group_cache WHERE period='2026-09'"
+    ).fetchone()[0])
+    group["state"] = "ended"
+    db.conn.execute(
+        "UPDATE cwl_live_group_cache SET state='ended', status='ended', data_json=? WHERE period='2026-09'",
+        (json.dumps(group),),
+    )
+    for war_tag in ("#W1", "#W2"):
+        row = db.conn.execute(
+            "SELECT data_json FROM cwl_live_war_cache WHERE war_tag=?", (war_tag,)
+        ).fetchone()
+        war = json.loads(row[0])
+        war["state"] = "warEnded"
+        war["status"] = "war_ended"
+        db.conn.execute(
+            "UPDATE cwl_live_war_cache SET state='warEnded', status='war_ended', data_json=? WHERE war_tag=?",
+            (json.dumps(war), war_tag),
+        )
+    db.conn.commit()
+
+    complete = routes.cwl_live("2026-09", db)
+    assert [item["period"] for item in complete["available_periods"]] == ["2026-10", "2026-09"]

@@ -183,6 +183,28 @@ CREATE TABLE IF NOT EXISTS current_war_cache (
 );
 """
 
+_WAR_HISTORY_CACHE_DDL = """
+CREATE TABLE IF NOT EXISTS war_history_cache (
+    clan_tag               TEXT NOT NULL,
+    war_key                TEXT NOT NULL,
+    clan_name              TEXT NOT NULL,
+    category               TEXT NOT NULL,
+    opponent_tag           TEXT,
+    opponent_name          TEXT,
+    status                 TEXT NOT NULL,
+    result                 TEXT,
+    preparation_start_time TEXT,
+    start_time             TEXT,
+    end_time               TEXT,
+    data_json              TEXT NOT NULL,
+    updated_at             TEXT NOT NULL,
+    PRIMARY KEY(clan_tag, war_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_war_history_clan_end
+ON war_history_cache(clan_tag, end_time DESC);
+"""
+
 _CLAN_PROFILE_CACHE_DDL = """
 CREATE TABLE IF NOT EXISTS clan_profile_cache (
     clan_tag     TEXT PRIMARY KEY,
@@ -257,6 +279,7 @@ _CHILDREN_DDL = (
     + _WAR_RESULTS_DDL
     + _FARM_STATS_DDL
     + _CURRENT_WAR_CACHE_DDL
+    + _WAR_HISTORY_CACHE_DDL
     + _CLAN_PROFILE_CACHE_DDL
     + _CWL_LIVE_GROUP_CACHE_DDL
     + _CWL_LIVE_WAR_CACHE_DDL
@@ -380,6 +403,11 @@ class Database:
                     "ALTER TABLE current_war_cache ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0"
                 )
 
+        # 普通部落战逐场历史归档（每个部落保留最近 15 场已结束战争）
+        wh_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(war_history_cache)")}
+        if not wh_cols:
+            self.conn.executescript(_WAR_HISTORY_CACHE_DDL)
+
         # clan_profile_cache 表迁移（自有部落官方资料缓存）
         cp_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(clan_profile_cache)")}
         if not cp_cols:
@@ -463,7 +491,8 @@ class Database:
         """清空并重建所有业务表（历史数据清零）。"""
         self.conn.execute("PRAGMA foreign_keys = OFF")
         for table in (
-            "cwl_live_war_cache", "cwl_live_group_cache", "current_war_cache",
+            "cwl_live_war_cache", "cwl_live_group_cache", "war_history_cache",
+            "current_war_cache",
             "clan_profile_cache",
             "war_results", "league_results", "league_teams", "results",
             "registrations", "accounts", "sync_jobs",

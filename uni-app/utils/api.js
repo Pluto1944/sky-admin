@@ -143,6 +143,17 @@ export function getCurrentWar(clanTag) {
   return request(`/api/clan/current-wars/${encodeURIComponent(clanTag)}`)
 }
 
+/** 获取全部自有部落最近 15 场已结束普通部落战摘要。 */
+export function getWarHistory(clanTag) {
+  const query = clanTag ? `?clan_tag=${encodeURIComponent(clanTag)}` : ''
+  return request(`/api/clan/war-history${query}`)
+}
+
+/** 获取一场已归档普通部落战的完整详情。 */
+export function getWarHistoryDetail(clanTag, warKey) {
+  return request(`/api/clan/war-history/${encodeURIComponent(clanTag)}/${encodeURIComponent(warKey)}`)
+}
+
 /** 获取当前月份 CWL 参赛部落摘要。 */
 export function getCwlLive(period) {
   const query = period ? `?period=${encodeURIComponent(period)}` : ''
@@ -169,6 +180,8 @@ export default {
   getFarmConfig,
   getCurrentWars,
   getCurrentWar,
+  getWarHistory,
+  getWarHistoryDetail,
   getCwlLive,
   getCwlLiveDetail
 }

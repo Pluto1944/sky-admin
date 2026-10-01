@@ -5,6 +5,7 @@ from fastapi import HTTPException
 
 import api_server.routes as routes
 from modules.coc_sync.current_war import normalize_current_war
+from scripts.scheduler import _archive_current_war
 
 from .test_current_war import _war
 
@@ -54,4 +55,33 @@ def test_current_war_detail_returns_rows_and_rejects_external_clan(db, monkeypat
 
     with pytest.raises(HTTPException) as exc:
         routes.current_war_detail("#OUTSIDE", db)
+    assert exc.value.status_code == 404
+
+
+def test_war_history_returns_lightweight_list_and_full_detail(db, monkeypatch):
+    monkeypatch.setattr(routes, "CLANS", [
+        {"tag": "#AAA", "name": "配置名", "category": "combat", "enabled": True},
+    ])
+    raw = _war()
+    raw["state"] = "warEnded"
+    item = normalize_current_war(
+        raw, {"tag": "#AAA", "name": "配置名", "category": "combat"},
+        "2026-09-27T02:00:00+00:00",
+    )
+    assert _archive_current_war(db, item)
+    db.conn.commit()
+
+    listing = routes.war_history(None, db)
+    assert listing["limit_per_clan"] == 15
+    assert len(listing["wars"]) == 1
+    assert "rows" not in listing["wars"][0]
+    war_key = listing["wars"][0]["war_key"]
+
+    detail = routes.war_history_detail("#aaa", war_key, db)
+    assert detail["is_history"] is True
+    assert detail["status"] == "war_ended"
+    assert len(detail["rows"]) == 2
+
+    with pytest.raises(HTTPException) as exc:
+        routes.war_history_detail("#AAA", "missing", db)
     assert exc.value.status_code == 404

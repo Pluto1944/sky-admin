@@ -146,6 +146,64 @@ def _current_war_refresh_minutes(cache: dict, now: datetime) -> int:
     return CURRENT_WAR_REFRESH_MINUTES.get(cache.get("status"), 30)
 
 
+def _archive_current_war(
+    db: Database,
+    item: dict,
+    keep_ended: int = 15,
+    cleanup_active: bool = True,
+) -> bool:
+    """把普通战争快照幂等归档，并仅保留该部落最近若干场已结束战争。"""
+    from modules.coc_sync.war_history import is_archivable_war, war_history_record
+
+    if not is_archivable_war(item):
+        return False
+    record = war_history_record(item)
+    db.conn.execute(
+        """INSERT INTO war_history_cache
+           (clan_tag, war_key, clan_name, category, opponent_tag, opponent_name,
+            status, result, preparation_start_time, start_time, end_time,
+            data_json, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(clan_tag, war_key) DO UPDATE SET
+               clan_name = excluded.clan_name,
+               category = excluded.category,
+               opponent_tag = excluded.opponent_tag,
+               opponent_name = excluded.opponent_name,
+               status = excluded.status,
+               result = excluded.result,
+               preparation_start_time = excluded.preparation_start_time,
+               start_time = excluded.start_time,
+               end_time = excluded.end_time,
+               data_json = excluded.data_json,
+               updated_at = excluded.updated_at""",
+        (
+            record["clan_tag"], record["war_key"], record["clan_name"],
+            record["category"], record["opponent_tag"], record["opponent_name"],
+            record["status"], record["result"], record["preparation_start_time"],
+            record["start_time"], record["end_time"],
+            json.dumps(record["data"], ensure_ascii=False), record["updated_at"],
+        ),
+    )
+    # 实时同步发现新战争时清理旧草稿；历史回填不得删除当前活动战争快照。
+    if cleanup_active:
+        db.conn.execute(
+            """DELETE FROM war_history_cache
+               WHERE clan_tag = ? AND status != 'war_ended' AND war_key != ?""",
+            (record["clan_tag"], record["war_key"]),
+        )
+    db.conn.execute(
+        """DELETE FROM war_history_cache
+           WHERE clan_tag = ? AND status = 'war_ended' AND war_key IN (
+               SELECT war_key FROM war_history_cache
+               WHERE clan_tag = ? AND status = 'war_ended'
+               ORDER BY end_time DESC, war_key DESC
+               LIMIT -1 OFFSET ?
+           )""",
+        (record["clan_tag"], record["clan_tag"], keep_ended),
+    )
+    return True
+
+
 def _run_current_wars(force: bool = False, now: datetime | None = None) -> dict:
     """按战争状态增量拉取已启用自有部落，写入当前战争缓存。"""
     from modules.coc_sync.service import CocSyncService
@@ -221,6 +279,7 @@ def _run_current_wars(force: bool = False, now: datetime | None = None) -> dict:
                 failure_count,
             ),
         )
+        _archive_current_war(db, item)
         if item["status"] == "error":
             failed += 1
         else:
@@ -336,7 +395,7 @@ def _run_cwl_live(force: bool = False, now: datetime | None = None) -> dict:
                 else:
                     message = (
                         f"官方返回赛季 {group.get('season')}，与 {period} 不一致"
-                        if group else "等待联赛开启"
+                        if group and group.get("season") else "等待联赛开启"
                     )
                     db.conn.execute(
                         """INSERT INTO cwl_live_group_cache

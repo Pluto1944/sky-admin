@@ -26,6 +26,7 @@ from modules.player.repository import PlayerRepository
 from modules.coc_sync.current_war import current_war_summary
 from modules.coc_sync.cwl_live import build_cwl_dashboard, group_war_tags
 from modules.coc_sync.official.mapper import normalize_tag
+from modules.coc_sync.war_history import war_history_summary
 from .deps import get_repo, get_db
 from .auth import create_token, require_user
 from shared.db.connection import Database
@@ -311,6 +312,97 @@ def current_war_detail(clan_tag: str, db: Database = Depends(get_db)):
     return item
 
 
+@router.get("/clan/war-history")
+def war_history(clan_tag: Optional[str] = None, db: Database = Depends(get_db)):
+    """返回每个自有部落最近 15 场已结束普通部落战的轻量摘要。"""
+    configured_by_tag = {
+        normalize_tag(clan["tag"]): clan for clan in _enabled_clans()
+    }
+    selected = normalize_tag(clan_tag) if clan_tag else None
+    if selected and selected not in configured_by_tag:
+        raise HTTPException(status_code=404, detail="部落不在允许查询的自有部落列表中")
+
+    rows = db.conn.execute(
+        """SELECT clan_tag, war_key, data_json, updated_at
+           FROM war_history_cache
+           WHERE status = 'war_ended'
+           ORDER BY end_time DESC, war_key DESC"""
+    ).fetchall()
+    counts: dict[str, int] = defaultdict(int)
+    wars = []
+    updated = []
+    for row in rows:
+        tag = normalize_tag(row["clan_tag"])
+        if tag not in configured_by_tag or (selected and tag != selected) or counts[tag] >= 15:
+            continue
+        item = _load_json(row["data_json"])
+        if not item:
+            continue
+        configured = configured_by_tag[tag]
+        item.update({
+            "clan_tag": tag,
+            "clan_name": configured.get("name") or tag,
+            "category": configured.get("category", "normal"),
+        })
+        wars.append(war_history_summary(item, row["war_key"]))
+        counts[tag] += 1
+        if row["updated_at"]:
+            updated.append(row["updated_at"])
+
+    categories = []
+    seen_categories = set()
+    clans = []
+    for configured in _enabled_clans():
+        tag = normalize_tag(configured["tag"])
+        category = configured.get("category", "normal")
+        clans.append({
+            "clan_tag": tag,
+            "clan_name": configured.get("name") or tag,
+            "category": category,
+        })
+        if category not in seen_categories:
+            seen_categories.add(category)
+            categories.append({
+                "key": category,
+                "label": CLAN_CATEGORY_LABELS.get(category, category),
+            })
+    return {
+        "limit_per_clan": 15,
+        "updated_at": max(updated) if updated else None,
+        "categories": categories,
+        "clans": clans,
+        "wars": wars,
+    }
+
+
+@router.get("/clan/war-history/{clan_tag}/{war_key}")
+def war_history_detail(clan_tag: str, war_key: str, db: Database = Depends(get_db)):
+    """返回一场已归档普通部落战的完整详情。"""
+    normalized = normalize_tag(clan_tag)
+    configured = next(
+        (clan for clan in _enabled_clans() if normalize_tag(clan["tag"]) == normalized),
+        None,
+    )
+    if configured is None:
+        raise HTTPException(status_code=404, detail="部落不在允许查询的自有部落列表中")
+    row = db.conn.execute(
+        """SELECT data_json FROM war_history_cache
+           WHERE clan_tag = ? AND war_key = ? AND status = 'war_ended'""",
+        (normalized, war_key),
+    ).fetchone()
+    item = _load_json(row["data_json"]) if row else None
+    if not item:
+        raise HTTPException(status_code=404, detail="历史部落战不存在")
+    item.update({
+        "war_key": war_key,
+        "clan_tag": normalized,
+        "clan_name": configured.get("name") or normalized,
+        "category": configured.get("category", "normal"),
+        "is_history": True,
+    })
+    return item
+
+
 # ── CWL 联赛实时看板 ──────────────────────────────────────────
 
 
@@ -402,6 +494,61 @@ def _pending_cwl_summary(team: dict, cache: dict | None = None) -> dict:
     }
 
 
+def _cwl_live_available_periods(db: Database) -> list[dict]:
+    """返回当前月份，以及逐场详情完整的历史月份。"""
+    current = _current_cwl_live_period()
+    periods = [
+        row["period"] for row in db.conn.execute(
+            """SELECT DISTINCT period FROM league_teams
+               WHERE category IN ('combat', 'shell')
+               ORDER BY period DESC"""
+        ).fetchall()
+    ]
+    if current not in periods:
+        periods.insert(0, current)
+
+    result = []
+    for period in periods:
+        teams = _cwl_live_teams(db, period)
+        if period == current:
+            result.append({"period": period, "label": f"{period[:4]}年{int(period[5:])}月", "current": True})
+            continue
+        if not teams:
+            continue
+        group_rows = db.conn.execute(
+            "SELECT clan_tag, data_json FROM cwl_live_group_cache WHERE period = ?",
+            (period,),
+        ).fetchall()
+        groups = {
+            normalize_tag(row["clan_tag"]): _load_json(row["data_json"])
+            for row in group_rows
+        }
+        war_rows = db.conn.execute(
+            "SELECT war_tag, data_json FROM cwl_live_war_cache WHERE season = ?",
+            (period,),
+        ).fetchall()
+        wars = {
+            normalize_tag(row["war_tag"]): _load_json(row["data_json"])
+            for row in war_rows
+        }
+        complete = True
+        for team in teams:
+            group = groups.get(team.get("clan_tag"))
+            if not group or group.get("season") != period:
+                complete = False
+                break
+            war_tags = group_war_tags(group)
+            if not war_tags or any(
+                tag not in wars or not wars[tag] or wars[tag].get("status") != "war_ended"
+                for tag in war_tags
+            ):
+                complete = False
+                break
+        if complete:
+            result.append({"period": period, "label": f"{period[:4]}年{int(period[5:])}月", "current": False})
+    return result
+
+
 def _build_cwl_live_summary(db: Database, period: str) -> dict:
     teams = _cwl_live_teams(db, period)
     clans = []
@@ -427,6 +574,7 @@ def _build_cwl_live_summary(db: Database, period: str) -> dict:
             {"key": "combat", "label": "实战队"},
             {"key": "shell", "label": "壳子队"},
         ],
+        "available_periods": _cwl_live_available_periods(db),
         "clans": clans,
     }
 

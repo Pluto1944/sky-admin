@@ -47,6 +47,7 @@
 | `wechat_users` | 微信用户绑定 | `openid` | 微信小程序 | 实时（用户登录） |
 | `farm_stats` | 互刷部落统计缓存 | `clan_tag` | COC 官方 API | **周期**（每 30 分钟） |
 | `current_war_cache` | 自有部落当前战争缓存 | `clan_tag` | COC 官方 API | **周期**（每 2 分钟检查，按状态限频） |
+| `war_history_cache` | 自有部落最近 15 场普通战争归档 | `(clan_tag, war_key)` | current_wars / ClashKing 回填 | **随 current_wars 更新** |
 | `clan_profile_cache` | 自有部落官方资料缓存 | `clan_tag` | COC 官方 API | **周期**（每 6 小时） |
 | `cwl_live_group_cache` | 当月联赛组缓存 | `(period, clan_tag)` | COC 官方 API | **周期**（联赛窗口） |
 | `cwl_live_war_cache` | CWL 逐场战争缓存 | `war_tag` | COC 官方 API | **周期**（活跃战争每 2 分钟） |
@@ -68,6 +69,7 @@
 | `wechat_users` | `api_server`（登录/绑定） | `api_server` |
 | `farm_stats` | `sync_farm_stats` | `api_server`（farm-config） |
 | `current_war_cache` | `current_wars` | `api_server`（current-wars） |
+| `war_history_cache` | `current_wars` / 手工回填 | `api_server`（war-history） |
 | `clan_profile_cache` | `coc_sync` | `api_server`（clan overview 详情） |
 | `cwl_live_group_cache` | `cwl_live` | `api_server`（cwl-live） |
 | `cwl_live_war_cache` | `cwl_live` | `api_server`（cwl-live） |
@@ -77,7 +79,7 @@
 
 | job_id | 数据表 | 脚本 | 数据源 | 频率 | 前端接口 |
 |--------|--------|------|--------|------|----------|
-| `current_wars` | `current_war_cache` | `scheduler.py` | COC 官方 API | 每 2 分钟检查，按状态和开战时间限频 | `/api/clan/current-wars` |
+| `current_wars` | `current_war_cache` + `war_history_cache` | `scheduler.py` | COC 官方 API | 每 2 分钟检查，按状态和开战时间限频 | `/api/clan/current-wars`、`/api/clan/war-history` |
 | `cwl_live` | `cwl_live_group_cache` + `cwl_live_war_cache` | `scheduler.py` | COC 官方 API | 活跃期每 2 分钟 | `/api/clan/cwl-live` |
 | `coc_sync` | `accounts`、`clan_profile_cache` | `CocSyncService` | COC 官方 API | 每 6 小时 | `/api/members`、`/api/clan/overview/{tag}` |
 | `farm_stats` | `farm_stats` | `sync_farm_stats.py` | COC 官方 API | 每 30 分钟 | `/api/clan/farm-config` |
@@ -99,6 +101,8 @@
 | 状态限频 | 战斗日 2 分钟；准备日通常 30 分钟、距开战不超过 30 分钟时 2 分钟；无战争和已结束 5 分钟；普通战页面的 CWL 跳转状态 30 分钟 |
 | 失败退避 | 连续失败依次等待 5、10、20、30 分钟，成功后清零 |
 | 逻辑 | 遍历全部已启用自有部落 → 仅拉取到期部落 → 标准化双方对位/出刀/防守 → 每部落一行覆盖缓存；单部落失败不阻塞其余部落 |
+
+成功取得普通战争时，同一事务按稳定 `war_key` 更新 `war_history_cache`。准备日和战斗日提前建立快照，结束后固化最终结果；CWL 不归档，每个部落只保留最近 15 场已结束战争。历史页面不触发外部同步。
 
 `sync_jobs.interval_min` 会持久化已有环境的设置。将既有部署从旧的 5 分钟调整为 2 分钟时，
 部署后需保持 `python scripts/scheduler.py --set-interval current_wars 2`，该值是检查粒度，不代表每次都请求全部部落；新建数据库直接使用代码中的 2 分钟默认值。手动执行 `--once current_wars` 会忽略单部落限频并立即全量刷新。

@@ -85,6 +85,7 @@ python scripts/fetch_cwl_data.py --period 2026-07
 | `sync_and_export.sh` | 长期维护：COC 同步 → 导出玩家档案 |
 | `fetch_cwl_data.sh` | `fetch_cwl_data.py` 的便捷包装 |
 | `backfill_cwl_live.py` | 从 ClashKing 历史战争日志重建指定月份的联赛看板缓存；默认 dry-run，`--apply` 才写库 |
+| `backfill_war_history.py` | 从 ClashKing 重建各自有部落最近 15 场普通战争详情；默认 dry-run，`--apply` 才写库 |
 
 ---
 
@@ -106,6 +107,26 @@ venv/bin/python scripts/backfill_cwl_live.py --period 2026-09 --apply
 
 脚本不会覆盖目标月份已有的 `cwl_live_group_cache` 或 `cwl_live_war_cache`。
 它是一次性运维修复工具，不替代 `scheduler.py` 的月初实时同步。
+
+### 最近普通部落战回填
+
+先对所有启用自有部落执行只读校验：
+
+```bash
+source scripts/load_env.sh
+venv/bin/python scripts/backfill_war_history.py
+```
+
+确认输出完整并备份 `data/league.db` 后，才执行：
+
+```bash
+venv/bin/python scripts/backfill_war_history.py --apply
+```
+
+`--apply` 只有在全部已启用部落均拉取成功后才开启事务写入；写入历史战争时不会删除
+实时同步保存的准备日或战斗日快照。生产执行前仍须先备份 `data/league.db`。
+
+脚本按部落幂等覆盖同一场战争并裁剪到最近 15 场；CWL 和不完整历史记录不会写入。
 
 ---
 
