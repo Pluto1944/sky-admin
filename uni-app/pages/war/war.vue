@@ -217,7 +217,6 @@
 import TopBar from '@/components/TopBar.vue'
 import { getCurrentWars, getWarHistory, getCwlLive } from '@/utils/api.js'
 
-const STATUS_ORDER = { in_war: 0, preparation: 1, war_ended: 2, cwl: 3, not_in_war: 4, sync_pending: 5, error: 6 }
 const CACHE_REFRESH_INTERVAL_MS = 60 * 1000
 const BUSINESS_TIMEZONE_OFFSET_MS = 8 * 60 * 60 * 1000
 
@@ -287,10 +286,7 @@ export default {
         .filter(clan => this.selectedClans.indexOf(clan.clan_tag) >= 0)
         .filter(clan => this.statusFilter === 'all' || clan.status === this.statusFilter)
         .slice()
-        .sort((a, b) => {
-          const statusDiff = (STATUS_ORDER[a.status] == null ? 99 : STATUS_ORDER[a.status]) - (STATUS_ORDER[b.status] == null ? 99 : STATUS_ORDER[b.status])
-          return statusDiff || (a.config_order || 0) - (b.config_order || 0)
-        })
+        .sort((a, b) => (a.config_order == null ? 9999 : a.config_order) - (b.config_order == null ? 9999 : b.config_order))
     },
     filteredHistoryWars() {
       return this.historyWars
