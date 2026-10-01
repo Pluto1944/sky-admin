@@ -143,11 +143,11 @@ coc_sync:
     - tag: "#LQR"
       name: "秋雨不问梧桐意"
       enabled: true
-    - tag: "#U2L"
-      name: "仙境"
-      enabled: true
     - tag: "#2COUL898"
       name: "Avalon"
+      enabled: true
+    - tag: "#U2L"
+      name: "仙境"
       enabled: true
     - tag: "#YCOC"
       name: "Minecraft(互刷一营)"
