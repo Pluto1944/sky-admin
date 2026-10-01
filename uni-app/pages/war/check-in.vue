@@ -194,7 +194,8 @@ export default {
 </script>
 
 <style>
-.check-in-container { flex: 1; min-height: 0; display: flex; flex-direction: column; background: #0f0f23; color: #d8dce8; }
+:host { width: 100%; height: 0; min-height: 0; flex: 1; display: block; }
+.check-in-container { width: 100%; height: 100%; min-height: 0; display: flex; flex-direction: column; background: #0f0f23; color: #d8dce8; }
 .inner-tab-bar { flex-shrink: 0; height: 72rpx; display: flex; border-bottom: 1rpx solid #1a1a2e; background: #141428; }
 .inner-tab { flex: 1; display: flex; align-items: center; justify-content: center; box-sizing: border-box; color: #66708a; font-size: 28rpx; border-bottom: 4rpx solid transparent; }
 .inner-tab.active { color: #5fa8ff; border-bottom-color: #4a90d9; font-weight: 600; }

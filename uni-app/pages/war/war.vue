@@ -182,7 +182,13 @@
       </scroll-view>
     </view>
 
-    <CwlCheckIn v-else ref="checkIn" :initial-view="checkInView" @view-change="onCheckInViewChange" />
+    <CwlCheckIn
+      v-else
+      ref="checkIn"
+      class="check-in-host"
+      :initial-view="checkInView"
+      @view-change="onCheckInViewChange"
+    />
 
     <view v-if="filterVisible" class="filter-mask" @tap="closeFilter">
       <view class="filter-panel" @tap.stop>
@@ -610,6 +616,7 @@ export default {
 
 <style>
 .page-container { height: 100vh; display: flex; flex-direction: column; background: #0f0f23; }
+.check-in-host { width: 100%; height: 0; min-height: 0; flex: 1; display: block; }
 .war-pane, .content-area { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .war-toolbar { flex-shrink: 0; height: 72rpx; padding: 0 24rpx; display: flex; align-items: center; justify-content: space-between; background: #141428; border-bottom: 1rpx solid #2a2a4a; }
 .toolbar-title-wrap, .toolbar-actions { display: flex; align-items: center; }.toolbar-title { color: #d8dce8; font-size: 28rpx; font-weight: 600; }.toolbar-count { margin-left: 12rpx; color: #66708a; font-size: 22rpx; }.filter-trigger { padding: 12rpx; color: #aab4c8; font-size: 25rpx; }
