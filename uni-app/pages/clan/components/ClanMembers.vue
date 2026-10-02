@@ -27,11 +27,11 @@
     <scroll-view v-else scroll-x scroll-y class="clan-members-table-scroll">
       <view class="clan-members-table-wrap">
         <view class="clan-members-tr clan-members-head">
-          <view class="clan-members-td cm-name" @tap="onSort('account_name')">昵称{{ sortMark('account_name') }}</view><view class="clan-members-td cm-owner">归属人</view><view class="clan-members-td cm-clan" @tap="onSort('clan_tag')">部落{{ sortMark('clan_tag') }}</view><view class="clan-members-td cm-role">职位</view><view class="clan-members-td cm-th" @tap="onSort('town_hall_level')">本{{ sortMark('town_hall_level') }}</view><view class="clan-members-td cm-exp" @tap="onSort('exp_level')">经验{{ sortMark('exp_level') }}</view><view class="clan-members-td cm-trophy" @tap="onSort('trophies')">奖杯{{ sortMark('trophies') }}</view><view class="clan-members-td cm-league">联赛</view><view class="clan-members-td cm-score" @tap="onSort('history_score')">历史分{{ sortMark('history_score') }}</view><view class="clan-members-td cm-status">报名状态</view><view class="clan-members-td cm-member">成员状态</view><view class="clan-members-td cm-reg">最近报名</view><view class="clan-members-td cm-sync">最近同步</view>
+          <view class="clan-members-td cm-name" @tap="onSort('account_name')">昵称{{ sortMark('account_name') }}</view><view class="clan-members-td cm-tag">玩家标签</view><view class="clan-members-td cm-clan" @tap="onSort('clan_tag')">部落{{ sortMark('clan_tag') }}</view><view class="clan-members-td cm-role">职位</view><view class="clan-members-td cm-th" @tap="onSort('town_hall_level')">本{{ sortMark('town_hall_level') }}</view><view class="clan-members-td cm-league">联赛</view><view class="clan-members-td cm-trophy" @tap="onSort('trophies')">奖杯{{ sortMark('trophies') }}</view><view class="clan-members-td cm-attacks" @tap="onSort('season_attack_wins')">赛季进攻{{ sortMark('season_attack_wins') }}</view><view class="clan-members-td cm-donation" @tap="onSort('donations')">赛季捐兵{{ sortMark('donations') }}</view><view class="clan-members-td cm-donation" @tap="onSort('donations_received')">赛季收兵{{ sortMark('donations_received') }}</view><view class="clan-members-td cm-activity" @tap="onSort('last_activity_at')">最近活动{{ sortMark('last_activity_at') }}</view><view class="clan-members-td cm-war" @tap="onSort('war_recent_15')">普战近15战{{ sortMark('war_recent_15') }}</view><view class="clan-members-td cm-cwl" @tap="onSort('cwl_recent_3m')">联赛近3月{{ sortMark('cwl_recent_3m') }}</view><view class="clan-members-td cm-capital" @tap="onSort('capital_recent_4w')">都城近4周{{ sortMark('capital_recent_4w') }}</view><view class="clan-members-td cm-games" @tap="onSort('clan_games')">竞赛贡献{{ sortMark('clan_games') }}</view>
         </view>
         <view v-if="!sortedMembers.length" class="clan-members-no-result">没有符合条件的成员</view>
         <view v-for="(item, idx) in sortedMembers" :key="item.player_tag" class="clan-members-tr" :class="{ 'clan-members-even': idx % 2 === 1 }">
-          <view class="clan-members-td cm-name clan-members-name-text">{{ item.account_name || '-' }}</view><view class="clan-members-td cm-owner">{{ item.player_name || '-' }}</view><view class="clan-members-td cm-clan">{{ item.clan_tag || '-' }}</view><view class="clan-members-td cm-role">{{ formatRole(item.clan_role) }}</view><view class="clan-members-td cm-th">{{ item.town_hall_level || '-' }}</view><view class="clan-members-td cm-exp">{{ item.exp_level || '-' }}</view><view class="clan-members-td cm-trophy">{{ item.trophies || 0 }}</view><view class="clan-members-td cm-league">{{ item.league_name || '-' }}</view><view class="clan-members-td cm-score">{{ item.history_score || 0 }}</view><view class="clan-members-td cm-status">{{ formatStatus(item.status) }}</view><view class="clan-members-td cm-member">{{ formatStatus(item.membership_status) }}</view><view class="clan-members-td cm-reg">{{ item.last_reg_period || '-' }}</view><view class="clan-members-td cm-sync">{{ formatTime(item.last_synced_at) }}</view>
+          <view class="clan-members-td cm-name clan-members-name-text"><text>{{ item.account_name || '-' }}</text><text v-if="item.membership_status === 'left'" class="clan-members-left-badge">已离开</text></view><view class="clan-members-td cm-tag">{{ item.player_tag || '-' }}</view><view class="clan-members-td cm-clan">{{ item.clan_name || item.clan_tag || '-' }}</view><view class="clan-members-td cm-role">{{ formatRole(item.clan_role) }}</view><view class="clan-members-td cm-th">{{ item.town_hall_level || '-' }}</view><view class="clan-members-td cm-league">{{ item.league_name || '-' }}</view><view class="clan-members-td cm-trophy">{{ numberText(item.trophies) }}</view><view class="clan-members-td cm-attacks">{{ numberText(item.season_attack_wins) }}</view><view class="clan-members-td cm-donation">{{ numberText(item.donations) }}</view><view class="clan-members-td cm-donation">{{ numberText(item.donations_received) }}</view><view class="clan-members-td cm-activity clan-members-two-lines"><text>{{ activityTime(item) }}</text><text class="clan-members-subline">{{ activityReason(item) }}</text></view><view class="clan-members-td cm-war clan-members-two-lines"><text>{{ warLine1(item.war_recent_15) }}</text><text class="clan-members-subline">{{ warLine2(item.war_recent_15) }}</text></view><view class="clan-members-td cm-cwl clan-members-two-lines"><text>{{ cwlLine1(item.cwl_recent_3m) }}</text><text class="clan-members-subline">{{ cwlLine2(item.cwl_recent_3m) }}</text></view><view class="clan-members-td cm-capital clan-members-two-lines"><text>{{ capitalLine1(item.capital_recent_4w) }}</text><text class="clan-members-subline">{{ capitalLine2(item.capital_recent_4w) }}</text></view><view class="clan-members-td cm-games clan-members-two-lines"><text>{{ gamesLine1(item.clan_games) }}</text><text class="clan-members-subline">{{ gamesLine2(item.clan_games) }}</text></view>
         </view>
       </view>
     </scroll-view>
@@ -71,13 +71,13 @@ export default {
   name: 'ClanMembers',
   props: { initialClanTag: { type: String, default: '' } },
   data() {
-    return { members: [], allowedClans: [], loading: true, updatedAt: '', sortKey: 'town_hall_level', sortOrder: 'desc', searchText: '', memberFilter: 'all', clanFilters: [], filterPanelVisible: false, draftMemberFilter: 'all', draftClanFilters: [] }
+    return { members: [], allowedClans: [], loading: true, updatedAt: '', sortKey: 'town_hall_level', sortOrder: 'desc', searchText: '', memberFilter: 'member', clanFilters: [], filterPanelVisible: false, draftMemberFilter: 'member', draftClanFilters: [] }
   },
   computed: {
     memberFilterOptions() { return [{ key: 'all', label: '全部成员' }, { key: 'member', label: '仅在部落' }, { key: 'left', label: '已离开' }] },
     clanOptions() { return this.allowedClans },
     activeFilterCount() {
-      return (this.memberFilter !== 'all' ? 1 : 0) + this.clanFilters.length
+      return (this.memberFilter !== 'member' ? 1 : 0) + this.clanFilters.length
     },
     hasActiveFilters() {
       return Boolean(this.searchText || this.activeFilterCount)
@@ -104,7 +104,8 @@ export default {
       })
       const key = this.sortKey
       result.sort((x, y) => {
-        const xv = x[key]; const yv = y[key]
+        const xv = this.sortValue(x, key); const yv = this.sortValue(y, key)
+        if (xv == null && yv == null) return 0
         if (xv == null) return 1
         if (yv == null) return -1
         const comparison = typeof xv === 'number' && typeof yv === 'number' ? xv - yv : String(xv).localeCompare(String(yv), 'zh-CN')
@@ -128,8 +129,7 @@ export default {
     applyResponse(res) {
       this.members = res.members || []
       this.allowedClans = res.clans || []
-      const times = this.members.map(item => item.last_synced_at).filter(Boolean).sort()
-      this.updatedAt = times.length ? this.formatTime(times[times.length - 1]) : ''
+      this.updatedAt = res.updated_at ? this.formatTime(res.updated_at) : ''
       this.applyInitialClan()
     },
     applyInitialClan() {
@@ -150,7 +150,8 @@ export default {
       }
     },
     formatRole(value) { return ({ leader: '首领', coLeader: '副首领', admin: '长老', member: '成员' }[value] || value || '-') },
-    formatStatus(value) { return value === 'member' ? '在部落' : value === 'left' ? '已离开' : '-' },
+    numberText(value) { return value == null ? '-' : value },
+    percent(value) { return value == null ? '-' : `${Number(value).toFixed(1).replace('.0', '')}%` },
     formatTime(value) {
       if (!value) return '-'
       const date = new Date(String(value).replace('+00:00', 'Z'))
@@ -161,6 +162,40 @@ export default {
       const minute = String(date.getMinutes()).padStart(2, '0')
       return `${month}-${day} ${hour}:${minute}`
     },
+    relativeTime(value) {
+      if (!value) return '-'
+      const date = new Date(String(value).replace('+00:00', 'Z'))
+      if (isNaN(date.getTime())) return '-'
+      const minutes = Math.max(0, Math.floor((Date.now() - date.getTime()) / 60000))
+      if (minutes < 60) return `${Math.max(1, minutes)}分钟前`
+      const hours = Math.floor(minutes / 60)
+      if (hours < 24) return `${hours}小时前`
+      const days = Math.floor(hours / 24)
+      return days < 30 ? `${days}天前` : this.formatTime(value)
+    },
+    activityTime(item) { return item.last_activity_at ? this.relativeTime(item.last_activity_at) : '暂未检测到' },
+    activityReason(item) {
+      if (!item.last_activity_at) return item.activity_observed_since ? `观察始于 ${this.formatTime(item.activity_observed_since)}` : '尚未开始观察'
+      const labels = { donations: '捐兵增加', donations_received: '收兵增加', exp_level: '经验提升', town_hall_level: '大本升级', name: '昵称变化', player_house: '玩家小屋变化', season_attack_wins: '赛季进攻', war_attack: '部落战出刀', cwl_attack: '联赛出刀' }
+      return (item.last_activity_reasons || []).map(key => labels[key] || key).join('、') || '公开数据变化'
+    },
+    warLine1(stats) { return stats && stats.attacks ? `三星 ${this.percent(stats.three_star_rate)} · ${stats.three_stars}/${stats.attacks}` : '-' },
+    warLine2(stats) { return stats && stats.attacks ? `出刀 ${this.percent(stats.attack_rate)} · ${stats.attacks}/${stats.available_attacks}` : '' },
+    cwlLine1(stats) { return stats && stats.attacks ? `三星 ${this.percent(stats.three_star_rate)} · ${stats.three_stars}/${stats.attacks}` : '-' },
+    cwlLine2(stats) { return stats && stats.attacks ? `出刀 ${stats.attacks}次` : '' },
+    compactNumber(value) { if (value == null) return '-'; if (value >= 1000000) return `${(value / 1000000).toFixed(1)}M`; if (value >= 1000) return `${(value / 1000).toFixed(1)}K`; return String(value) },
+    capitalLine1(stats) { return stats && stats.weeks ? `掠夺 ${this.compactNumber(stats.looted)}` : '-' },
+    capitalLine2(stats) { return stats && stats.weeks ? `出刀 ${stats.attacks}/${stats.available_attacks} · 均${this.compactNumber(stats.loot_per_attack)}` : '' },
+    gamesLine1(stats) { return stats ? `${stats.period || '-'} ${stats.complete ? this.numberText(stats.points) : '记录不完整'}` : '-' },
+    gamesLine2(stats) { return stats && stats.average_3 != null ? `近${stats.period_count}期均 ${Math.round(stats.average_3)}` : '' },
+    sortValue(item, key) {
+      if (key === 'war_recent_15') return item.war_recent_15 && item.war_recent_15.three_star_rate
+      if (key === 'cwl_recent_3m') return item.cwl_recent_3m && item.cwl_recent_3m.three_star_rate
+      if (key === 'capital_recent_4w') return item.capital_recent_4w && item.capital_recent_4w.looted
+      if (key === 'clan_games') return item.clan_games && item.clan_games.points
+      if (key === 'last_activity_at') return item.last_activity_at ? new Date(String(item.last_activity_at).replace('+00:00', 'Z')).getTime() : null
+      return item[key]
+    },
     onSort(key) { if (this.sortKey === key) this.sortOrder = this.sortOrder === 'desc' ? 'asc' : 'desc'; else { this.sortKey = key; this.sortOrder = 'desc' } },
     sortMark(key) { return this.sortKey === key ? (this.sortOrder === 'desc' ? '↓' : '↑') : '' },
     onFilter() { this.draftMemberFilter = this.memberFilter; this.draftClanFilters = this.clanFilters.slice(); this.filterPanelVisible = true },
@@ -170,7 +205,7 @@ export default {
     onSearch() {
       uni.showModal({ title: '搜索成员', editable: true, placeholderText: '输入昵称、玩家标签或部落标签', content: this.searchText, success: (res) => { if (res.confirm) this.searchText = (res.content || '').trim() } })
     },
-    clearFilters() { this.searchText = ''; this.memberFilter = 'all'; this.clanFilters = []; this.draftMemberFilter = 'all'; this.draftClanFilters = []; this.filterPanelVisible = false }
+    clearFilters() { this.searchText = ''; this.memberFilter = 'member'; this.clanFilters = []; this.draftMemberFilter = 'member'; this.draftClanFilters = []; this.filterPanelVisible = false }
   }
 }
 </script>
@@ -193,14 +228,17 @@ export default {
 .clan-members-tool-badge { position: absolute; top: -9rpx; right: -7rpx; display: flex; align-items: center; justify-content: center; min-width: 32rpx; height: 32rpx; padding: 0 5rpx; box-sizing: border-box; color: #fff; background: #4a90d9; border: 3rpx solid #141428; border-radius: 18rpx; font-size: 18rpx; font-weight: 700; }
 .clan-members-state { flex: 1; display: flex; align-items: center; justify-content: center; color: #8890a0; font-size: 28rpx; }
 .clan-members-table-scroll { flex: 1; min-height: 0; width: 100%; }
-.clan-members-table-wrap { width: 1570rpx; padding-bottom: 100rpx; }
-.clan-members-tr { display: flex; flex-direction: row; width: 1570rpx; height: 72rpx; align-items: center; border-bottom: 2rpx solid #33334d; }
+.clan-members-table-wrap { width: 2260rpx; padding-bottom: 100rpx; }
+.clan-members-tr { display: flex; flex-direction: row; width: 2260rpx; height: 94rpx; align-items: center; border-bottom: 2rpx solid #33334d; }
 .clan-members-head { height: 88rpx; background: #262644; border-top: 2rpx solid #4a4a70; }
 .clan-members-even { background: #19192f; }
 .clan-members-td { display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-sizing: border-box; height: 100%; color: #d0d0dc; font-size: 24rpx; border-right: 2rpx solid #33334d; white-space: nowrap; overflow: hidden; }
 .clan-members-head .clan-members-td { color: #fff; font-weight: 600; background: #262644; border-color: #5a5a80; }
-.cm-name { width: 190rpx; padding: 0 12rpx; justify-content: flex-start; border-left: 2rpx solid #33334d; }.cm-owner { width: 140rpx; }.cm-clan { width: 150rpx; }.cm-role { width: 120rpx; }.cm-th { width: 60rpx; }.cm-exp { width: 70rpx; }.cm-trophy { width: 100rpx; }.cm-league { width: 150rpx; }.cm-score { width: 110rpx; }.cm-status { width: 120rpx; }.cm-member { width: 120rpx; }.cm-reg { width: 110rpx; }.cm-sync { width: 130rpx; }
+.cm-name { width: 190rpx; padding: 0 12rpx; justify-content: flex-start; border-left: 2rpx solid #33334d; }.cm-tag { width: 145rpx; }.cm-clan { width: 185rpx; padding: 0 8rpx; }.cm-role { width: 100rpx; }.cm-th { width: 60rpx; }.cm-league { width: 145rpx; }.cm-trophy { width: 95rpx; }.cm-attacks { width: 115rpx; }.cm-donation { width: 110rpx; }.cm-activity { width: 190rpx; }.cm-war { width: 215rpx; }.cm-cwl { width: 195rpx; }.cm-capital { width: 230rpx; }.cm-games { width: 175rpx; }
 .clan-members-name-text { color: #f0f0f5; }
+.clan-members-left-badge { flex-shrink: 0; margin-left: 8rpx; padding: 2rpx 7rpx; color: #7d859d; background: #29293d; border-radius: 6rpx; font-size: 18rpx; }
+.clan-members-two-lines { flex-direction: column; line-height: 1.35; white-space: normal; }
+.clan-members-subline { margin-top: 5rpx; color: #778099; font-size: 20rpx; }
 .clan-members-no-result { width: 750rpx; padding: 80rpx 0; color: #777f96; font-size: 26rpx; text-align: center; }
 .clan-members-mask { position: fixed; left: 0; right: 0; top: 0; bottom: 0; z-index: 1000; display: flex; align-items: flex-end; background: rgba(0, 0, 0, 0.58); }
 .clan-members-panel { width: 100%; max-height: 78vh; box-sizing: border-box; padding: 28rpx 32rpx 36rpx; background: #1a1a2e; border-radius: 24rpx 24rpx 0 0; }

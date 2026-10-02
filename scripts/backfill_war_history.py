@@ -92,6 +92,8 @@ def run(limit: int = 100, keep: int = 15, apply: bool = False) -> int:
                     keep_ended=keep,
                     cleanup_active=False,
                 )
+        from modules.player.member_stats import refresh_member_combat_stats
+        refresh_member_combat_stats(db.conn)
         db.conn.commit()
     except Exception:
         db.conn.rollback()

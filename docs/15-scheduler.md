@@ -34,7 +34,7 @@
 
 ### 2.1 数据表全景
 
-系统共 **12 张表**（`shared/db/connection.py` 中定义），按数据生命周期分三类：
+系统共 **20 张表**（`shared/db/connection.py` 中定义），按数据生命周期分三类：
 
 | 表名 | 职责 | 主键 | 数据来源 | 刷新方式 |
 |------|------|------|----------|----------|
@@ -48,6 +48,10 @@
 | `farm_stats` | 互刷部落统计缓存 | `clan_tag` | COC 官方 API | **周期**（每 30 分钟） |
 | `current_war_cache` | 自有部落当前战争缓存 | `clan_tag` | COC 官方 API | **周期**（每 2 分钟检查，按状态限频） |
 | `war_history_cache` | 自有部落最近 15 场普通战争归档 | `(clan_tag, war_key)` | current_wars / ClashKing 回填 | **随 current_wars 更新** |
+| `member_war_facts` | 普通战逐玩家事实 | `(clan_tag, war_key, player_tag)` | `current_wars` / 历史回填 | **随战争快照更新** |
+| `member_combat_stats_cache` | 成员普通战/CWL摘要 | `player_tag` | 本地战争与联赛事实 | **增量 + 每日滑窗** |
+| `capital_raid_member_results` | 都城周末逐成员事实 | `(clan_tag, start_time, player_tag)` | COC 官方 API | **每周窗口** |
+| `clan_games_member_snapshots` | 竞赛月末成员快照 | `(period, player_tag)` | COC 官方 API | **每月窗口** |
 | `clan_profile_cache` | 自有部落官方资料缓存 | `clan_tag` | COC 官方 API | **周期**（每 6 小时） |
 | `cwl_live_group_cache` | 当月联赛组缓存 | `(period, clan_tag)` | COC 官方 API | **周期**（联赛窗口） |
 | `cwl_live_war_cache` | CWL 逐场战争缓存 | `war_tag` | COC 官方 API | **周期**（活跃战争每 2 分钟） |
@@ -55,16 +59,14 @@
 | `cwl_assembly_cache` | 联赛集结检查缓存 | `(period, clan_tag)` | COC 官方 API | **周期**（窗口内每 5 分钟） |
 | `sync_jobs` | 调度器任务状态 | `job_id` | `scheduler.py` | 实时（调度器维护） |
 
-> `results` 为过渡期旧表，`league_results` 写入时双写，稳定后废弃。
 > `sync_jobs` 为周期调度方案新增的状态表，详见第三节。
 
 ### 2.2 表读写关系矩阵
 
 | 表 | 写入者 | 读取者 |
 |----|--------|--------|
-| `accounts` | `coc_sync`、`war_result` | `player-export`、`import-reg`、`arrange`、`fetch_cwl_data`、`api_server` |
+| `accounts` | `coc_sync` | `player-export`、`import-reg`、`arrange`、`fetch_cwl_data`、`api_server` |
 | `registrations` | `import-reg`、`arrange`（回写） | `arrange`、`refresh_status`、`api_server` |
-| `results` | `fetch_cwl_data`（双写） | `arrange`（回退读取） |
 | `league_teams` | `arrange`（幂等写入） | `arrange`、`fetch_cwl_data` |
 | `league_results` | `fetch_cwl_data` | `arrange`、`api_server`（league-stats） |
 | `war_results` | `fetch_war_data` | `api_server`（war-stats） |
@@ -152,10 +154,27 @@
 | 建议频率 | `interval_min=360`，即每 6 小时一次 |
 | 逻辑 | 遍历联盟部落拉成员 → 写 `accounts` → 退部对账；再拉官方部落资料 → 写 `clan_profile_cache`，失败保留上次成功值 |
 
+成员最近数据活动复用该同步链路：覆盖旧 `coc_raw` 前比较有效字段，只在捐兵/收兵等累计值增加或昵称、玩家小屋等明确字段变化时更新活动时间，数值下降按赛季重置处理。主世界和夜世界奖杯均不参与判断。`player_details` 每天逐个读取当前成员详情，缓存 `attackWins` 并补充玩家小屋变化；不能在 `/api/members` 请求路径中现场抓取。
+
+成员战斗摘要也不得在 `/api/members` 请求路径现场展开战争 JSON。`current_wars` 更新或归档某个部落后，先在完整 JSON 清理前固化该场玩家事实，再按受影响的 `player_tag` 跨全部自有部落重算“普战近15战”：只看最近 90 天并最多纳入 15 场。`league_results` 抓取或回填后，按玩家跨对应月份全部自有联赛队伍重算“联赛近3月”。两项都限制自有部落边界，但不限制 `combat`、`shell`、互刷、偷矿等类型；玩家当前部落不作为历史统计边界。每日还需执行一次窗口过期检查。失败保留上次成功汇总和更新时间。两项均读取本地缓存，不增加 COC 请求；只有逐玩家 `attackWins` 属于额外官方 API 成本。
+
+成员贡献由两个每 6 小时检查业务窗口的低频任务维护：
+
+| 任务 | 北京时间 | 数据源 | 处理规则 |
+|---|---|---|---|
+| `capital_member_stats` | 每周二 03:00 | 每个自有部落的 `capitalraidseasons` | 补齐最近若干个已结束周末，按周末身份幂等写入；汇总近 4 周 |
+| `clan_games_stats` | 每月 29 日 03:00 | 当前成员玩家详情中的 `Games Champion.value` | 保存月末累计快照，与上期做差；复用同次请求中的 `attackWins` |
+
+都城周末在周一 15:00 结束，周二执行留有 12 小时缓冲；常规竞赛在 28 日 16:00 结束，29 日执行留有 11 小时缓冲。都城失败每 6 小时重试至周三结束，竞赛失败每 6 小时重试至 30 日结束；成功后停止，失败保留旧数据。首次竞赛任务没有上期基准时只保存基准并标记不完整。
+
+首次上线若处于当月 22 日竞赛开始前，可手动执行 `--once clan_games_stats --force`：任务把当前累计成就保存为上月结束基准，不伪造上月积分；本月 29 日即可用该基准计算本期差值。22 日至 28 日拒绝强制建立基准，避免漏掉已经发生的竞赛贡献。
+
 COC API Key 按请求出口 IP 校验。生产 `sky-scheduler.service` 保持直连，不设置
 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY`。手工读取或补同步时，若当前 Shell 存在代理环境变量，
-应仅对该次命令使用 `env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY` 及对应小写变量直连；
-不要修改或打印 `COC_API_TOKEN`。
+官方 `CocApiClient` 仍会使用无代理 opener 直连；命令也可额外使用
+`env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY` 及对应小写变量明确清理环境。
+不要修改或打印 `COC_API_TOKEN`。逐玩家任务默认在请求间隔 0.05 秒，可通过
+`COC_PLAYER_REQUEST_DELAY_SECONDS` 调大，但不得在页面请求路径执行。
 
 #### `farm_stats` — 互刷部落大本配置（`farm_stats`）
 
@@ -293,6 +312,10 @@ CREATE TABLE IF NOT EXISTS sync_jobs (
 | `cwl_assembly` | CWL 集结检查 | 5 | 1 日 14:00 至 3 日 16:00 检查，按部落冻结 |
 | `farm_stats` | 互刷部落统计 | 30 | 拉 8 个互刷部落成员+战争，计算 TH 分布 |
 | `coc_sync` | COC 玩家与部落资料 | 360 | 同步联盟成员到 `accounts`，并更新 `clan_profile_cache`（每 6 小时一次） |
+| `player_details` | COC 玩家详情 | 1440 | 逐玩家缓存赛季进攻与活动信号；不加入 `--once all` |
+| `member_combat_stats` | 成员战斗摘要 | 1440 | 推进普通战 90 天和联赛 3 个完整月窗口 |
+| `capital_member_stats` | 都城成员贡献 | 360 | 每 6 小时检查周二至周三业务窗口；成功后本周跳过 |
+| `clan_games_stats` | 竞赛成员贡献 | 360 | 每 6 小时检查 29 至 30 日业务窗口；成功玩家幂等跳过 |
 | `war_results` | 普通部落战战绩 | 1440 | 拉取战营 `#2QQ` 部落战，写 `war_results` |
 | `cwl` | CWL 联赛战绩 | 1440 | 每天触发，`day==12` 才真正拉当月 CWL |
 | `war_layout` | 公众号阵型更新 | 1440 | 每天北京时间固定时刻创建草稿；不加入 `--once all` |

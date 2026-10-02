@@ -1,6 +1,8 @@
 """PlayerService 测试：昵称反查真实 Tag / COC 更新不覆盖战绩组。"""
 from __future__ import annotations
 
+import json
+
 
 def test_resolve_finds_coc_account(player_service):
     player_service.update_from_coc({"player_tag": "#A", "account_name": "甲"})
@@ -37,3 +39,28 @@ def test_update_from_coc_does_not_touch_score_group(player_service):
     acc = player_service.get("#A")
     assert acc["trophies"] == 5000
     assert acc["history_score"] == 42.0          # 战绩组保留
+
+
+def test_activity_observation_ignores_first_snapshot_then_tracks_increase(player_service):
+    player_service.update_from_coc({
+        "player_tag": "#ACT", "account_name": "活跃玩家",
+        "coc_raw": {"name": "活跃玩家", "donations": 0, "donationsReceived": 0},
+    })
+    first = player_service.get("#ACT")
+    assert first["activity_observed_since"]
+    assert first["last_activity_at"] is None
+
+    player_service.update_from_coc({
+        "player_tag": "#ACT", "account_name": "活跃玩家",
+        "coc_raw": {"name": "活跃玩家", "donations": 20, "donationsReceived": 0},
+    })
+    changed = player_service.get("#ACT")
+    assert changed["last_activity_at"]
+    assert json.loads(changed["last_activity_reason"]) == ["donations"]
+
+    previous_activity = changed["last_activity_at"]
+    player_service.update_from_coc({
+        "player_tag": "#ACT", "account_name": "活跃玩家",
+        "coc_raw": {"name": "活跃玩家", "donations": 0, "donationsReceived": 0},
+    })
+    assert player_service.get("#ACT")["last_activity_at"] == previous_activity

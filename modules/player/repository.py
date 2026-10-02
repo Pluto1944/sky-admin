@@ -29,6 +29,10 @@ _UPSERT_COLS = (
     "clan_role",
     "coc_raw",
     "last_synced_at",
+    "season_attack_wins",
+    "last_activity_at",
+    "last_activity_reason",
+    "activity_observed_since",
     "membership_status",
     "player_name",
     "status",
@@ -70,6 +74,10 @@ class PlayerRepository:
             "clan_role": account.get("clan_role"),
             "coc_raw": raw,
             "last_synced_at": account.get("last_synced_at"),
+            "season_attack_wins": account.get("season_attack_wins"),
+            "last_activity_at": account.get("last_activity_at"),
+            "last_activity_reason": account.get("last_activity_reason"),
+            "activity_observed_since": account.get("activity_observed_since"),
             "membership_status": account.get("membership_status"),
             "player_name": account.get("player_name"),
             "status": account.get("status"),
@@ -158,5 +166,15 @@ class PlayerRepository:
         self.conn.execute(
             "UPDATE accounts SET history_score = ?, updated_at = ? WHERE player_tag = ?",
             (score, now_iso(), player_tag),
+        )
+        self.conn.commit()
+
+    def mark_activity(self, player_tag: str, at: str, reasons: list[str]) -> None:
+        """记录由战争等公开事实检测到的活动，不改动账号其它字段。"""
+        self.conn.execute(
+            """UPDATE accounts
+               SET last_activity_at = ?, last_activity_reason = ?, updated_at = ?
+               WHERE player_tag = ?""",
+            (at, json.dumps(reasons, ensure_ascii=False), now_iso(), player_tag),
         )
         self.conn.commit()

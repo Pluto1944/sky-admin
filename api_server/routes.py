@@ -48,7 +48,10 @@ def ping():
 
 
 @router.get("/members")
-def list_members(repo: PlayerRepository = Depends(get_repo)):
+def list_members(
+    repo: PlayerRepository = Depends(get_repo),
+    db: Database = Depends(get_db),
+):
     """获取所有 COC 成员列表。
 
     从 accounts 表读取，返回每个成员的：
@@ -57,12 +60,48 @@ def list_members(repo: PlayerRepository = Depends(get_repo)):
     - membership_status, last_synced_at, updated_at
     """
     try:
-        members = repo.list_all()
+        from modules.player.member_stats import member_summary_map
+
+        raw_members = repo.list_all()
+        summaries = member_summary_map(
+            db.conn, [member["player_tag"] for member in raw_members]
+        )
+        configured = {
+            normalize_tag(clan["tag"]): clan
+            for clan in CLANS
+            if clan.get("enabled", True)
+        }
+        members = []
+        for source in raw_members:
+            member = dict(source)
+            raw = _safe_coc_raw(member.pop("coc_raw", None))
+            member["donations"] = _safe_number(raw.get("donations"))
+            member["donations_received"] = _safe_number(raw.get("donationsReceived"))
+            try:
+                reasons = json.loads(member.get("last_activity_reason") or "[]")
+            except (TypeError, json.JSONDecodeError):
+                reasons = []
+            member.pop("last_activity_reason", None)
+            member["last_activity_reasons"] = reasons if isinstance(reasons, list) else []
+            clan = configured.get(normalize_tag(member.get("clan_tag")))
+            member["clan_name"] = clan.get("name") if clan else None
+            member["clan_category"] = clan.get("category") if clan else None
+            member.update(summaries.get(member["player_tag"], {}))
+            members.append(member)
+        updated_values = [member.get("last_synced_at") for member in members if member.get("last_synced_at")]
         return {
             "count": len(members),
             "members": members,
+            "updated_at": max(updated_values) if updated_values else None,
             "clans": [
-                {"tag": clan["tag"], "name": clan.get("name") or clan["tag"]}
+                {
+                    "tag": normalize_tag(clan["tag"]),
+                    "name": clan.get("name") or clan["tag"],
+                    "category": clan.get("category", "normal"),
+                    "category_label": CLAN_CATEGORY_LABELS.get(
+                        clan.get("category", "normal"), clan.get("category", "normal")
+                    ),
+                }
                 for clan in CLANS
                 if clan.get("enabled", True)
             ],

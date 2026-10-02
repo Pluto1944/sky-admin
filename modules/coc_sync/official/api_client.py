@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import os
 from urllib.parse import quote, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import ProxyHandler, Request, build_opener
 from urllib.error import HTTPError, URLError
 
 ALLOWED_HOST = "api.clashofclans.com"
@@ -29,10 +29,14 @@ class CocApiError(RuntimeError):
 class CocApiClient:
     """Clash of Clans 官方 API 客户端。"""
 
-    def __init__(self, token: str | None = None, timeout: int = DEFAULT_TIMEOUT):
+    def __init__(
+        self, token: str | None = None, timeout: int = DEFAULT_TIMEOUT, opener=None,
+    ):
         # 密钥仅来自环境变量，绝不硬编码；构造时不强制读取，避免无 token 环境导入即失败
         self._token = token or os.environ.get("COC_API_TOKEN")
         self._timeout = timeout
+        # COC Key 绑定服务器出口 IP；显式禁用环境代理，保证所有官方请求直连。
+        self._opener = opener or build_opener(ProxyHandler({}))
 
     # ------------------------------------------------------------------
     # 公开接口
@@ -57,6 +61,13 @@ class CocApiClient:
     def get_current_war(self, clan_tag: str) -> dict:
         """查询指定部落的当前战争详情。"""
         return self._get(f"/clans/{self._encode_tag(clan_tag)}/currentwar")
+
+    def get_capital_raid_seasons(self, clan_tag: str, limit: int = 8) -> list[dict]:
+        """查询部落都城突袭周末历史。"""
+        data = self._get(
+            f"/clans/{self._encode_tag(clan_tag)}/capitalraidseasons?limit={int(limit)}"
+        )
+        return data.get("items", [])
 
     # ------------------------------------------------------------------
     # CWL 相关接口
@@ -129,7 +140,7 @@ class CocApiClient:
             method="GET",
         )
         try:
-            with urlopen(req, timeout=self._timeout) as resp:
+            with self._opener.open(req, timeout=self._timeout) as resp:
                 body = resp.read().decode("utf-8")
         except HTTPError as e:
             detail = e.read().decode("utf-8", errors="replace") if e.fp else ""

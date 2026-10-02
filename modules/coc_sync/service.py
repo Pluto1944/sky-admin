@@ -108,6 +108,14 @@ class CocSyncService:
                 results.append(failed_current_war(clan, str(exc), synced_at))
         return results
 
+    def fetch_capital_raid_seasons(self, clan_tag: str, limit: int = 8) -> list[dict]:
+        """读取一个自有部落最近的都城突袭周末，不写数据库。"""
+        return self.api_client.get_capital_raid_seasons(clan_tag, limit=limit)
+
+    def fetch_player(self, player_tag: str) -> dict:
+        """读取一个玩家的完整官方资料，不写数据库。"""
+        return self.api_client.get_player(player_tag)
+
     def fetch_cwl_group(self, team: dict) -> dict | None:
         """拉取并规范化一个月度联赛队伍的当前 leaguegroup，不写数据库。"""
         clan_tag = team.get("clan_tag") or team.get("tag")

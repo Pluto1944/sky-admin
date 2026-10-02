@@ -7,7 +7,7 @@
 
 ## 一、数据库概览
 
-系统当前包含 **16 张业务与运行状态表**：
+系统当前包含 **19 张业务与运行状态表**：
 
 | 表名 | 职责 | 主键 | 状态 |
 |------|------|------|------|
@@ -15,11 +15,14 @@
 | `registrations` | 月度报名（自包含事实源） | `id` (自增) | 活跃 |
 | `league_teams` | 队伍配置快照 | `id` (自增) | **v3.0 新增** |
 | `league_results` | 联赛战绩（结构化） | `id` (自增) | **v3.0 新增** |
-| `results` | 月度战绩（旧） | `id` (自增) | 过渡期保留 |
 | `war_results` | 普通部落战历史统计 | `id` (自增) | 活跃 |
 | `farm_stats` | 互刷部落统计缓存 | `clan_tag` | 活跃 |
 | `current_war_cache` | 自有部落当前战争缓存 | `clan_tag` | 活跃 |
 | `war_history_cache` | 自有部落最近普通战争完整归档 | `(clan_tag, war_key)` | 活跃 |
+| `member_war_facts` | 自有部落普通战逐玩家可追溯事实 | `(clan_tag, war_key, player_tag)` | 活跃 |
+| `member_combat_stats_cache` | 成员普通战/CWL轻量摘要 | `player_tag` | 活跃 |
+| `capital_raid_member_results` | 都城突袭周末逐成员事实 | `(clan_tag, start_time, player_tag)` | 活跃 |
+| `clan_games_member_snapshots` | 竞赛月末成就快照与差值 | `(period, player_tag)` | 活跃 |
 | `clan_profile_cache` | 自有部落官方资料缓存 | `clan_tag` | 活跃 |
 | `cwl_live_group_cache` | 当月 CWL 联赛组缓存 | `(period, clan_tag)` | 活跃 |
 | `cwl_live_war_cache` | CWL 单场战争缓存 | `war_tag` | 活跃 |
@@ -30,7 +33,7 @@
 
 `current_war_cache` 每个已启用自有部落一行，保存标准化后的当前战争 JSON、状态、错误、同步时间、最近尝试时间和连续失败次数。`current_wars` 调度任务每 2 分钟检查一次：战斗日每 2 分钟，准备日通常每 30 分钟且开战前 30 分钟内提升为每 2 分钟，无战争 / 已结束每 5 分钟，CWL 跳转状态每 30 分钟调用 COC；失败按 5～30 分钟退避。API 只读缓存，不在页面请求中直接调用 COC。
 
-`war_history_cache` 保存普通战争标准化完整 JSON。准备日、战斗日和结束状态按稳定 `war_key` 幂等覆盖；CWL 不进入该表。每个自有部落最多保留最近 15 场 `war_ended`，当前未结束战争不占该限额。成员滚动统计仍读取 `war_results`，两者不可混用。
+`war_history_cache` 保存普通战争标准化完整 JSON。准备日、战斗日和结束状态按稳定 `war_key` 幂等覆盖；CWL 不进入该表。每个自有部落最多保留最近 15 场 `war_ended`，当前未结束战争不占该限额。旧战营 5/15/45 统计仍读取 `war_results`；成员页在完整 JSON 清理前写入 `member_war_facts`，再从该事实表生成跨自有部落的 `member_combat_stats_cache`。
 
 `clan_profile_cache` 每个已启用自有部落一行，保存 `/clans/{tag}` 规范化后的徽章、等级、战争战绩、联赛、三类积分、地区、标签、门槛和描述。跟随 `coc_sync` 每 6 小时更新；单部落失败时保留上次成功 JSON 并标记 `stale`。
 
@@ -46,7 +49,6 @@
 erDiagram
     accounts ||--o{ registrations : "1:N (account_name关联, 无FK)"
     accounts ||--o{ league_results : "1:N (player_tag FK)"
-    accounts ||--o{ results : "1:N (player_tag FK)"
 
     league_teams ||--o{ league_results : "1:N (period+team_index关联)"
 
@@ -131,6 +133,18 @@ erDiagram
 
 > **派生列**：`last_reg_period` 不落列，读取时 `MAX(period)` 子查询实时派生，按 `account_name` 关联 registrations。
 
+### 成员活动与贡献统计
+
+`accounts` 已增加 `season_attack_wins`、`last_activity_at`、`last_activity_reason` 和 `activity_observed_since`。`coc_sync` 在覆盖旧 `coc_raw` 前比较有效字段，普通战与 CWL 实时缓存补充新进攻信号。
+
+累计字段只认增加，赛季重置造成的下降不更新活动时间；奖杯、排名、联赛、职位和部落归属不参与判断。首次观察只写观察起点，不伪造历史活动时间。完整设计见 [22-member-activity.md](22-member-activity.md)。
+
+成员主表的普通战和联赛摘要落在可重建的 `member_combat_stats_cache`，以 `player_tag` 为主键；当前 `clan_tag` 不作为统计边界。普通战组保存最近 90 天内跨全部自有部落最近最多 15 场参战普通战的来源部落、三星数、实际进攻数和可用进攻数；联赛组保存最近 3 个完整月份内跨全部自有联赛队伍的月份/队伍身份、三星数和实际进攻数。两组都限制自有部落边界，但不限制 `combat`、`shell`、互刷、偷矿等业务类型。缓存只保存计数及窗口身份，API 实时派生百分比。
+
+`member_war_facts` 在 `war_history_cache` 完整 JSON 被清理前，按 `(clan_tag, war_key, player_tag)` 固化上阵、有效进攻、观察到的出刀、三星和可用刀数，保证玩家转部落或长期未上阵时不会提前丢失仍在 90 天内的数据。
+
+都城与竞赛使用两张事件事实表：`capital_raid_member_results` 以 `(clan_tag, start_time, player_tag)` 唯一，保存每周出刀上限、额外刀数、实际出刀和掠夺都城金币；`clan_games_member_snapshots` 以 `(period, player_tag)` 唯一，保存月末 `Games Champion.value` 累计值、本期差值、快照部落和完整性。近 4 周和近 3 期展示值从这些事实批量派生，退部或换部落不得覆盖历史事实。
+
 ---
 
 ## 四、registrations 表（月度报名，自包含事实源）
@@ -207,24 +221,8 @@ CREATE TABLE league_results (
 );
 ```
 
-**写入**：`fetch_cwl_data.py` 拉取后写入（同时双写到旧 `results` 表）。
-**读取**：编排时 `_load_combat_star_data()` 和 `_load_prev_combat_from_results()` 优先读此表。
-
----
-
-## 七、results 表（旧战绩，过渡期保留）
-
-旧战绩表。`league_results` 写入时双写到此表，过渡期后废弃。
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `id` | INTEGER PK | 自增主键 |
-| `player_tag` | TEXT FK | 关联账号 |
-| `period` | TEXT | CWL 实际发生月 |
-| `league_type` | TEXT | 实战 / 壳子 |
-| `raw_metrics` | TEXT(JSON) | 原始多指标 |
-
-> `UNIQUE(player_tag, period, league_type)`；`league_type` 为 NULL 时 SQLite 不视为冲突。
+**写入**：`fetch_cwl_data.py` 拉取后写入。
+**读取**：编排时 `_load_combat_star_data()` 和 `_load_prev_combat_from_league_results()` 读取此表。
 
 ---
 
@@ -245,7 +243,6 @@ CREATE TABLE league_results (
 | 表 | period 含义 |
 |----|------------|
 | `registrations.period` | 联赛月份（实际打 CWL 的月份） |
-| `results.period` | CWL 实际发生月 |
 | `league_teams.period` | 联赛月份（与 registrations 一致） |
 | `league_results.period` | CWL 实际发生月 |
 
@@ -257,11 +254,10 @@ CREATE TABLE league_results (
 
 | 表 | 写入者 | 读取者 |
 |----|--------|--------|
-| `accounts` | `coc_sync`, `war_result`, `cwl_registration` | `player-export`, `import-reg`, `arrange`, `fetch_cwl_data`, `api_server`（members 与 clan overview） |
+| `accounts` | `coc_sync`, `cwl_registration` | `player-export`, `import-reg`, `arrange`, `fetch_cwl_data`, `api_server`（members 与 clan overview） |
 | `registrations` | `import-reg`, `arrange`（回写） | `arrange`, `refresh_status` |
 | `league_teams` | `arrange`（幂等写入） | `arrange`（读上月配置+team_name） |
 | `league_results` | `fetch_cwl_data` | `arrange`（读星数+队伍归属） |
-| `results`（旧） | `fetch_cwl_data`（双写） | `arrange`（回退读取） |
 | `war_results` | `fetch_war_data` | `api_server`（war-stats） |
 | `farm_stats` | `scheduler.py`（farm_stats） | `api_server`（farm-config） |
 | `current_war_cache` | `scheduler.py`（current_wars） | `api_server`（current-wars 汇总/详情） |

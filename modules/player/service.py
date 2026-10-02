@@ -10,15 +10,17 @@ accounts 表。好处：
 经 resolve_tag_by_name 反查真实 Tag 关联。
 
 B 方案：报名导入**不再写 accounts**（registrations 自持报名事实、无 FK），因此不存在
-"昵称临时建档 / 合并"这套复杂度——accounts 只由 coc_sync（COC 权威）与 war_result
-（history_score）填充，报名侧只读。报名维度状态由 registrations 按昵称实时派生。
+"昵称临时建档 / 合并"这套复杂度——accounts 只由 coc_sync（COC 权威）填充，报名侧只读。
+报名维度状态由 registrations 按昵称实时派生。
 """
 from __future__ import annotations
 
+import json
 import sys
 from typing import Optional
 
 from config import MAYBE_LEFT_MONTHS, MEMBERSHIP_LEFT, MEMBERSHIP_MEMBER
+from modules.player.activity import activity_reasons
 from modules.player.repository import PlayerRepository
 from modules.player.status_rule import infer_status
 from shared.db.connection import now_iso
@@ -86,7 +88,7 @@ class PlayerService:
             if status != acc.get("status"):
                 self.repo.update_status(acc["player_tag"], status)
 
-    # ---- 战绩模块更新入口 ----
+    # ---- 账号历史分维护入口（当前没有自动写入方） ----
     def update_history_score(self, player_tag: str, score: float) -> None:
         self.repo.update_history_score(player_tag, score)
 
@@ -99,8 +101,26 @@ class PlayerService:
         只写 COC 组字段（COALESCE 语义保证不覆盖报名/战绩组），并写入同步时间。
         """
         fields = dict(coc_fields)
-        fields["last_synced_at"] = now_iso()
+        timestamp = now_iso()
+        existing = self.repo.get(fields.get("player_tag")) if fields.get("player_tag") else None
+        if existing is None or not existing.get("activity_observed_since"):
+            fields["activity_observed_since"] = timestamp
+        else:
+            reasons = activity_reasons(existing.get("coc_raw"), fields.get("coc_raw"))
+            if reasons:
+                fields["last_activity_at"] = timestamp
+                fields["last_activity_reason"] = json.dumps(reasons, ensure_ascii=False)
+        fields["last_synced_at"] = timestamp
         self.repo.upsert(fields)
+
+    def mark_activity(self, player_tag: str, at: str, reason: str) -> None:
+        account = self.repo.get(player_tag)
+        if not account:
+            return
+        if not account.get("activity_observed_since"):
+            self.repo.upsert({"player_tag": player_tag, "activity_observed_since": at})
+            return
+        self.repo.mark_activity(player_tag, at, [reason])
 
     def list_members_by_clan(self, clan_tags) -> list[dict]:
         """查当前归属于给定部落集合的真实账号（退部对账的候选来源）。"""

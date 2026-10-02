@@ -126,6 +126,21 @@ def test_war_history_cache_table_is_created(db):
     } <= columns
 
 
+def test_member_activity_and_contribution_tables_are_created(db):
+    account_columns = {row[1] for row in db.conn.execute("PRAGMA table_info(accounts)")}
+    assert {
+        "season_attack_wins", "last_activity_at", "last_activity_reason",
+        "activity_observed_since",
+    } <= account_columns
+    for table in (
+        "member_war_facts", "member_combat_stats_cache",
+        "capital_raid_member_results", "clan_games_member_snapshots",
+    ):
+        assert db.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name = ?", (table,)
+        ).fetchone()
+
+
 def test_cwl_live_cache_tables_are_created(db):
     group_columns = {
         row[1] for row in db.conn.execute("PRAGMA table_info(cwl_live_group_cache)")

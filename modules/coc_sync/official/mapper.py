@@ -51,6 +51,7 @@ def map_member(member: dict, clan_tag: str, clan_name: Optional[str] = None) -> 
         "clan_tag": normalize_tag(clan_tag),
         "clan_role": member.get("role"),
         "coc_raw": json.dumps(raw, ensure_ascii=False),
+        "season_attack_wins": member.get("attackWins"),
         # 出现在部落成员列表 => 当前确在联盟部落内
         "membership_status": MEMBERSHIP_MEMBER,
     }

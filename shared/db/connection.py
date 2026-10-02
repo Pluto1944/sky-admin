@@ -38,6 +38,10 @@ CREATE TABLE IF NOT EXISTS {table} (
     clan_role          TEXT,               -- 部落职位
     coc_raw            TEXT,               -- COC 原始成员数据全量快照(JSON)，扩展字段零改表
     last_synced_at     TEXT,               -- 最近一次 COC 同步时间
+    season_attack_wins INTEGER,            -- 当前赛季主世界进攻胜场（玩家详情）
+    last_activity_at   TEXT,               -- 最近检测到公开数据有效变化时间
+    last_activity_reason TEXT,              -- 有效变化原因 JSON 数组
+    activity_observed_since TEXT,           -- 开始观察公开数据变化的时间
     membership_status  TEXT DEFAULT 'member', -- 联盟部落身份：member=在联盟部落 / left=已退部
     -- 账号级事实（非 COC，但描述账号本身；按月维度已下沉子表）
     player_name        TEXT,               -- 归属人（主号）
@@ -205,6 +209,82 @@ CREATE INDEX IF NOT EXISTS idx_war_history_clan_end
 ON war_history_cache(clan_tag, end_time DESC);
 """
 
+_MEMBER_WAR_FACTS_DDL = """
+CREATE TABLE IF NOT EXISTS member_war_facts (
+    clan_tag         TEXT NOT NULL,
+    war_key          TEXT NOT NULL,
+    player_tag       TEXT NOT NULL,
+    end_time         TEXT NOT NULL,
+    status           TEXT NOT NULL,
+    category         TEXT,
+    available_attacks INTEGER NOT NULL DEFAULT 0,
+    actual_attacks   INTEGER NOT NULL DEFAULT 0,
+    observed_attacks INTEGER NOT NULL DEFAULT 0,
+    three_stars      INTEGER NOT NULL DEFAULT 0,
+    updated_at       TEXT NOT NULL,
+    PRIMARY KEY(clan_tag, war_key, player_tag)
+);
+
+CREATE INDEX IF NOT EXISTS idx_member_war_facts_player_end
+ON member_war_facts(player_tag, end_time DESC);
+"""
+
+_MEMBER_COMBAT_STATS_CACHE_DDL = """
+CREATE TABLE IF NOT EXISTS member_combat_stats_cache (
+    player_tag            TEXT PRIMARY KEY,
+    war_window_start      TEXT,
+    war_count             INTEGER NOT NULL DEFAULT 0,
+    war_three_stars       INTEGER NOT NULL DEFAULT 0,
+    war_attacks           INTEGER NOT NULL DEFAULT 0,
+    war_available_attacks INTEGER NOT NULL DEFAULT 0,
+    war_keys_json         TEXT,
+    war_clan_tags_json    TEXT,
+    cwl_periods_json      TEXT,
+    cwl_clan_tags_json    TEXT,
+    cwl_three_stars       INTEGER NOT NULL DEFAULT 0,
+    cwl_attacks           INTEGER NOT NULL DEFAULT 0,
+    status                TEXT NOT NULL DEFAULT 'success',
+    error                 TEXT,
+    updated_at            TEXT NOT NULL
+);
+"""
+
+_CAPITAL_RAID_MEMBER_RESULTS_DDL = """
+CREATE TABLE IF NOT EXISTS capital_raid_member_results (
+    clan_tag                 TEXT NOT NULL,
+    start_time               TEXT NOT NULL,
+    end_time                 TEXT,
+    player_tag               TEXT NOT NULL,
+    player_name              TEXT,
+    attack_limit             INTEGER NOT NULL DEFAULT 0,
+    bonus_attack_limit       INTEGER NOT NULL DEFAULT 0,
+    attacks                  INTEGER NOT NULL DEFAULT 0,
+    capital_resources_looted INTEGER NOT NULL DEFAULT 0,
+    fetched_at               TEXT NOT NULL,
+    PRIMARY KEY(clan_tag, start_time, player_tag)
+);
+
+CREATE INDEX IF NOT EXISTS idx_capital_member_start
+ON capital_raid_member_results(player_tag, start_time DESC);
+"""
+
+_CLAN_GAMES_MEMBER_SNAPSHOTS_DDL = """
+CREATE TABLE IF NOT EXISTS clan_games_member_snapshots (
+    period           TEXT NOT NULL,
+    player_tag       TEXT NOT NULL,
+    player_name      TEXT,
+    clan_tag         TEXT,
+    cumulative_value INTEGER NOT NULL DEFAULT 0,
+    points           INTEGER,
+    complete         INTEGER NOT NULL DEFAULT 0,
+    fetched_at       TEXT NOT NULL,
+    PRIMARY KEY(period, player_tag)
+);
+
+CREATE INDEX IF NOT EXISTS idx_clan_games_member_period
+ON clan_games_member_snapshots(player_tag, period DESC);
+"""
+
 _CLAN_PROFILE_CACHE_DDL = """
 CREATE TABLE IF NOT EXISTS clan_profile_cache (
     clan_tag     TEXT PRIMARY KEY,
@@ -317,6 +397,10 @@ _CHILDREN_DDL = (
     + _FARM_STATS_DDL
     + _CURRENT_WAR_CACHE_DDL
     + _WAR_HISTORY_CACHE_DDL
+    + _MEMBER_WAR_FACTS_DDL
+    + _MEMBER_COMBAT_STATS_CACHE_DDL
+    + _CAPITAL_RAID_MEMBER_RESULTS_DDL
+    + _CLAN_GAMES_MEMBER_SNAPSHOTS_DDL
     + _CLAN_PROFILE_CACHE_DDL
     + _CWL_LIVE_GROUP_CACHE_DDL
     + _CWL_LIVE_WAR_CACHE_DDL
@@ -331,6 +415,8 @@ _SCHEMA = _ACCOUNTS_DDL.format(table="accounts") + _CHILDREN_DDL
 _ACCOUNTS_COLS = (
     "player_tag", "account_name", "exp_level", "trophies", "league_name",
     "town_hall_level", "clan_tag", "clan_role", "coc_raw", "last_synced_at",
+    "season_attack_wins", "last_activity_at", "last_activity_reason",
+    "activity_observed_since",
     "membership_status", "player_name", "status",
     "history_score", "updated_at",
 )
@@ -408,6 +494,16 @@ class Database:
 
         if any(c in acc_cols for c in _OBSOLETE_ACCOUNT_COLS):
             self._rebuild_accounts(acc_cols)
+            acc_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(accounts)")}
+
+        for column, column_type in (
+            ("season_attack_wins", "INTEGER"),
+            ("last_activity_at", "TEXT"),
+            ("last_activity_reason", "TEXT"),
+            ("activity_observed_since", "TEXT"),
+        ):
+            if column not in acc_cols:
+                self.conn.execute(f"ALTER TABLE accounts ADD COLUMN {column} {column_type}")
 
         # league_results 新增列迁移（league-stats 功能）
         lr_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(league_results)")}
@@ -446,6 +542,20 @@ class Database:
         wh_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(war_history_cache)")}
         if not wh_cols:
             self.conn.executescript(_WAR_HISTORY_CACHE_DDL)
+
+        if not {row[1] for row in self.conn.execute("PRAGMA table_info(member_war_facts)")}:
+            self.conn.executescript(_MEMBER_WAR_FACTS_DDL)
+        combat_cache_cols = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(member_combat_stats_cache)")
+        }
+        if not combat_cache_cols:
+            self.conn.execute(_MEMBER_COMBAT_STATS_CACHE_DDL)
+        elif "war_keys_json" not in combat_cache_cols:
+            self.conn.execute("ALTER TABLE member_combat_stats_cache ADD COLUMN war_keys_json TEXT")
+        if not {row[1] for row in self.conn.execute("PRAGMA table_info(capital_raid_member_results)")}:
+            self.conn.executescript(_CAPITAL_RAID_MEMBER_RESULTS_DDL)
+        if not {row[1] for row in self.conn.execute("PRAGMA table_info(clan_games_member_snapshots)")}:
+            self.conn.executescript(_CLAN_GAMES_MEMBER_SNAPSHOTS_DDL)
 
         # clan_profile_cache 表迁移（自有部落官方资料缓存）
         cp_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(clan_profile_cache)")}
@@ -544,6 +654,8 @@ class Database:
         for table in (
             "cwl_assembly_cache", "cwl_roster_snapshots",
             "cwl_live_war_cache", "cwl_live_group_cache", "war_history_cache",
+            "member_war_facts", "member_combat_stats_cache",
+            "capital_raid_member_results", "clan_games_member_snapshots",
             "current_war_cache",
             "clan_profile_cache",
             "war_results", "league_results", "league_teams", "results",

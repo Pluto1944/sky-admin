@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """周期数据刷新调度器（常驻 loop 进程）。
 
-统一管理 8 类需要周期性执行的任务，状态落 `sync_jobs` 表：
+统一管理需要周期性执行的任务，状态落 `sync_jobs` 表：
 
     current_wars 全部自有部落当前战争（战斗日 2 分钟，准备日动态 30/2 分钟）
     cwl_live    当月 CWL 联赛组与逐场战争（活跃期每 2 分钟）
@@ -10,6 +10,10 @@
     coc_sync    COC 玩家档案（每 6 小时）
     war_results 普通部落战战绩（每天）
     cwl         CWL 联赛战绩（每天触发，day==12 才真正拉取）
+    player_details 玩家详情（每天，赛季进攻与活动估算）
+    member_combat_stats 成员战斗摘要窗口清理（每天）
+    capital_member_stats 都城成员贡献（每6小时检查业务窗口）
+    clan_games_stats 竞赛贡献（每6小时检查业务窗口）
     war_layout  公众号阵型群发（每天北京时间 09:00）
 
 用法：
@@ -53,6 +57,9 @@ from shared.db.connection import Database  # noqa: E402
 
 POLL_SECONDS = 60  # 主循环轮询间隔（秒）
 BUSINESS_TZ = ZoneInfo("Asia/Shanghai")
+PLAYER_DETAIL_REQUEST_DELAY_SECONDS = max(
+    0.0, float(os.getenv("COC_PLAYER_REQUEST_DELAY_SECONDS", "0.05"))
+)
 
 
 def now_iso() -> str:
@@ -161,6 +168,14 @@ def _archive_current_war(
     if not is_archivable_war(item):
         return False
     record = war_history_record(item)
+    from modules.player.member_stats import materialize_war_member_facts
+    from modules.player.repository import PlayerRepository
+    from modules.player.service import PlayerService
+
+    activity_tags = materialize_war_member_facts(db.conn, item, record["updated_at"])
+    player_service = PlayerService(PlayerRepository(db.conn))
+    for player_tag in activity_tags:
+        player_service.mark_activity(player_tag, record["updated_at"], "war_attack")
     db.conn.execute(
         """INSERT INTO war_history_cache
            (clan_tag, war_key, clan_name, category, opponent_tag, opponent_name,
@@ -303,6 +318,8 @@ def _run_current_wars(force: bool = False, now: datetime | None = None) -> dict:
             failed += 1
         else:
             success += 1
+    from modules.player.member_stats import refresh_member_combat_stats
+    refresh_member_combat_stats(db.conn, current_time)
     db.conn.commit()
     db.close()
 
@@ -483,6 +500,11 @@ def _run_cwl_live(force: bool = False, now: datetime | None = None) -> dict:
                 unique_war_tags.append(war_tag)
 
     war_ok = war_skipped = war_failed = 0
+    from modules.player.member_stats import cwl_attack_counts
+    from modules.player.repository import PlayerRepository
+    from modules.player.service import PlayerService
+    player_service = PlayerService(PlayerRepository(db.conn))
+    own_cwl_tags = {team["clan_tag"] for team in teams if team.get("clan_tag")}
     for war_tag in unique_war_tags:
         cached = db.conn.execute(
             "SELECT * FROM cwl_live_war_cache WHERE war_tag = ?", (war_tag,)
@@ -500,6 +522,14 @@ def _run_cwl_live(force: bool = False, now: datetime | None = None) -> dict:
             continue
         try:
             war = service.fetch_cwl_war(war_tag)
+            old_payload = None
+            if cached and cached.get("data_json"):
+                try:
+                    old_payload = json.loads(cached["data_json"])
+                except (TypeError, json.JSONDecodeError):
+                    old_payload = None
+            before_attacks = cwl_attack_counts(old_payload, own_cwl_tags)
+            after_attacks = cwl_attack_counts(war, own_cwl_tags)
             db.conn.execute(
                 """INSERT INTO cwl_live_war_cache
                    (war_tag, season, state, status, data_json, error, updated_at, attempted_at)
@@ -517,6 +547,11 @@ def _run_cwl_live(force: bool = False, now: datetime | None = None) -> dict:
                     json.dumps(war, ensure_ascii=False), war.get("synced_at"), attempted_at,
                 ),
             )
+            for player_tag, attacks in after_attacks.items():
+                if player_tag in before_attacks and attacks > before_attacks[player_tag]:
+                    player_service.mark_activity(
+                        player_tag, war.get("synced_at") or attempted_at, "cwl_attack"
+                    )
             war_ok += 1
         except Exception as exc:  # noqa: BLE001 - 单场失败隔离
             war_failed += 1
@@ -635,6 +670,242 @@ def _run_coc_sync() -> dict:
             suffix += f"，资料失败 {profile_stats['failed']} 个"
         return {"status": "failed", "reason": reason + suffix}
     return {"status": "success", "reason": reason}
+
+
+def _run_player_details() -> dict:
+    """每日补齐玩家详情，用于赛季进攻数和最近数据活动估算。"""
+    from modules.coc_sync.official.mapper import map_player
+    from modules.coc_sync.service import CocSyncService
+    from modules.player.repository import PlayerRepository
+    from modules.player.service import PlayerService
+
+    db = Database(config.DB_PATH)
+    db.init_schema()
+    repo = PlayerRepository(db.conn)
+    player_service = PlayerService(repo)
+    service = CocSyncService(api_client=None)
+    rows = db.conn.execute(
+        "SELECT player_tag FROM accounts WHERE membership_status = 'member' ORDER BY player_tag"
+    ).fetchall()
+    success = 0
+    failed = 0
+    for row in rows:
+        try:
+            raw = service.fetch_player(row["player_tag"])
+            player_service.update_from_coc(map_player(raw, set(config.ALLIANCE_CLAN_TAGS)))
+            success += 1
+        except Exception as exc:  # noqa: BLE001 - 单玩家失败隔离
+            failed += 1
+            print(f"[warn] 玩家详情 {row['player_tag']} 同步失败：{exc}", file=sys.stderr)
+        if PLAYER_DETAIL_REQUEST_DELAY_SECONDS:
+            time.sleep(PLAYER_DETAIL_REQUEST_DELAY_SECONDS)
+    db.close()
+    if not success and failed:
+        return {"status": "failed", "reason": f"全部 {failed} 名玩家详情同步失败"}
+    suffix = f"，失败 {failed}" if failed else ""
+    return {"status": "success", "reason": f"同步玩家详情 {success}{suffix}"}
+
+
+def _capital_window_open(local_now: datetime) -> bool:
+    return (
+        (local_now.weekday() == 1 and local_now.hour >= 3)
+        or local_now.weekday() == 2
+    )
+
+
+def _run_capital_member_stats(force: bool = False, now: datetime | None = None) -> dict:
+    """每周二抓取最近已结束突袭周末；失败时周三仍可按 6 小时间隔重试。"""
+    from modules.coc_sync.official.mapper import normalize_tag
+    from modules.coc_sync.service import CocSyncService
+
+    current = now or datetime.now(timezone.utc)
+    local_now = current.astimezone(BUSINESS_TZ)
+    if not force and not _capital_window_open(local_now):
+        return {"status": "skipped", "reason": "不在周二03:00至周三的都城统计窗口"}
+
+    db = Database(config.DB_PATH)
+    db.init_schema()
+    week_start = (local_now - timedelta(days=local_now.weekday())).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    success_marker = week_start.replace(hour=3).astimezone(timezone.utc).isoformat(timespec="seconds")
+    if not force:
+        row = db.conn.execute(
+            "SELECT MAX(fetched_at) AS fetched_at FROM capital_raid_member_results"
+        ).fetchone()
+        if row and row["fetched_at"] and row["fetched_at"] >= success_marker:
+            db.close()
+            return {"status": "skipped", "reason": "本周都城成员统计已完成"}
+
+    service = CocSyncService()
+    fetched_at = current.astimezone(timezone.utc).isoformat(timespec="seconds")
+    success = 0
+    failed = 0
+    written = 0
+    for clan in config.CLANS:
+        if not clan.get("enabled", True):
+            continue
+        clan_tag = normalize_tag(clan.get("tag"))
+        try:
+            seasons = service.fetch_capital_raid_seasons(clan_tag, limit=8)
+        except Exception as exc:  # noqa: BLE001 - 单部落失败隔离
+            failed += 1
+            print(f"[warn] 都城统计 {clan_tag} 同步失败：{exc}", file=sys.stderr)
+            continue
+        success += 1
+        for season in seasons:
+            state = str(season.get("state") or "").lower()
+            if state and state != "ended":
+                continue
+            start_time = season.get("startTime")
+            if not start_time:
+                continue
+            for member in season.get("members") or []:
+                player_tag = normalize_tag(member.get("tag"))
+                if not player_tag:
+                    continue
+                db.conn.execute(
+                    """INSERT INTO capital_raid_member_results
+                       (clan_tag, start_time, end_time, player_tag, player_name,
+                        attack_limit, bonus_attack_limit, attacks,
+                        capital_resources_looted, fetched_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(clan_tag, start_time, player_tag) DO UPDATE SET
+                           end_time = excluded.end_time,
+                           player_name = excluded.player_name,
+                           attack_limit = excluded.attack_limit,
+                           bonus_attack_limit = excluded.bonus_attack_limit,
+                           attacks = excluded.attacks,
+                           capital_resources_looted = excluded.capital_resources_looted,
+                           fetched_at = excluded.fetched_at""",
+                    (
+                        clan_tag, start_time, season.get("endTime"), player_tag,
+                        member.get("name"), int(member.get("attackLimit") or 0),
+                        int(member.get("bonusAttackLimit") or 0),
+                        int(member.get("attacks") or 0),
+                        int(member.get("capitalResourcesLooted") or 0), fetched_at,
+                    ),
+                )
+                written += 1
+    db.conn.commit()
+    db.close()
+    if not success and failed:
+        return {"status": "failed", "reason": f"全部 {failed} 个部落都城统计失败"}
+    suffix = f"，失败部落 {failed}" if failed else ""
+    return {"status": "success", "reason": f"都城部落 {success}，写入 {written} 条{suffix}"}
+
+
+def _achievement_value(player: dict, name: str) -> int:
+    for achievement in player.get("achievements") or []:
+        if achievement.get("name") == name:
+            try:
+                return int(achievement.get("value") or 0)
+            except (TypeError, ValueError):
+                return 0
+    return 0
+
+
+def _games_window_open(local_now: datetime) -> bool:
+    return (local_now.day == 29 and local_now.hour >= 3) or local_now.day == 30
+
+
+def _previous_period(local_now: datetime) -> str:
+    first = local_now.replace(day=1)
+    return (first - timedelta(days=1)).strftime("%Y-%m")
+
+
+def _run_clan_games_stats(force: bool = False, now: datetime | None = None) -> dict:
+    """每月29日保存竞赛累计成就快照并与上期基准做差。"""
+    from modules.coc_sync.official.mapper import map_player, normalize_tag
+    from modules.coc_sync.service import CocSyncService
+    from modules.player.repository import PlayerRepository
+    from modules.player.service import PlayerService
+
+    current = now or datetime.now(timezone.utc)
+    local_now = current.astimezone(BUSINESS_TZ)
+    in_result_window = _games_window_open(local_now)
+    if not force and not in_result_window:
+        return {"status": "skipped", "reason": "不在29日03:00至30日的竞赛统计窗口"}
+    if force and not in_result_window and local_now.day >= 22:
+        return {"status": "skipped", "reason": "竞赛已经开始，拒绝建立不完整的月初基准"}
+    baseline_only = force and not in_result_window
+    period = _previous_period(local_now) if baseline_only else local_now.strftime("%Y-%m")
+    fetched_at = current.astimezone(timezone.utc).isoformat(timespec="seconds")
+    db = Database(config.DB_PATH)
+    db.init_schema()
+    repo = PlayerRepository(db.conn)
+    members = db.conn.execute(
+        "SELECT player_tag FROM accounts WHERE membership_status = 'member' ORDER BY player_tag"
+    ).fetchall()
+    if not force:
+        done = db.conn.execute(
+            "SELECT COUNT(*) AS count FROM clan_games_member_snapshots WHERE period = ?",
+            (period,),
+        ).fetchone()["count"]
+        if members and done >= len(members):
+            db.close()
+            return {"status": "skipped", "reason": f"{period} 竞赛成员统计已完成"}
+
+    player_service = PlayerService(repo)
+    service = CocSyncService()
+    success = 0
+    failed = 0
+    for row in members:
+        player_tag = row["player_tag"]
+        try:
+            player = service.fetch_player(player_tag)
+            player_service.update_from_coc(map_player(player, set(config.ALLIANCE_CLAN_TAGS)))
+            cumulative = _achievement_value(player, "Games Champion")
+            previous = db.conn.execute(
+                """SELECT cumulative_value FROM clan_games_member_snapshots
+                   WHERE player_tag = ? AND period < ? ORDER BY period DESC LIMIT 1""",
+                (player_tag, period),
+            ).fetchone()
+            complete = previous is not None and cumulative >= int(previous["cumulative_value"] or 0)
+            points = cumulative - int(previous["cumulative_value"] or 0) if complete else None
+            db.conn.execute(
+                """INSERT INTO clan_games_member_snapshots
+                   (period, player_tag, player_name, clan_tag, cumulative_value,
+                    points, complete, fetched_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(period, player_tag) DO UPDATE SET
+                       player_name = excluded.player_name,
+                       clan_tag = excluded.clan_tag,
+                       cumulative_value = excluded.cumulative_value,
+                       points = excluded.points,
+                       complete = excluded.complete,
+                       fetched_at = excluded.fetched_at""",
+                (
+                    period, player_tag, player.get("name"),
+                    normalize_tag((player.get("clan") or {}).get("tag")), cumulative,
+                    points, int(complete), fetched_at,
+                ),
+            )
+            db.conn.commit()
+            success += 1
+        except Exception as exc:  # noqa: BLE001 - 单玩家失败隔离
+            failed += 1
+            print(f"[warn] 竞赛统计 {player_tag} 同步失败：{exc}", file=sys.stderr)
+        if PLAYER_DETAIL_REQUEST_DELAY_SECONDS:
+            time.sleep(PLAYER_DETAIL_REQUEST_DELAY_SECONDS)
+    db.close()
+    if not success and failed:
+        return {"status": "failed", "reason": f"全部 {failed} 名玩家竞赛统计失败"}
+    suffix = f"，失败 {failed}" if failed else ""
+    action = "竞赛结束基准" if baseline_only else "竞赛成员"
+    return {"status": "success", "reason": f"{period} {action} {success}{suffix}"}
+
+
+def _run_member_combat_stats() -> dict:
+    """每日滑动成员战斗窗口，清除超过90天/3完整月的数据。"""
+    from modules.player.member_stats import refresh_member_combat_stats
+
+    db = Database(config.DB_PATH)
+    db.init_schema()
+    count = refresh_member_combat_stats(db.conn)
+    db.conn.commit()
+    db.close()
+    return {"status": "success", "reason": f"刷新 {count} 名成员战斗摘要"}
 
 
 def _run_cwl_assembly(force: bool = False, now: datetime | None = None) -> dict:
@@ -931,12 +1202,24 @@ def _run_cwl(force: bool = False) -> dict:
             return {"status": "failed", "reason": f"{period} 全部队伍拉取失败"}
         if n_ok == 0:
             return {"status": "skipped", "reason": f"{period} 0 条战绩写入（不在 accounts）"}
+        db = Database(config.DB_PATH)
+        db.init_schema()
+        from modules.player.member_stats import refresh_member_combat_stats
+        refresh_member_combat_stats(db.conn)
+        db.conn.commit()
+        db.close()
         return {"status": "success", "reason": f"{period} 写入 {n_ok} 条（{len(ok_teams)}/{len(teams)} 队）"}
 
     # 冷启动：league_teams 无记录，从本地 JSON 导入
     ok_teams, n_ok, _n_skip = _cold_start_from_json(period)
     if n_ok == 0:
         return {"status": "skipped", "reason": f"{period} 无 league_teams 且无本地 JSON"}
+    db = Database(config.DB_PATH)
+    db.init_schema()
+    from modules.player.member_stats import refresh_member_combat_stats
+    refresh_member_combat_stats(db.conn)
+    db.conn.commit()
+    db.close()
     return {"status": "success", "reason": f"{period} 冷启动写入 {n_ok} 条"}
 
 
@@ -1000,6 +1283,29 @@ JOBS = {
         "name": "COC玩家档案",
         "interval": 360,
         "run": _run_coc_sync,
+    },
+    "player_details": {
+        "name": "COC玩家详情",
+        "interval": 1440,
+        "include_in_all": False,
+        "run": _run_player_details,
+    },
+    "member_combat_stats": {
+        "name": "成员战斗摘要",
+        "interval": 1440,
+        "run": _run_member_combat_stats,
+    },
+    "capital_member_stats": {
+        "name": "都城成员贡献",
+        "interval": 360,
+        "include_in_all": False,
+        "run": _run_capital_member_stats,
+    },
+    "clan_games_stats": {
+        "name": "竞赛成员贡献",
+        "interval": 360,
+        "include_in_all": False,
+        "run": _run_clan_games_stats,
     },
     "war_results": {
         "name": "普通部落战战绩",
@@ -1079,7 +1385,10 @@ def run_one(db: Database, job_id: str, force: bool = False) -> dict:
     start = time.monotonic()
     try:
         run_fn = job["run"]
-        if job_id in {"current_wars", "cwl", "cwl_live", "cwl_assembly"}:
+        if job_id in {
+            "current_wars", "cwl", "cwl_live", "cwl_assembly",
+            "capital_member_stats", "clan_games_stats",
+        }:
             result = run_fn(force=force)
         else:
             result = run_fn()

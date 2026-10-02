@@ -111,6 +111,16 @@ GET /api/members
 **错误码**：
 - `500` — 数据库查询失败
 
+#### 成员活动与贡献字段
+
+`GET /api/members` 已返回 `donations`、`donations_received`、`season_attack_wins`、`last_activity_at`、`last_activity_reasons` 和 `activity_observed_since`。接口只读本地缓存，不在页面请求中逐玩家访问 COC API，也不向前端返回完整 `coc_raw`。
+
+其中“最近活动”是检测到公开数据有效变化的时间，不是精确登录时间。赛季进攻由后端周期读取玩家详情后缓存，捐兵/收兵从成员 `coc_raw` 提取。完整响应和重置规则见 [22-member-activity.md](22-member-activity.md)。
+
+接口同时返回 `war_recent_15` 和 `cwl_recent_3m` 两个结构化摘要。前者按 `player_tag` 汇总最近 90 天内、跨全部自有部落的最近最多 15 场参战普通战，包含战争数、三星数、实际/可用进攻数、三星率和出刀率；后者按 `player_tag` 汇总最近 3 个完整联赛月内全部自有联赛队伍的三星数、实际进攻数和三星率。两者都限制自有部落边界，但不按部落业务类型过滤；玩家当前 `clan_tag` 只用于展示和筛选。百分比必须伴随原始计数，无样本返回 `null`，前端显示 `-`。接口只联结预计算缓存，不在请求中扫描完整战争 JSON。
+
+成员贡献还返回 `capital_recent_4w` 和 `clan_games`。都城摘要包含实际纳入周数、总掠夺、实际/可用刀数和每刀掠夺；竞赛摘要包含统计月份、本期积分、完整性、近 3 期平均和实际期数。无都城样本时不返回摘要；竞赛缺少前期基准时 `complete=false`，不得返回虚假的 0 分。两项都只读调度任务保存的本地事实。
+
 ---
 
 ### 2.1 自有部落概览
