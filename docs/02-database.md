@@ -1,6 +1,6 @@
 # 02 — 数据库表结构与数据流
 
-> 版本：v3.0
+> 版本：v3.1
 > 数据库：SQLite `data/league.db`
 
 ---
@@ -40,6 +40,9 @@
 `cwl_live_group_cache` 以当月 `league_teams` 为部落范围，保存官方联赛组和轮次 warTag；`cwl_live_war_cache` 以 `war_tag` 去重保存完整逐场攻防数据。两表由 `cwl_live` 增量更新，页面 API 只读缓存。已结束战争不再重复拉取。
 
 `cwl_roster_snapshots` 保存每月正式公示表的 revision，同月只有一个 `is_active=1`；`cwl_assembly_cache` 保存正式名单与当前部落成员的比较结果。两表由 `cwl_assembly` 在每月 1 日 14:00 至 3 日 16:00 的窗口内维护，单部落开启当月联赛后冻结。完整边界见 [21-cwl-assembly-check.md](21-cwl-assembly-check.md)。
+
+表的事实/缓存边界、可重建性、当前容量和已确认遗留列见
+[23-data-task-audit.md](23-data-task-audit.md)。不要仅因表名含 `cache` 就直接清空；先确认消费者和重建路径。
 
 ---
 
@@ -103,7 +106,8 @@ erDiagram
 
 ## 三、accounts 表（账号档案）
 
-只保留**账号级事实**。COC 权威组（由 `coc_sync` 更新）与报名/战绩组经 upsert COALESCE 语义互不覆盖。
+只保留**账号级事实**。COC 权威组由 `coc_sync`、`player_details` 与 `clan_games_stats`
+更新；`cwl_registration` 只维护报名状态。各写入方经 upsert COALESCE 语义互不覆盖。
 
 | 字段 | 类型 | 组 | 说明 |
 |------|------|----|------|
@@ -118,10 +122,13 @@ erDiagram
 | `coc_raw` | TEXT(JSON) | COC | API 原始成员数据全量快照 |
 | `last_synced_at` | TEXT | COC | 最近 COC 同步时间 |
 | `membership_status` | TEXT | COC | `member` / `left`（退部对账维护） |
-| `is_provisional` | INTEGER | — | 保留备用（v2.2 起恒为 0） |
 | `player_name` | TEXT | 报名 | 归属人（= 主号昵称） |
 | `status` | TEXT | 报名 | `active` / `missed` / `maybe_left` / `left` |
-| `history_score` | REAL | 战绩 | 历史战绩综合分 |
+| `history_score` | REAL | 兼容 | 历史分兼容字段；当前没有自动写入方 |
+| `season_attack_wins` | INTEGER | COC 详情 | 当前赛季主世界进攻胜场 |
+| `last_activity_at` | TEXT | 活动观察 | 最后检测到公开数据有效变化的时间 |
+| `last_activity_reason` | TEXT(JSON) | 活动观察 | 本次有效变化原因列表 |
+| `activity_observed_since` | TEXT | 活动观察 | 开始观察公开数据的时间 |
 | `updated_at` | TEXT | — | 更新时间 |
 
 > **派生列**：`last_reg_period` 不落列，读取时 `MAX(period)` 子查询实时派生，按 `account_name` 关联 registrations。
@@ -149,7 +156,7 @@ v2.2 B 方案：自成一体的报名事实源。自持 `account_name`/`player_n
 | `id` | INTEGER PK | 自增 | 行 ID |
 | `account_name` | TEXT NOT NULL | UNIQUE(account_name, period) | 报名昵称，报名事实主标识 |
 | `player_name` | TEXT | | 主号归属（自持） |
-| `period` | TEXT | UNIQUE | 联赛月份 `YYYY-MM`（v2.5 统一） |
+| `period` | TEXT | 与 `account_name` 联合唯一 | 联赛月份 `YYYY-MM`（v2.5 统一） |
 | `match_value` | REAL | | 本月匹配值 |
 | `join_combat` | INTEGER | | 是否实战 (0/1) |
 | `account_type` | TEXT | | 本月分类：combat/normal |
@@ -157,11 +164,11 @@ v2.2 B 方案：自成一体的报名事实源。自持 `account_name`/`player_n
 | `league_type` | TEXT | | 编排结果：combat/shell |
 | `rank_order` | INTEGER | | 最终名单位次（编排产物，arrange() 结束时回写） |
 | `player_tag` | TEXT | 可空，无 FK | 真实 Tag 关联缓存 |
-| `team_name` | TEXT | 可空 | 分配到哪个队伍（v2.3，回写格式含 index+alias+coc_name+clan_tag） |
+| `team_info` | TEXT | 可空 | 分配到哪个队伍，回写格式含 index+alias+coc_name+clan_tag |
 
-**team_name 回写格式**：`"{team_index} {team_alias} {coc_name} {clan_tag}"`
+**team_info 回写格式**：`"{team_index} {team_alias} {coc_name} {clan_tag}"`
 
-**team_name 在 ARRANGEMENT_OUTPUT_HEADERS 中**：COC 真实部落名称列（v2.8 新增），供 Excel 展示使用。
+`team_name` 是 `ARRANGEMENT_OUTPUT_HEADERS` 中的 COC 真实部落名称展示列，不是当前 `registrations` 的目标字段。生产库仍遗留的同名物理列见 [23-data-task-audit.md](23-data-task-audit.md)。
 
 ---
 
@@ -247,7 +254,7 @@ CREATE TABLE league_results (
 
 | 表 | 写入者 | 读取者 |
 |----|--------|--------|
-| `accounts` | `coc_sync`, `cwl_registration` | `player-export`, `import-reg`, `arrange`, `fetch_cwl_data`, `api_server`（members 与 clan overview） |
+| `accounts` | `coc_sync`、`player_details`、`clan_games_stats`、`cwl_registration`（报名状态） | `player-export`, `import-reg`, `arrange`, `fetch_cwl_data`, `api_server`（members 与 clan overview） |
 | `registrations` | `import-reg`, `arrange`（回写） | `arrange`, `refresh_status` |
 | `league_teams` | `arrange`（幂等写入） | `arrange`（读上月配置+team_name） |
 | `league_results` | `fetch_cwl_data` | `arrange`（读星数+队伍归属） |
@@ -255,6 +262,10 @@ CREATE TABLE league_results (
 | `farm_stats` | `scheduler.py`（farm_stats） | `api_server`（farm-config） |
 | `current_war_cache` | `scheduler.py`（current_wars） | `api_server`（current-wars 汇总/详情） |
 | `war_history_cache` | `scheduler.py`（current_wars）、`backfill_war_history.py` | `api_server`（war-history 汇总/详情） |
+| `member_war_facts` | `current_wars`、历史缓存物化 | `member_combat_stats` |
+| `member_combat_stats_cache` | `current_wars`、`cwl`、`member_combat_stats` | `api_server`（members） |
+| `capital_raid_member_results` | `capital_member_stats` | `api_server`（members） |
+| `clan_games_member_snapshots` | `clan_games_stats` | `api_server`（members） |
 | `clan_profile_cache` | `scheduler.py`（coc_sync） | `api_server`（clan overview 详情） |
 | `cwl_live_group_cache` | `scheduler.py`（cwl_live） | `api_server`（cwl-live 汇总/详情） |
 | `cwl_live_war_cache` | `scheduler.py`（cwl_live） | `api_server`（cwl-live 详情与总览） |
@@ -363,7 +374,7 @@ v2.x 的数据库只有 3 张表（accounts / registrations / results），随�
 1. ✅ DDL 添加 `league_teams` 和 `league_results`
 2. ✅ `arrange()` 开始时写入 `league_teams`
 3. ✅ `fetch_cwl_data.py` 读写新表
-4. ✅ `registrations.team_name` 回写格式改为含 index + alias + coc_name + clan_tag
+4. ✅ `registrations.team_info` 回写格式改为含 index + alias + coc_name + clan_tag
 5. ✅ `baseline_rebuilder.py` 从 `league_teams` 读取上月配置
 6. ✅ Excel 导出 `ARRANGEMENT_OUTPUT_HEADERS` 新增 `team_name` 列（13 列）
 7. ✅ 迁移脚本 `migrate_results_202607.py` 将旧数据迁入新表

@@ -1,6 +1,6 @@
 # 15 — 周期调度方案设计（sync_jobs 常驻调度器）
 
-> 版本：v1.0（2026-08）
+> 版本：v1.1（2026-10）
 > 状态：已实现
 > 关联代码：`shared/db/connection.py`（`sync_jobs` 表）、`scripts/scheduler.py`、`deploy/sky-scheduler.service`
 
@@ -10,7 +10,7 @@
 
 ### 1.1 现状问题
 
-项目当前有 **8 类** 需要周期性执行的任务，其中数据刷新任务采用间隔调度，公众号阵型采用固定业务时刻：
+项目当前有 **12 个** 需要周期性执行的任务，其中数据刷新任务采用间隔调度，公众号阵型采用固定业务时刻：
 
 | 问题 | 现状 | 影响 |
 |------|------|------|
@@ -59,6 +59,7 @@
 | `sync_jobs` | 调度器任务状态 | `job_id` | `scheduler.py` | 实时（调度器维护） |
 
 > `sync_jobs` 为周期调度方案新增的状态表，详见第三节。
+> 表的权威边界、缓存重建路径和任务重叠审计见 [23-data-task-audit.md](23-data-task-audit.md)。
 
 ### 2.2 表读写关系矩阵
 
@@ -73,6 +74,10 @@
 | `farm_stats` | `sync_farm_stats` | `api_server`（farm-config） |
 | `current_war_cache` | `current_wars` | `api_server`（current-wars） |
 | `war_history_cache` | `current_wars` / 手工回填 | `api_server`（war-history） |
+| `member_war_facts` | `current_wars` / 历史缓存物化 | `member_combat_stats` |
+| `member_combat_stats_cache` | `current_wars`、`cwl`、`member_combat_stats` | `api_server`（members） |
+| `capital_raid_member_results` | `capital_member_stats` | `api_server`（members） |
+| `clan_games_member_snapshots` | `clan_games_stats` | `api_server`（members） |
 | `clan_profile_cache` | `coc_sync` | `api_server`（clan overview 详情） |
 | `cwl_live_group_cache` | `cwl_live` | `api_server`（cwl-live、cwl-check-in） |
 | `cwl_live_war_cache` | `cwl_live` | `api_server`（cwl-live、cwl-check-in） |
@@ -80,7 +85,7 @@
 | `cwl_assembly_cache` | `cwl_assembly` | `api_server`（cwl-assembly） |
 | `sync_jobs` | `scheduler.py` | `scheduler.py`（`--list`） |
 
-### 2.3 需要周期性执行的任务（8 类）
+### 2.3 需要周期性执行的任务（12 个）
 
 | job_id | 数据表 | 脚本 | 数据源 | 频率 | 前端接口 |
 |--------|--------|------|--------|------|----------|
@@ -88,7 +93,11 @@
 | `cwl_live` | `cwl_live_group_cache` + `cwl_live_war_cache` | `scheduler.py` | COC 官方 API | 活跃期每 2 分钟 | `/api/clan/cwl-live`、`/api/clan/cwl-check-in` |
 | `cwl_assembly` | `cwl_roster_snapshots` + `cwl_assembly_cache` | `scheduler.py` | 腾讯文档 + COC 官方 API | 月初窗口每 5 分钟 | `/api/clan/cwl-assembly` |
 | `coc_sync` | `accounts`、`clan_profile_cache` | `CocSyncService` | COC 官方 API | 每 6 小时 | `/api/members`、`/api/clan/overview/{tag}` |
+| `player_details` | `accounts` | `scheduler.py` | COC 官方 API | 每天 | `/api/members` |
+| `member_combat_stats` | `member_combat_stats_cache` | `scheduler.py` | 本地战争/CWL事实 | 每天 | `/api/members` |
 | `farm_stats` | `farm_stats` | `sync_farm_stats.py` | COC 官方 API | 每 30 分钟 | `/api/clan/farm-config` |
+| `capital_member_stats` | `capital_raid_member_results` | `scheduler.py` | COC 官方 API | 每 6 小时检查；周二至周三写入 | `/api/members` |
+| `clan_games_stats` | `clan_games_member_snapshots` | `scheduler.py` | COC 官方 API | 每 6 小时检查；每月 29–30 日写入 | `/api/members` |
 | `war_results` | `war_results` | `fetch_war_data.py` | ClashKing API | 每天 | `/api/clan/war-stats` |
 | `cwl` | `league_results` | `fetch_cwl_data.py` | ClashKing API | 每月 12 号 | `/api/clan/league-stats` |
 | `war_layout` | 独立 `war_layout.db` | `modules.war_layout` | SocialData/X + 微信公众号 API | 每天 09:00（北京时间） | — |

@@ -38,6 +38,7 @@
 | --- | --- |
 | 总体架构、模块归属、已知缺口 | `docs/01-architecture.md` |
 | 数据库、字段所有权、period | `docs/02-database.md` |
+| 数据表生命周期、缓存重建与任务冗余审计 | `docs/23-data-task-audit.md` |
 | CWL 排序、基准重建、队伍填充 | `docs/03-sorting.md`、`docs/04-promotion-relegation.md` |
 | 名单 Part1–4 与腾讯文档公示 | `docs/05-roster-output.md` |
 | 月度操作和异常处理 | `docs/06-operations.md`、`docs/17-cwl-arrangement-sop.md` |
