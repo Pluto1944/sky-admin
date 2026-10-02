@@ -644,6 +644,7 @@ def _run_cwl_assembly(force: bool = False, now: datetime | None = None) -> dict:
         parse_published_roster,
         published_sheet_name,
         roster_content_hash,
+        roster_membership_signature,
     )
     from modules.coc_sync.official.mapper import normalize_tag
     from modules.coc_sync.service import CocSyncService
@@ -660,7 +661,7 @@ def _run_cwl_assembly(force: bool = False, now: datetime | None = None) -> dict:
     db.init_schema()
     teams = [dict(row) for row in db.conn.execute(
         """SELECT period, team_index, team_alias, team_name, clan_tag,
-                  category, member_count, league_level
+                  category, member_count, league_level, leader
            FROM league_teams
            WHERE period = ? AND category IN ('combat', 'shell')
            ORDER BY team_index""",
@@ -690,7 +691,29 @@ def _run_cwl_assembly(force: bool = False, now: datetime | None = None) -> dict:
         try:
             rows = TencentDocAdapter().read_sheet(file_id, source_sheet)
             roster = parse_published_roster(rows, teams)
+            missing_leaders = [
+                team for team in roster.get("teams", []) if not team.get("leader_name")
+            ]
+            if missing_leaders:
+                profile_service = CocSyncService()
+                for team in missing_leaders:
+                    try:
+                        profile = profile_service.fetch_clan_profile(team["clan_tag"])
+                        team["leader_name"] = str(profile.get("leader_name") or "").strip()
+                    except Exception:  # noqa: BLE001 - 抬头补充失败不应阻断正式成员快照
+                        pass
             content_hash = roster_content_hash(roster)
+            previous_roster = None
+            if snapshot is not None:
+                try:
+                    previous_roster = json.loads(snapshot["data_json"])
+                except (KeyError, TypeError, json.JSONDecodeError):
+                    previous_roster = None
+            preserve_assembly = (
+                previous_roster is not None
+                and roster_membership_signature(previous_roster)
+                == roster_membership_signature(roster)
+            )
             next_revision = db.conn.execute(
                 "SELECT COALESCE(MAX(revision), 0) + 1 FROM cwl_roster_snapshots WHERE period = ?",
                 (period,),
@@ -709,9 +732,17 @@ def _run_cwl_assembly(force: bool = False, now: datetime | None = None) -> dict:
                         json.dumps(roster, ensure_ascii=False), attempted_at,
                     ),
                 )
-                # 强制重建后让所有部落使用新 revision 重新核对。
                 if snapshot is not None:
-                    db.conn.execute("DELETE FROM cwl_assembly_cache WHERE period = ?", (period,))
+                    if preserve_assembly:
+                        # 只有首领/管理等抬头元数据变化时，换绑新 revision，保留
+                        # 已冻结的集结结果，避免联赛开启后重新计算。
+                        db.conn.execute(
+                            """UPDATE cwl_assembly_cache
+                               SET roster_snapshot_id = ? WHERE period = ?""",
+                            (cursor.lastrowid, period),
+                        )
+                    else:
+                        db.conn.execute("DELETE FROM cwl_assembly_cache WHERE period = ?", (period,))
             snapshot = {
                 "id": cursor.lastrowid,
                 "period": period,

@@ -429,16 +429,23 @@ def _valid_period(value: str) -> bool:
 def _cwl_live_teams(db: Database, period: str) -> list[dict]:
     rows = db.conn.execute(
         """SELECT period, team_index, team_alias, team_name, clan_tag,
-                  category, member_count, league_level
+                  category, member_count, league_level, leader
            FROM league_teams
            WHERE period = ? AND category IN ('combat', 'shell')
            ORDER BY team_index""",
         (period,),
     ).fetchall()
+    management = _cwl_roster_team_metadata(db, period)
     result = []
     for row in rows:
         item = dict(row)
         item["clan_tag"] = normalize_tag(item.get("clan_tag"))
+        metadata = management.get(item["clan_tag"], {})
+        item["leader_name"] = (
+            str(metadata.get("leader_name") or "").strip()
+            or str(item.get("leader") or "").strip()
+        )
+        item["manager_names"] = str(metadata.get("manager_names") or "").strip()
         result.append(item)
     return result
 
@@ -451,6 +458,19 @@ def _load_json(value: str | None) -> dict | None:
         return data if isinstance(data, dict) else None
     except (TypeError, json.JSONDecodeError):
         return None
+
+
+def _cwl_roster_team_metadata(db: Database, period: str) -> dict[str, dict]:
+    row = db.conn.execute(
+        "SELECT data_json FROM cwl_roster_snapshots WHERE period = ? AND is_active = 1",
+        (period,),
+    ).fetchone()
+    roster = _load_json(row["data_json"] if row else None) or {}
+    return {
+        normalize_tag(team.get("clan_tag")): team
+        for team in roster.get("teams", [])
+        if normalize_tag(team.get("clan_tag"))
+    }
 
 
 def _cwl_live_group_row(db: Database, period: str, clan_tag: str) -> dict | None:
@@ -488,6 +508,8 @@ def _pending_cwl_summary(team: dict, cache: dict | None = None) -> dict:
         "category": team.get("category"),
         "member_count": team.get("member_count", 0),
         "league_level": team.get("league_level") or "-",
+        "leader_name": team.get("leader_name") or "",
+        "manager_names": team.get("manager_names") or "",
         "season": (cache or {}).get("season"),
         "status": (cache or {}).get("status") or "waiting",
         "current_round": None,
@@ -573,6 +595,8 @@ def _build_cwl_live_summary(db: Database, period: str) -> dict:
         else:
             dashboard = build_cwl_dashboard(group, _cwl_live_wars(db, group))
             item = {**dashboard["summary"], "error": (cache or {}).get("error")}
+            item["leader_name"] = team.get("leader_name") or ""
+            item["manager_names"] = team.get("manager_names") or ""
         if item.get("synced_at"):
             updated.append(item["synced_at"])
         clans.append(item)

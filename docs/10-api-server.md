@@ -161,7 +161,7 @@ GET /api/clan/war-history/{clan_tag}/{war_key}
 GET /api/clan/cwl-live?period=YYYY-MM
 ```
 
-无需认证。`period` 可选，默认北京时间当前月份。部落范围只读当月 `league_teams` 中的 `combat` 和 `shell` 队伍，返回队伍类别、轮次、排名、胜负、星数、摧毁率、缓存状态和更新时间。响应中的 `available_periods` 始终包含当前月，并只加入联赛组和逐场战争均完整的历史月份。
+无需认证。`period` 可选，默认北京时间当前月份。部落范围只读当月 `league_teams` 中的 `combat` 和 `shell` 队伍，返回队伍类别、轮次、排名、胜负、星数、摧毁率、缓存状态和更新时间。若该月存在正式名单快照，同时返回 `leader_name`（官方完整首领昵称，缺失时回退配置简称）和 `manager_names`（当月联赛管理）。响应中的 `available_periods` 始终包含当前月，并只加入联赛组和逐场战争均完整的历史月份。
 
 ### 2.6 单个 CWL 部落详情
 

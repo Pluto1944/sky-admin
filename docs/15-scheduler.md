@@ -141,7 +141,7 @@
 | 容错 | 名单失败不写半成品；成员失败保留上次成功 JSON 并在下轮重试 |
 
 调度器不会在快照成功后再次读取在线文档。明确需要纠错时可执行
-`python scripts/scheduler.py --once cwl_assembly --force` 生成新 revision 并重新核对；历史 revision 保留。完整设计见 [21-cwl-assembly-check.md](21-cwl-assembly-check.md)。
+`python scripts/scheduler.py --once cwl_assembly --force` 生成新 revision；若部落和正式成员序列未变、仅首领或管理等抬头变化，已冻结集结缓存保持不变，成员变化时才重新核对。历史 revision 始终保留。完整设计见 [21-cwl-assembly-check.md](21-cwl-assembly-check.md)。
 
 #### `coc_sync` — 部落成员与官方资料（`accounts`、`clan_profile_cache`）
 

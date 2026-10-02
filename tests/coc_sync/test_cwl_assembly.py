@@ -9,6 +9,7 @@ from modules.coc_sync.cwl_assembly import (
     normalize_roster_name,
     parse_published_roster,
     published_sheet_name,
+    roster_membership_signature,
 )
 
 
@@ -21,6 +22,7 @@ def _team(index=0, tag="#AAA", category="combat", count=15):
         "clan_tag": tag,
         "category": category,
         "member_count": count,
+        "leader": "首领简称",
     }
 
 
@@ -33,7 +35,7 @@ def test_sheet_name_and_shell_score_normalization():
 def test_parse_published_roster_uses_part4_member_rows():
     rows = [
         {"苍穹联赛报名": "说明", "col1": "", "col2": "", "col3": "", "col4": ""},
-        {"苍穹联赛报名": "实战:冠三 15/15", "col1": "#AAA", "col2": "部落名", "col3": "首领", "col4": "管理"},
+        {"苍穹联赛报名": "实战:冠三 15/15", "col1": "#AAA", "col2": "部落名", "col3": "首领:首领完整昵称", "col4": "管理:管A、管B 开战/捐兵给一份额外"},
         {"苍穹联赛报名": "甲", "col1": "乙", "col2": "丙", "col3": "丁", "col4": "戊"},
         {"苍穹联赛报名": "己", "col1": "庚", "col2": "辛", "col3": "壬", "col4": "癸"},
         {"苍穹联赛报名": "子", "col1": "丑", "col2": "寅", "col3": "卯", "col4": "辰"},
@@ -43,6 +45,8 @@ def test_parse_published_roster_uses_part4_member_rows():
     assert roster["teams"][0]["members"] == [
         "甲", "乙", "丙", "丁", "戊", "己", "庚", "辛", "壬", "癸", "子", "丑", "寅", "卯", "辰",
     ]
+    assert roster["teams"][0]["leader_name"] == "首领完整昵称"
+    assert roster["teams"][0]["manager_names"] == "管A、管B"
 
 
 def test_parse_shell_roster_strips_scores_and_rejects_missing_heading():
@@ -52,8 +56,15 @@ def test_parse_shell_roster_strips_scores_and_rejects_missing_heading():
     ]
     roster = parse_published_roster(rows, [_team(tag="#BBB", category="shell", count=5)])
     assert roster["teams"][0]["members"] == ["甲", "乙"]
+    assert roster["teams"][0]["leader_name"] == "首领简称"
     with pytest.raises(ValueError, match="抬头出现 0 次"):
         parse_published_roster(rows, [_team(tag="#AAA")])
+
+
+def test_membership_signature_ignores_heading_metadata():
+    first = {"teams": [{"clan_tag": "#AAA", "members": ["甲"], "leader_name": "全名"}]}
+    second = {"teams": [{"clan_tag": "#AAA", "members": ["甲"], "leader_name": "简称", "manager_names": "管A"}]}
+    assert roster_membership_signature(first) == roster_membership_signature(second)
 
 
 def test_compare_roster_members_preserves_duplicate_counts():
@@ -81,7 +92,12 @@ def _seed_api(db):
             team["clan_tag"], team["category"], team["member_count"],
         ),
     )
-    roster = {"teams": [{**team, "members": ["甲", "乙"]}]}
+    roster = {"teams": [{
+        **team,
+        "leader_name": "首领完整昵称",
+        "manager_names": "管A、管B",
+        "members": ["甲", "乙"],
+    }]}
     cursor = db.conn.execute(
         """INSERT INTO cwl_roster_snapshots
            (period, revision, is_active, source_sheet, content_hash, data_json, created_at)
@@ -111,6 +127,10 @@ def test_assembly_summary_and_detail_read_only_cache(db, monkeypatch):
     assert summary["status"] == "ready"
     assert summary["summary"]["missing_count"] == 1
     assert summary["teams"][0]["present_count"] == 1
+
+    league = routes.cwl_live("2026-10", db)
+    assert league["clans"][0]["leader_name"] == "首领完整昵称"
+    assert league["clans"][0]["manager_names"] == "管A、管B"
 
     detail = routes.cwl_assembly_detail("#aaa", db)
     assert detail["snapshot_revision"] == 1

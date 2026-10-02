@@ -18,9 +18,9 @@ def _seed_teams(path):
     for index, tag in enumerate(("#AAA", "#BBB")):
         db.conn.execute(
             """INSERT INTO league_teams
-               (period, team_index, team_alias, team_name, clan_tag, category, member_count)
-               VALUES ('2026-10', ?, ?, ?, ?, 'combat', 5)""",
-            (index, f"队伍{index + 1}", f"部落{index + 1}", tag),
+               (period, team_index, team_alias, team_name, clan_tag, category, member_count, leader)
+               VALUES ('2026-10', ?, ?, ?, ?, 'combat', 5, ?)""",
+            (index, f"队伍{index + 1}", f"部落{index + 1}", tag, f"首领简称{index + 1}"),
         )
     db.conn.commit()
     db.close()
@@ -28,7 +28,7 @@ def _seed_teams(path):
 
 def _published_rows():
     return [
-        {"苍穹联赛报名": "实战:队伍1 5/5", "col1": "#AAA", "col2": "部落1", "col3": "", "col4": ""},
+        {"苍穹联赛报名": "实战:队伍1 5/5", "col1": "#AAA", "col2": "部落1", "col3": "首领:首领完整1", "col4": "管理:管A 开战/捐兵给一份额外"},
         {"苍穹联赛报名": "甲", "col1": "乙", "col2": "丙", "col3": "丁", "col4": "戊"},
         {"苍穹联赛报名": "实战:队伍2 5/5", "col1": "#BBB", "col2": "部落2", "col3": "", "col4": ""},
         {"苍穹联赛报名": "己", "col1": "庚", "col2": "辛", "col3": "壬", "col4": "癸"},
@@ -80,12 +80,27 @@ def test_assembly_scheduler_snapshots_once_freezes_started_and_preserves_cache(t
     before = json.loads(rows["#BBB"]["data_json"])
     assert before["missing_count"] == 1
     assert before["extra_count"] == 1
+    first_locked_at = rows["#AAA"]["locked_at"]
+    db.close()
+
+    # 仅抬头元数据变化的强制 revision 不得清空或重算已经冻结的集结结果。
+    refreshed = _run_cwl_assembly(force=True, now=datetime(2026, 10, 2, 10, 1, tzinfo=TZ))
+    assert refreshed["status"] == "success"
+    assert len(reads) == 2
+    db = Database(str(db_path))
+    assert db.conn.execute(
+        "SELECT COUNT(*) FROM cwl_roster_snapshots WHERE period='2026-10'"
+    ).fetchone()[0] == 2
+    preserved = db.conn.execute(
+        "SELECT locked_at FROM cwl_assembly_cache WHERE period='2026-10' AND clan_tag='#AAA'"
+    ).fetchone()
+    assert preserved["locked_at"] == first_locked_at
     db.close()
 
     fail_b["value"] = True
     second = _run_cwl_assembly(now=datetime(2026, 10, 2, 10, 5, tzinfo=TZ))
     assert second["status"] == "failed"
-    assert len(reads) == 1
+    assert len(reads) == 2
     db = Database(str(db_path))
     after = db.conn.execute(
         "SELECT data_json, error FROM cwl_assembly_cache WHERE period='2026-10' AND clan_tag='#BBB'"

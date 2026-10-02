@@ -15,6 +15,7 @@ from typing import Any
 from modules.coc_sync.official.mapper import normalize_tag
 
 _SHELL_SCORE_SUFFIX = re.compile(r"\s+-?\d+(?:\.\d+)?\s*$")
+_MANAGER_NOTE_SUFFIX = re.compile(r"\s*开战/捐兵给一份额外.*$")
 
 
 def published_sheet_name(period: str) -> str:
@@ -29,6 +30,23 @@ def normalize_roster_name(value: Any, category: str) -> str:
     if category == "shell":
         name = _SHELL_SCORE_SUFFIX.sub("", name).strip()
     return name
+
+
+def normalize_roster_heading(value: Any, label: str) -> str:
+    """清理 Part4 抬头里的 ``首领:`` / ``管理:`` 前缀及管理说明。"""
+    text = "" if value is None else str(value).strip()
+    text = re.sub(rf"^{re.escape(label)}\s*[:：]\s*", "", text).strip()
+    if label == "管理":
+        text = _MANAGER_NOTE_SUFFIX.sub("", text).strip()
+    return text
+
+
+def roster_membership_signature(roster: dict) -> list[tuple[str | None, tuple[str, ...]]]:
+    """只比较影响集结结果的部落与正式成员，忽略抬头元数据。"""
+    return [
+        (normalize_tag(team.get("clan_tag")), tuple(team.get("members") or []))
+        for team in roster.get("teams", [])
+    ]
 
 
 def parse_published_roster(rows: list[dict], teams: list[dict]) -> dict:
@@ -59,6 +77,7 @@ def parse_published_roster(rows: list[dict], teams: list[dict]) -> dict:
         if len(positions) != 1:
             raise ValueError(f"正式名单中部落 {tag} 抬头出现 {len(positions)} 次")
 
+        heading = rows[positions[0]]
         start = positions[0] + 1
         capacity = max(0, int(team.get("member_count") or 0))
         member_rows = max(1, math.ceil(capacity / 5))
@@ -78,6 +97,16 @@ def parse_published_roster(rows: list[dict], teams: list[dict]) -> dict:
             "clan_tag": tag,
             "category": team.get("category") or "combat",
             "member_count": capacity,
+            # leader_name 与 league_teams.leader 是同一位首领；正式表的官方完整
+            # 昵称优先，缺失时才回退到配置简称。
+            "leader_name": normalize_roster_heading(
+                heading.get(columns[3]) if len(columns) > 3 else None,
+                "首领",
+            ) or str(team.get("leader") or "").strip(),
+            "manager_names": normalize_roster_heading(
+                heading.get(columns[4]) if len(columns) > 4 else None,
+                "管理",
+            ),
             "members": names,
         })
 
