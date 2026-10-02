@@ -62,9 +62,18 @@ def map_player(player: dict, alliance_clan_tags: set[str]) -> dict:
     clan = player.get("clan") or {}
     clan_tag = normalize_tag(clan.get("tag"))
     fields = map_member(player, clan_tag or "", clan.get("name"))
-    alliance = {normalize_tag(tag) for tag in alliance_clan_tags}
-    alliance.discard(None)
-    fields["membership_status"] = (
-        MEMBERSHIP_MEMBER if clan_tag in alliance else MEMBERSHIP_LEFT
-    )
+    # COC 标签字符集中没有字母 O，但历史配置可能按游戏字体录成 O；官方
+    # 玩家接口会返回数字 0。比较时视为同一标签，并继续保存配置中的标签
+    # 拼写，避免破坏现有 accounts / farm_stats 等表的关联键。
+    alliance = {
+        normalized.replace("O", "0"): normalized
+        for tag in alliance_clan_tags
+        if (normalized := normalize_tag(tag))
+    }
+    configured_tag = alliance.get(clan_tag.replace("O", "0") if clan_tag else None)
+    if configured_tag:
+        fields["clan_tag"] = configured_tag
+        fields["membership_status"] = MEMBERSHIP_MEMBER
+    else:
+        fields["membership_status"] = MEMBERSHIP_LEFT
     return fields

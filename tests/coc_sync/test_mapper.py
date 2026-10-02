@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from modules.coc_sync.official.mapper import map_member
+from modules.coc_sync.official.mapper import map_member, map_player
 from tests.fakes import coc_member
 
 
@@ -41,3 +41,13 @@ def test_map_member_coc_raw_is_json_with_clan_context():
     assert raw["tag"] == "#X"
     assert raw["_clan_tag"] == "#C"
     assert raw["_clan_name"] == "部落名"
+
+
+def test_map_player_matches_official_zero_to_legacy_o_clan_tag():
+    player = coc_member("#PLAYER", "成员")
+    player["clan"] = {"tag": "#YC0C", "name": "Minecraft"}
+
+    out = map_player(player, {"#YCOC"})
+
+    assert out["membership_status"] == "member"
+    assert out["clan_tag"] == "#YCOC"
