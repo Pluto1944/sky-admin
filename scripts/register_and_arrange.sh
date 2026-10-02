@@ -6,8 +6,8 @@
 #
 # 步骤：
 #   [1] 导入报名表（--period = 联赛时间；sheet 名按报名月 = 联赛-1 推算）
-#   [2] fetch_cwl_data.py --period CWL月（= 联赛-1，拉取星数 → results 表）
-#   [3] cli.py arrange（编排 + 升降级，星数从 results 表自动读取上月 CWL）
+#   [2] fetch_cwl_data.py --period CWL月（= 联赛-1，拉取星数 → league_results 表）
+#   [3] cli.py arrange（编排 + 升降级，星数从 league_results 表自动读取上月 CWL）
 #
 # 用法：
 #   scripts/register_and_arrange.sh 2026-08
@@ -64,10 +64,10 @@ echo "[1] 导入报名表（联赛时间=${LEAGUE_PERIOD}）..."
 "$PY" cli.py import-reg "$REG_DOC_FILE_ID" --period "$LEAGUE_PERIOD" --to tencent --sheet "$REG_SHEET"
 
 
-# [2] 拉取星数 → results 表（CWL 月 = 联赛-1）
+# [2] 拉取星数 → league_results 表（CWL 月 = 联赛-1）
 # 三级降级：Supercell API → ClashKing → 本地 JSON
 echo ""
-echo "[2] 拉取 CWL 星数 → results 表..."
+echo "[2] 拉取 CWL 星数 → league_results 表..."
 if "$PY" scripts/fetch_cwl_data.py --period "$REG_PERIOD"; then
   echo "[2] ✅ 星数就绪"
 else

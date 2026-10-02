@@ -20,7 +20,7 @@
   - removed_list: 被删除的缺失人员（供 Part3 展示）
   - movements: 升降级日志
 
-名单1 的成员来自 results 表（谁实际打了实战 + 星数），队伍归属来自
+名单1 的成员来自 league_results 表（谁实际打了实战 + 星数），队伍归属来自
 registrations 表的 team_info 字段（由上月 arrange() 回写）。按 team_index
 （队伍编号）分组，避免重名队伍（如 3 支"大一"）混组。
 """
@@ -267,7 +267,7 @@ def build_temp_lists(
         }
     """
     # --- 名单1：上月实战名单 ---
-    # 成员和队伍归属都来自 results 表（prev_combat_regs 自带 team_name 和 stars）
+    # 成员和队伍归属都来自 league_results 表（prev_combat_regs 自带 team_name 和 stars）
     # 按 team_index（队伍编号）分组，组内按星数降序、同星沿用上月顺序
     # team_index 是队伍的唯一身份标识，避免重名队伍（如 3 支"大一"）混组
     # 同时从当月 accounts 合并报名数据（match_value / rank_score 等），
@@ -294,7 +294,7 @@ def build_temp_lists(
         name = reg.get("account_name")
         if not name:
             continue
-        # stars 优先取 prev_combat_regs 自带（来自 results），回退到 star_data
+        # stars 优先取 prev_combat_regs 自带（来自 league_results），回退到 star_data
         stars = reg.get("stars")
         if stars is None:
             stars = star_data.get(name)

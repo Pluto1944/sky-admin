@@ -168,7 +168,7 @@ PROMOTION_RELEGATION_CONFIG = {
 flowchart TD
     A["arrange(period)"] --> B["_load_accounts(period)"]
     B --> C["sort_accounts()"]
-    C --> D["_load_prev_combat_from_results()"]
+    C --> D["_load_prev_combat_from_league_results()"]
     D --> E["_load_prev_teams_config()"]
     E --> F["build_final_list()<br/>baseline_rebuilder 阶段0~6"]
     F --> G["阶段2b: 在 prev_slots 上执行升降级"]
@@ -184,7 +184,7 @@ def arrange(self, period, ...):
     ordered = sort_accounts(accounts, ...)
     
     # 读上月数据
-    prev_combat_regs = self._load_prev_combat_from_results(prev_period)
+    prev_combat_regs = self._load_prev_combat_from_league_results(prev_period)
     star_data = self._load_combat_star_data(prev_period)
     prev_teams_config = self._load_prev_teams_config(prev_period)
     

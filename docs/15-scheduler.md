@@ -34,13 +34,12 @@
 
 ### 2.1 数据表全景
 
-系统共 **20 张表**（`shared/db/connection.py` 中定义），按数据生命周期分三类：
+系统共 **19 张表**（`shared/db/connection.py` 中定义），按数据生命周期分三类：
 
 | 表名 | 职责 | 主键 | 数据来源 | 刷新方式 |
 |------|------|------|----------|----------|
 | `accounts` | 玩家档案（COC 权威） | `player_tag` | COC 官方 API | **周期**（每 6 小时） |
 | `registrations` | 月度报名（自包含事实源） | `id` 自增 | 腾讯文档报名表 | 人工（每月） |
-| `results` | 月度战绩（旧表，过渡） | `id` 自增 | `fetch_cwl_data` 双写 | 周期（每月） |
 | `league_teams` | 队伍配置快照 | `id` 自增 | `arrange()` 幂等写入 | 人工（每月） |
 | `league_results` | 联赛战绩（结构化） | `id` 自增 | ClashKing API / 本地 JSON | **周期**（每月 12 号） |
 | `war_results` | 普通部落战战绩 | `id` 自增 | ClashKing API | **周期**（每天） |
@@ -91,7 +90,7 @@
 | `coc_sync` | `accounts`、`clan_profile_cache` | `CocSyncService` | COC 官方 API | 每 6 小时 | `/api/members`、`/api/clan/overview/{tag}` |
 | `farm_stats` | `farm_stats` | `sync_farm_stats.py` | COC 官方 API | 每 30 分钟 | `/api/clan/farm-config` |
 | `war_results` | `war_results` | `fetch_war_data.py` | ClashKing API | 每天 | `/api/clan/war-stats` |
-| `cwl` | `league_results`+`results` | `fetch_cwl_data.py` | ClashKing API | 每月 12 号 | `/api/clan/league-stats` |
+| `cwl` | `league_results` | `fetch_cwl_data.py` | ClashKing API | 每月 12 号 | `/api/clan/league-stats` |
 | `war_layout` | 独立 `war_layout.db` | `modules.war_layout` | SocialData/X + 微信公众号 API | 每天 09:00（北京时间） | — |
 
 其余表（`registrations`、`league_teams`、`wechat_users`）由月度人工流程或用户实时操作写入，**不纳入周期刷新**。
@@ -196,14 +195,14 @@ COC API Key 按请求出口 IP 校验。生产 `sky-scheduler.service` 保持直
 | 建议频率 | 每天（`interval_min=1440`） |
 | 逻辑 | 拉 war log → 筛普通战（排除 CWL）→ 满星前统计 → 写 `war_results`（`ON CONFLICT DO NOTHING` 幂等） |
 
-#### `cwl` — CWL 联赛战绩（`league_results` + `results`）
+#### `cwl` — CWL 联赛战绩（`league_results`）
 
 | 项 | 内容 |
 |----|------|
 | 入口 | `scripts/fetch_cwl_data.py --period YYYY-MM` |
 | 数据源 | ClashKing API（主力）→ 本地 JSON（兜底） |
 | 建议频率 | 每月 12 号（`interval_min=1440` + `day==12` 判断） |
-| 逻辑 | 查 `league_teams` 得 combat 队 → 逐队拉星数 → 双写 `league_results` + `results` |
+| 逻辑 | 查 `league_teams` 得 combat 队 → 逐队拉星数 → 写入 `league_results` |
 
 ### 2.5 人工触发（月度流程，不纳入周期）
 

@@ -6,17 +6,16 @@
   python cli.py import-reg    报名表.xlsx --period 2026-08
   python cli.py import-reg    <fileId> --period 2026-08 --sheet 报名表 --to tencent
   python cli.py arrange       --period 2026-08 -o 名单.xlsx
-  python cli.py import-result 战绩表.xlsx --period 2026-08
   python cli.py accounts      [--status active]
   python cli.py player-export -o players.xlsx [--status active] [--membership member] [--sort history_score]
   python cli.py reset-db      [-y]                            清空重建（历史数据清零）
 
 period 语义统一为「联赛月份」（实际打 CWL 的月份，如 2026-08）。
-- import-reg / arrange / import-result 的 --period 均为联赛月份。
+- import-reg / arrange 的 --period 均为联赛月份。
 - fetch_cwl_data.py 的 --period 为 CWL 实际发生月（编排 N 月联赛时传 N-1 月）。
 
-架构：按业务领域分模块（player 中枢 / cwl_registration 报名 / war_result 战绩 /
-coc_sync 预留），共享 shared 基础设施（io_adapter / db / config）。
+架构：按业务领域分模块（player 中枢 / cwl_registration 报名 / coc_sync），
+共享 shared 基础设施（io_adapter / db / config）。
 """
 from __future__ import annotations
 
@@ -33,8 +32,6 @@ import config
 from modules.player.exporter import PlayerExporter
 from modules.player.repository import PlayerRepository
 from modules.player.service import PlayerService
-from modules.war_result.importer import ResultImporter
-from modules.war_result.repository import ResultRepository
 from shared.db.connection import Database
 from shared.io_adapter.base import ExcelIO
 
@@ -216,43 +213,12 @@ def cmd_arrange(args) -> None:
     db = make_db()
     player_service = PlayerService(PlayerRepository(db.conn))
     reg_repo = RegistrationRepository(db.conn)
-    result_repo = ResultRepository(db.conn)
-    arranger = LeagueArranger(player_service, reg_repo, make_excel_io(to), result_repo)
+    arranger = LeagueArranger(player_service, reg_repo, make_excel_io(to))
     ordered, team_results, _movements, sheet_name = arranger.arrange_and_export(
         args.period, target, sheet=args.sheet
     )
     where = f"腾讯文档 {target}" if to == "tencent" else target
     _print_arrange_report(ordered, team_results, args.period, where)
-
-
-def cmd_import_result(args) -> None:
-    """导入战绩表（本地 xlsx 或腾讯在线文档）。
-
-    --to tencent 时 file 作为腾讯文档 fileId（缺省读 TENCENT_DOC_FILE_ID）；
-    --to local 时 file 为本地 xlsx 路径。
-    """
-    to = args.to or config.IO_ADAPTER
-    if to == "tencent":
-        source = args.file or os.environ.get("TENCENT_DOC_FILE_ID")
-        if not source:
-            print(
-                "错误: 从腾讯文档导入需指定 fileId，或设置环境变量 TENCENT_DOC_FILE_ID。",
-                file=sys.stderr,
-            )
-            raise SystemExit(1)
-    else:
-        if not args.file:
-            print("错误: 从本地导入需指定战绩表 xlsx 路径。", file=sys.stderr)
-            raise SystemExit(1)
-        source = args.file
-
-    db = make_db()
-    player_service = PlayerService(PlayerRepository(db.conn))
-    result_repo = ResultRepository(db.conn)
-    importer = ResultImporter(player_service, result_repo, make_excel_io(to))
-    n = importer.import_from(source, args.period, args.sheet)
-    where = f"腾讯文档 {source}" if to == "tencent" else source
-    print(f"已导入 {n} 条战绩并更新历史分（{args.period}，来源：{where}）")
 
 
 def cmd_accounts(args) -> None:
@@ -351,8 +317,7 @@ def cmd_publish_results(args) -> None:
     db = make_db()
     player_service = PlayerService(PlayerRepository(db.conn))
     reg_repo = RegistrationRepository(db.conn)
-    result_repo = ResultRepository(db.conn)
-    arranger = LeagueArranger(player_service, reg_repo, make_excel_io(to), result_repo)
+    arranger = LeagueArranger(player_service, reg_repo, make_excel_io(to))
     sheet_name = arranger.publish_part4_to_doc(
         args.period,
         target,
@@ -362,7 +327,7 @@ def cmd_publish_results(args) -> None:
 
 def cmd_reset_db(args) -> None:
     if not args.yes:
-        ans = input("将清空并重建 accounts/registrations/results（历史数据不可恢复），输入 yes 确认: ")
+        ans = input("将清空并重建全部业务数据（历史数据不可恢复），输入 yes 确认: ")
         if ans.strip().lower() != "yes":
             print("已取消。")
             return
@@ -404,19 +369,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="写入的 sheet 名（默认“名单_<period>”，文件已存在则新建该 sheet）",
     )
     p2.set_defaults(func=cmd_arrange)
-
-    p3 = sub.add_parser("import-result", help="导入战绩表（本地/腾讯文档）")
-    p3.add_argument(
-        "file", nargs="?", default=None,
-        help="本地模式：战绩表 xlsx 路径；腾讯模式：文档 fileId（缺省读 TENCENT_DOC_FILE_ID）",
-    )
-    p3.add_argument("--period", required=True, help="联赛月份（战绩所属月），如 2026-08")
-    p3.add_argument("--sheet", default=None, help="工作表名（可选，腾讯文档建议指定）")
-    p3.add_argument(
-        "--to", choices=("local", "tencent"), default=None,
-        help="数据源：local=本地 xlsx，tencent=腾讯在线文档（缺省用 config.IO_ADAPTER）",
-    )
-    p3.set_defaults(func=cmd_import_result)
 
     p4 = sub.add_parser("accounts", help="查看账号档案")
     p4.add_argument("--status", default=None, help="按状态过滤：active/missed/maybe_left/left")

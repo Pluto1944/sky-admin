@@ -11,7 +11,6 @@ import pytest
 from modules.cwl_registration.repository import RegistrationRepository
 from modules.player.repository import PlayerRepository
 from modules.player.service import PlayerService
-from modules.war_result.repository import ResultRepository
 from shared.db.connection import Database
 from tests.fakes import FakeExcelIO
 
@@ -38,11 +37,6 @@ def player_service(player_repo) -> PlayerService:
 @pytest.fixture
 def reg_repo(db) -> RegistrationRepository:
     return RegistrationRepository(db.conn)
-
-
-@pytest.fixture
-def result_repo(db) -> ResultRepository:
-    return ResultRepository(db.conn)
 
 
 @pytest.fixture

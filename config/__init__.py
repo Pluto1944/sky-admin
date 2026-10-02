@@ -88,9 +88,3 @@ BLACK_LIST: set = set(_cwl["black_list"])
 WHITE_LIST: list = _cwl["white_list"]
 NEW_COMBAT_INSERT_START: int = _cwl["new_combat_insert_start"]
 NEW_NORMAL_INSERT_START: int = _cwl["new_normal_insert_start"]
-
-# ============================================================================
-# 战绩模块（原 modules/war_result/config.py）
-# ============================================================================
-RESULT_COLUMN_KEYWORDS: dict = _cfg["war_result"]["column_keywords"]
-RESULT_TAG_SOURCE: str = _cfg["war_result"]["tag_source"]

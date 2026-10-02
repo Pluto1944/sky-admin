@@ -45,10 +45,7 @@ python cli.py arrange --period 2026-08 -o 名单.xlsx
 # 3. 将 Part4 编排结果发布到公示文档
 python cli.py publish-results --period 2026-08 --file-id <docId>
 
-# 4. 联赛结束后导入战绩，更新历史分
-python cli.py import-result 战绩表.xlsx --period 2026-08
-
-# 查看账号档案（可按状态过滤）
+# 4. 查看账号档案（可按状态过滤）
 python cli.py accounts --status active
 
 # 导出 player 库到腾讯在线文档，供人工核对（-o 为 fileId，或读 TENCENT_DOC_FILE_ID）
@@ -60,7 +57,7 @@ python cli.py reset-db
 
 ## 账号身份与两阶段数据流
 
-- **主键 = COC 真实 Tag**：`accounts.player_tag` 为 COC 官方 Tag（`#XXXX`），名实相符。`accounts` **只由 `coc_sync`（COC 权威）与 `war_result`（历史分）填充**，报名侧只读、绝不建行。
+- **主键 = COC 真实 Tag**：`accounts.player_tag` 为 COC 官方 Tag（`#XXXX`），名实相符。`accounts` **只由 `coc_sync`（COC 权威）填充**，报名侧只读、绝不建行。
 - **COC 为权威建档源**：`coc-sync` 先跑，把部落全员按真实 Tag 建档；战绩再在其上**增量更新**历史分，字段分组、互不覆盖（COC 组 vs 战绩组）。
 - **报名事实自成一表（B 方案）**：`registrations` 是**自包含的报名事实源**——自持 `account_name`（报名昵称，主标识）/ `player_name`（主号归属），唯一键为 `(account_name, period)`，与 `accounts` **解耦、无外键**。`player_tag` 降为「命中真实账号时缓存的关联」，可空、无 FK。
 - **昵称 → 真实 Tag 反查（只读增强）**：导入报名时按 `account_name` 只读反查已建档的真实 Tag，命中就把它缓存进 `registrations.player_tag`（供排序阶段直接取历史分）。
@@ -89,17 +86,15 @@ shared/                      # 基础设施：config/common、columns、io_adapt
 modules/
   player/                    # ① 玩家中枢：PlayerService（账号读写唯一入口）+ repository + status_rule
   cwl_registration/          # ② CWL 报名：importer + roster(编排主控+Part4输出+公示发布) + sorter + rank_score + baseline_rebuilder(基准重建阶段0~6) + team_builder(贪心填充阶段7~9) + promotion(升降级纯函数)
-  war_result/                # ③ 战绩：importer + history_score + repository
-  coc_sync/                  # ④ COC 同步：api_client + mapper + config + service
+  coc_sync/                  # ③ COC 同步：api_client + mapper + config + service
 scripts/                     # 运维脚本：register_and_arrange.sh / publish_to_results.sh / sync_and_export.sh / load_env.sh / scheduler.py（周期调度器）/ fetch_*.py（数据拉取）
-tests/                       # 按模块归类：shared / player / cwl_registration / war_result / coc_sync（15 个测试文件，135 用例全绿）
+tests/                       # 按模块归类：shared / player / cwl_registration / coc_sync
 ```
 
 > 架构：按业务领域分模块，`player` 为数据中枢，其他模块只通过 `PlayerService` 读写账号；**所有 COC API 调用统一经 `CocSyncService` 封装**。v3.0 起 `team_filler.py` 已删除，由 `baseline_rebuilder.py` + `team_builder.py` 替代。详见 [`docs/01-architecture.md`](./docs/01-architecture.md)。
 
-## 两个可插拔开放函数（后续自行完善）
+## 一个可插拔开放函数（后续自行完善）
 
-- `modules/war_result/history_score.py :: compute_history_score()` — 历史战绩综合分，**占位待补公式**。
 - `modules/cwl_registration/rank_score.py :: compute_rank_score()` — 名单排序综合分，**已给归一化加权默认实现**，可深入替换。
 
 ## 队伍分配（v3.0 基准重建 + 贪心填充）

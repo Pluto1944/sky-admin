@@ -136,9 +136,9 @@ rank_order	league_type	team_name	movement	player_tag	account_name	player_name	ac
 
 **问题**：名单1（上月所有参加实战联赛的名单）用哪个数据源？
 - (A) `registrations` 表 combat 记录
-- (B) `results` 表
+- (B) `league_results` 表
 
-**回答**：用 `results` 表。`results` 表代表实际打了联赛的人，含战绩数据。
+**回答**：用 `league_results` 表。它代表实际打了联赛的人，并保存结构化战绩与队伍身份。
 
 ### 问题 2：名单3（壳子名单）的排序基准
 
@@ -247,7 +247,7 @@ rank_order	league_type	team_name	movement	player_tag	account_name	player_name	ac
 
 ### 补充问题 D：名单1 的成员顺序如何确定
 
-**问题**：`results` 表没有 rank_order 字段，同一个 team_name 下的成员顺序如何确定？
+**问题**：联赛战绩表没有 rank_order 字段，同一个 team_name 下的成员顺序如何确定？
 
 **回答**：名单1 的排序方式是——先按 `team_name` 在上月 TEAMS 配置中的顺序分组，组内按星数降序。
 
@@ -293,7 +293,7 @@ v3.1 延续 v3.0 的核心思路：以**上月实战名单为锚点**做基准�
 flowchart TD
     subgraph P1["前置数据准备"]
         A["sort_accounts()"] --> B["_load_combat_star_data()<br/>加载上月星数"]
-        A --> C["_load_prev_combat_from_results()<br/>加载上月实战名单"]
+        A --> C["_load_prev_combat_from_league_results()<br/>加载上月实战名单"]
     end
 
     subgraph P2["基准重建 阶段0-6<br/>baseline_rebuilder.py"]
@@ -322,7 +322,7 @@ flowchart TD
 
 | 名单 | 来源 | 排序规则 |
 |------|------|----------|
-| **名单1** | `league_results` 上月 combat 记录（为空时回退旧 `results`） | 按 `team_index` 分组，组内按星数降序；同星沿用上月最终队内顺序 |
+| **名单1** | `league_results` 上月 combat 记录 | 按 `team_index` 分组，组内按星数降序；同星沿用上月最终队内顺序 |
 | **名单2** | 当月实战人员 | 保持 `sort_accounts()` 的输出顺序 |
 | **名单3** | 当月壳子人员 | 综合分降序 |
 | **名单4** | 名单1 - 名单2 | 实战缺失（上月打了但本月没报） |
@@ -572,7 +572,7 @@ registrations.team_name 回写格式：`"{team_index} {team_alias} {coc_name} {c
 
 | 决策点 | 选择 | 理由 |
 |--------|------|------|
-| 名单1 来源 | `results` 表 | 代表实际打了联赛的人，含战绩 |
+| 名单1 来源 | `league_results` 表 | 代表实际打了联赛的人，含结构化战绩和队伍身份 |
 | 名单1 组内排序 | 按星数降序 | 星数高=实力强 |
 | 名单1 分组键 | `team_index` 为主 | 避免重名队伍混组 |
 | 战营排序键 | 奖杯降序 | 奖杯更能体现战营真实水平 |

@@ -1179,7 +1179,7 @@ def _run_war_results() -> dict:
 
 
 def _run_cwl(force: bool = False) -> dict:
-    """拉取当月 CWL 联赛战绩，写入 league_results + results 表。
+    """拉取当月 CWL 联赛战绩，写入 league_results 表。
 
     仅每月 12 号执行（force=True 跳过日期判断，供调试/补数据）。
     日期按东八区（Asia/Shanghai）判断，与业务时区一致。

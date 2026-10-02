@@ -97,13 +97,6 @@ erDiagram
         TEXT raw_metrics
     }
 
-    results {
-        INTEGER id PK
-        TEXT player_tag FK
-        TEXT period
-        TEXT league_type
-        TEXT raw_metrics
-    }
 ```
 
 ---
@@ -284,7 +277,6 @@ flowchart TD
     subgraph S2["fetch_cwl_data.sh（每月7号）"]
         COC2["COC API"] --> JSON["data/cwl_YYYYMM/"]
         JSON --> LR["league_results 表"]
-        JSON --> RES["results 表（双写）"]
     end
 
     subgraph S3["register_and_arrange.sh（每月底）"]
@@ -330,7 +322,7 @@ flowchart LR
 | team 字段冗余 | league_results 冗余存 | 避免 JOIN |
 | team_name 来源 | league_teams 表读取 | 不重复调 COC API |
 | TEAMS_LAST | 已删除 | league_teams 替代 |
-| 战绩双写 | league_results + results | 过渡期兼容 |
+| CWL 战绩存储 | league_results | 队伍身份和战绩字段结构化、可按队伍查询 |
 
 ---
 
@@ -360,12 +352,11 @@ v2.x 的数据库只有 3 张表（accounts / registrations / results），随�
 | **team_alias** | config `name` 字段 | 不唯一 | 人类标签，如"大一"、"泰坦二" |
 | **team_name** | COC API 真实部落名称 | 唯一 | 展示用途 |
 
-### 过渡策略
+### 迁移完成后的兼容边界
 
-1. `league_results` 写入时双写到旧 `results` 表
-2. `_load_prev_teams_config` 为空时回退 config TEAMS
-3. `_load_combat_star_data` / `_load_prev_combat_from_results` 优先新表，回退旧表
-4. `TEAMS_LAST` 已删除
+1. `_load_prev_teams_config` 为空时回退 config TEAMS
+2. `_load_combat_star_data` / `_load_prev_combat_from_league_results` 只读新表
+3. `TEAMS_LAST` 与旧 `results` 表已退役；旧库在迁移预检和 COS 恢复备份后删除旧表
 
 ### 迁移步骤（已完成）
 
@@ -393,7 +384,6 @@ v2.x 的数据库只有 3 张表（accounts / registrations / results），随�
 |----|------|------|
 | `registrations` | 无 | v2.2 B 方案解耦，`player_tag` 可空无 FK |
 | `league_results` | `player_tag → accounts` | 有 FK，未知账号不写入 |
-| `results` | `player_tag → accounts` | 有 FK，未知账号跳过告警 |
 
 ### 唯一约束
 
@@ -402,7 +392,6 @@ v2.x 的数据库只有 3 张表（accounts / registrations / results），随�
 | `registrations` | `(account_name, period)` | 防重复导入，同月同昵称覆盖 |
 | `league_teams` | `(period, team_index)` | 同月同队伍不重复 |
 | `league_results` | `(period, team_index, player_tag)` | 同月同队同人不重复 |
-| `results` | `(player_tag, period, league_type)` | `league_type=NULL` 时 SQLite 不视为冲突 |
 
 ### upsert COALESCE 语义
 

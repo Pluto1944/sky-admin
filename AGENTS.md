@@ -65,7 +65,7 @@
 
 - `modules/player`：账号与成员领域的唯一公共入口。除该模块外，业务模块不得直接更新 `accounts`；使用 `PlayerService`。
 - `modules/cwl_registration`：报名导入、排序、基准重建、升降级、队伍构建、名单输出与发布。使用 `baseline_rebuilder.py`（阶段 0–6）和 `team_builder.py`（阶段 7–9）；`team_filler.py` 是退役历史设计，不得新增依赖。
-- `modules/war_result`：手工战绩导入及历史分回写。`compute_history_score()` 当前仍为占位逻辑，未经明确业务公式不得顺带修改。
+- 手工 `import-result` 与旧 `results` 表已经退役；CWL 历史战绩只使用结构化的 `league_results`。`accounts.history_score` 暂保留为兼容字段，当前没有自动写入方，未经明确业务公式不得顺带启用或修改排序语义。
 - `modules/coc_sync`：COC 官方数据的权威同步、成员去重、联盟内转移与退部对账；`CocSyncService` 是首选编排入口。已有 roster / farm 的旧式直接客户端调用只作兼容，不要复制到新功能。
 - `modules/coc_sync/current_war.py`：纯转换层；不得在其中加入网络或数据库 I/O。
 - `modules/war_layout`：独立的阵型采集与公众号发布子系统，使用单独运行库；不要与主 `league.db` 混用。
@@ -95,10 +95,10 @@
 | 字段 / 命令 | 含义 |
 | --- | --- |
 | `registrations.period`、`league_teams.period`、`import-reg`、`arrange`、`publish-results` | 即将参赛的联赛月份 |
-| `league_results.period`、旧 `results.period`、`fetch_cwl_data.py` | CWL 实际发生月份 |
+| `league_results.period`、`fetch_cwl_data.py` | CWL 实际发生月份 |
 | 普通战 `war_results.end_time` | 单场战争结束时间，不是月份事实 |
 
-编排月份 `N` 必须读取 `registrations(N)`、`league_results(N-1)` 与 `league_teams(N-1)`；不要把 `import-result` 的历史兼容语义误套到 CWL 抓取脚本。
+编排月份 `N` 必须读取 `registrations(N)`、`league_results(N-1)` 与 `league_teams(N-1)`。
 
 ## 6. CWL 编排与统计规则
 

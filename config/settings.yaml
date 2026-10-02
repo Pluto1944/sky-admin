@@ -350,20 +350,3 @@ cwl_registration:
 
   new_combat_insert_start: 30
   new_normal_insert_start: 45    # 已废弃
-
-# ============================================================================
-# 战绩模块 - war_result（原 modules/war_result/config.py）
-# ============================================================================
-war_result:
-  column_keywords:
-    account_name:
-      include: [游戏昵称, 账号名]
-      exclude: [主号]
-    player_tag:
-      include: [玩家tag, tag]
-      exclude: []
-    league_type:
-      include: [联赛类型, 联赛]
-      exclude: []
-
-  tag_source: account_name

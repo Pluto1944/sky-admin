@@ -1,4 +1,4 @@
-"""拉取 CWL 数据并写入数据库。
+"""拉取 CWL 数据并写入结构化联赛战绩数据库。
 
 流程（两级降级）：
   1. 查 league_teams 表获取 combat 队伍列表
@@ -244,15 +244,6 @@ def _fetch_and_write(period: str, teams: list[TeamInfo]) -> tuple[list[str], int
                 ),
             )
 
-            # 双写旧 results 表（过渡期兼容）
-            conn.execute(
-                """INSERT INTO results (player_tag, period, league_type, raw_metrics)
-                   VALUES (?, ?, ?, ?)
-                   ON CONFLICT(player_tag, period, league_type) DO UPDATE SET
-                   raw_metrics = excluded.raw_metrics""",
-                (tag, period, LEAGUE_COMBAT, json.dumps(raw_metrics)),
-            )
-
             n_ok += 1
 
     conn.commit()
@@ -263,7 +254,7 @@ def _fetch_and_write(period: str, teams: list[TeamInfo]) -> tuple[list[str], int
           (f"，失败: {failed}" if failed else ""))
 
     if n_ok:
-        print(f"[write] {n_ok} 条战绩 → league_results + results（period={period}）" +
+        print(f"[write] {n_ok} 条战绩 → league_results（period={period}）" +
               (f"，跳过 {n_skip} 条（不在 accounts）" if n_skip else ""))
 
     return ok_teams, n_ok, n_skip, source_map
@@ -274,7 +265,7 @@ def _fetch_and_write(period: str, teams: list[TeamInfo]) -> tuple[list[str], int
 # ═══════════════════════════════════════════════════════════════════════
 
 def _cold_start_from_json(period: str) -> tuple[list[str], int, int]:
-    """冷启动：从 data/cwl_YYYYMM/*.json 导入 league_results + results 表。
+    """冷启动：从 data/cwl_YYYYMM/*.json 导入 league_results 表。
 
     返回 (ok_team_aliases, n_ok, n_skip)。
     """
@@ -364,21 +355,13 @@ def _cold_start_from_json(period: str) -> tuple[list[str], int, int]:
                 ),
             )
 
-            conn.execute(
-                """INSERT INTO results (player_tag, period, league_type, raw_metrics)
-                   VALUES (?, ?, ?, ?)
-                   ON CONFLICT(player_tag, period, league_type) DO UPDATE SET
-                   raw_metrics = excluded.raw_metrics""",
-                (tag, period, LEAGUE_COMBAT, json.dumps(raw_metrics)),
-            )
-
             n_ok += 1
 
     conn.commit()
     conn.close()
 
     if n_ok:
-        print(f"[cold-start] {n_ok} 条战绩 → league_results + results（period={period}）" +
+        print(f"[cold-start] {n_ok} 条战绩 → league_results（period={period}）" +
               (f"，跳过 {n_skip} 条（不在 accounts）" if n_skip else ""))
     return ok_teams, n_ok, n_skip
 
@@ -408,7 +391,7 @@ def _print_promotion_summary(period: str, team_order: list[str], ok_teams: set[s
 def main() -> int:
     import argparse
 
-    parser = argparse.ArgumentParser(description="拉取 CWL 数据并写入 league_results/results 表")
+    parser = argparse.ArgumentParser(description="拉取 CWL 数据并写入 league_results 表")
     parser.add_argument("--period", required=True, help="CWL 月份（实际发生月），如 2026-08")
     args = parser.parse_args()
 
@@ -442,7 +425,7 @@ def main() -> int:
             return 1
 
         _print_promotion_summary(period, [alias for _, alias, _, _ in teams], set(ok_teams))
-        print(f"\n✅ 数据就绪：{n_ok} 条星数已写入 league_results + results 表（period={period}）")
+        print(f"\n✅ 数据就绪：{n_ok} 条星数已写入 league_results 表（period={period}）")
         return 0
 
     else:
@@ -453,7 +436,7 @@ def main() -> int:
         if n_ok == 0:
             return 1
 
-        print(f"\n✅ 冷启动完成：{n_ok} 条星数已写入 league_results + results 表（period={period}）")
+        print(f"\n✅ 冷启动完成：{n_ok} 条星数已写入 league_results 表（period={period}）")
         return 0
 
 

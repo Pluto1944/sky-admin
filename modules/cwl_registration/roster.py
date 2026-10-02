@@ -42,7 +42,6 @@ from modules.cwl_registration.repository import RegistrationRepository
 from modules.cwl_registration.sorter import sort_accounts
 from modules.coc_sync.official.api_client import CocApiClient, CocApiError
 from modules.player.service import PlayerService
-from modules.war_result.repository import ResultRepository
 from shared.io_adapter.base import ExcelIO
 
 
@@ -59,66 +58,16 @@ def _prev_period(period: str) -> str | None:
     return f"{year:04d}-{month:02d}"
 
 
-def _extract_total_stars(raw_metrics: dict) -> int | None:
-    """从 raw_metrics 中提取总星数，兼容多种格式。
-
-    优先级：
-    1. {"total_stars": 18}                         → 直接取
-    2. {"three_stars": 15, "two_stars": 4, ...}    → 3*15 + 2*4 + ...
-    3. {"stars_1": 1, "stars_2": 2, "stars_3": 15} → 类似计算
-    4. 无法解析 → None（该账号不参与升降级）
-    """
-    if not raw_metrics:
-        return None
-
-    if "total_stars" in raw_metrics:
-        try:
-            return int(raw_metrics["total_stars"])
-        except (TypeError, ValueError):
-            return None
-
-    total = 0
-    found = False
-    for star_str, count in raw_metrics.items():
-        if star_str in ("three_stars", "stars_3"):
-            total += int(count) * 3
-            found = True
-        elif star_str in ("two_stars", "stars_2"):
-            total += int(count) * 2
-            found = True
-        elif star_str in ("one_stars", "stars_1"):
-            total += int(count) * 1
-            found = True
-    if found:
-        return total
-
-    return None
-
-
-def _extract_attacks(raw_metrics: dict) -> int | None:
-    """从新旧战绩 raw_metrics 中提取实际进攻次数。"""
-    for key in ("total_attacks", "attacks", "offense_total"):
-        value = raw_metrics.get(key)
-        if value is not None:
-            try:
-                return int(value)
-            except (TypeError, ValueError):
-                return None
-    return None
-
-
 class LeagueArranger:
     def __init__(
         self,
         player_service: PlayerService,
         reg_repo: RegistrationRepository,
         excel_io: ExcelIO,
-        result_repo: ResultRepository | None = None,
     ):
         self.player_service = player_service
         self.reg_repo = reg_repo
         self.excel_io = excel_io
-        self.result_repo = result_repo
         self._coc_client: CocApiClient | None = None
         self._clan_info_cache: dict[str, tuple[str, str]] = {}
 
@@ -221,75 +170,20 @@ class LeagueArranger:
         编排 N 月联赛时，需要的 CWL 星数来自 N-1 月，调用方应传入
         `_prev_period(league_period)`。
 
-        优先从 league_results 新表读取；若为空则回退到 results 旧表。
-        若 result_repo 未注入或无数据，返回空 dict（升降级自动跳过）。
+        数据只从 league_results 读取；没有数据时返回空 dict，升降级自动跳过。
         """
-        # 优先读 league_results 新表
         rows = self.reg_repo.conn.execute(
             "SELECT player_tag, account_name, total_stars FROM league_results "
             "WHERE period = ? AND category = ?",
             (cwl_period, LEAGUE_COMBAT),
         ).fetchall()
-        if rows:
-            star_data: dict[str, int] = {}
-            for r in rows:
-                name = r["account_name"]
-                stars = r["total_stars"]
-                if name and stars is not None:
-                    star_data[name] = stars
-            return star_data
-
-        # 回退到 results 旧表
-        if self.result_repo is None:
-            return {}
-
-        rows = self.result_repo.get_results_by_period(cwl_period, league_type=LEAGUE_COMBAT)
-        star_data = {}
+        star_data: dict[str, int] = {}
         for r in rows:
-            tag = r.get("player_tag")
-            metrics = r.get("raw_metrics") or {}
-            stars = _extract_total_stars(metrics)
-            if tag and stars is not None:
-                account_name = self.player_service.resolve_name_by_tag(tag)
-                if account_name:
-                    star_data[account_name] = stars
+            name = r["account_name"]
+            stars = r["total_stars"]
+            if name and stars is not None:
+                star_data[name] = stars
         return star_data
-
-    def _load_combat_team_map(
-        self, cwl_period: str
-    ) -> tuple[dict[str, str], dict[str, str]]:
-        """从 results 表加载 CWL 队伍归属。
-
-        cwl_period 语义：**CWL 实际发生月**（即 results.period），与
-        _load_combat_star_data 同源。编排 N 月联赛时传入
-        `_prev_period(league_period)` 获取上月 CWL 队伍信息。
-
-        返回 (prev_teams, team_clan_tags):
-          - prev_teams: {account_name: team_name}，用于"未报名/离开"人员原队查找。
-          - team_clan_tags: {team_name: clan_tag}，用于显示层补充 clan_tag
-            （覆盖 TEAMS 配置中未单独列出的队伍名，如"大一 A/B/C"）。
-
-        team_name / clan_tag 存储在 raw_metrics 中（由 fetch_cwl_data 导入时写入）。
-        替代反查 registrations（后者依赖 arrange 回写 team_info，冷启动场景容易缺失）。
-        """
-        if self.result_repo is None:
-            return {}, {}
-
-        rows = self.result_repo.get_results_by_period(cwl_period, league_type=LEAGUE_COMBAT)
-        team_map: dict[str, str] = {}
-        team_clan_tags: dict[str, str] = {}
-        for r in rows:
-            tag = r.get("player_tag")
-            metrics = r.get("raw_metrics") or {}
-            team_name = metrics.get("team_name")
-            clan_tag = metrics.get("clan_tag")
-            if tag and team_name:
-                account_name = self.player_service.resolve_name_by_tag(tag)
-                if account_name:
-                    team_map[account_name] = team_name
-                if clan_tag:
-                    team_clan_tags.setdefault(team_name, clan_tag)
-        return team_map, team_clan_tags
 
     def _load_prev_teams_config(self, cwl_period: str) -> list[dict] | None:
         """从 league_teams 表读取上月队伍配置。
@@ -317,10 +211,9 @@ class LeagueArranger:
             ]
         return None
 
-    def _load_prev_combat_from_results(self, cwl_period: str) -> list[dict]:
+    def _load_prev_combat_from_league_results(self, cwl_period: str) -> list[dict]:
         """构建上月实战名单（名单1 的数据源）。
 
-        优先从 league_results 新表读取；若为空则回退到 results 旧表。
         team_index 是队伍编号，作为队伍的唯一身份标识用于升降级分组。
 
         返回列表，每项含:
@@ -362,57 +255,26 @@ class LeagueArranger:
                 return rank_by_name.get(account_name)
             return None
 
-        # 优先读 league_results 新表
         lr_rows = self.reg_repo.conn.execute(
             "SELECT * FROM league_results WHERE period = ? AND category = ? "
             "ORDER BY team_index, id",
             (cwl_period, LEAGUE_COMBAT),
         ).fetchall()
-        if lr_rows:
-            result: list[dict] = []
-            for r in lr_rows:
-                if not r["player_tag"] or not r["team_alias"]:
-                    continue
-                result.append({
-                    "account_name": r["account_name"],
-                    "player_tag": r["player_tag"],
-                    "team_name": r["team_alias"],
-                    "clan_tag": r["clan_tag"],
-                    "team_index": r["team_index"],
-                    "stars": r["total_stars"],
-                    "attacks": r["attacks"],
-                    "rank_order": previous_rank(
-                        r["player_tag"], r["account_name"]
-                    ),
-                })
-            return result
-
-        # 回退到 results 旧表
-        if self.result_repo is None:
-            return []
-
-        rows = self.result_repo.get_results_by_period(cwl_period, league_type=LEAGUE_COMBAT)
         result: list[dict] = []
-        for r in rows:
-            tag = r.get("player_tag")
-            metrics = r.get("raw_metrics") or {}
-            team_name = metrics.get("team_name")
-            if not tag or not team_name:
+        for r in lr_rows:
+            if not r["player_tag"] or not r["team_alias"]:
                 continue
-            account_name = self.player_service.resolve_name_by_tag(tag)
-            if not account_name:
-                continue
-            stars = _extract_total_stars(metrics)
-            attacks = _extract_attacks(metrics)
             result.append({
-                "account_name": account_name,
-                "player_tag": tag,
-                "team_name": team_name,
-                "clan_tag": metrics.get("clan_tag"),
-                "team_index": metrics.get("team_index"),
-                "stars": stars,
-                "attacks": attacks,
-                "rank_order": previous_rank(tag, account_name),
+                "account_name": r["account_name"],
+                "player_tag": r["player_tag"],
+                "team_name": r["team_alias"],
+                "clan_tag": r["clan_tag"],
+                "team_index": r["team_index"],
+                "stars": r["total_stars"],
+                "attacks": r["attacks"],
+                "rank_order": previous_rank(
+                    r["player_tag"], r["account_name"]
+                ),
             })
         return result
 
@@ -467,12 +329,12 @@ class LeagueArranger:
 
         period 语义：**联赛时间**（实际打 CWL 的月份）。
         报名数据存于 registrations 表，period = 联赛时间（统一语义）。
-        CWL 星数存于 results 表，period = CWL 实际发生月 = 联赛时间 - 1 月：
-          - arrange("2026-08") → 读 registrations(2026-08) + results(2026-07)
+        CWL 星数存于 league_results 表，period = CWL 实际发生月 = 联赛时间 - 1 月：
+          - arrange("2026-08") → 读 registrations(2026-08) + league_results(2026-07)
 
         参数:
             star_data: 实战星数 {account_name: total_stars}。
-                显式传入时直接使用（冷启动场景）；为 None 时从 results 表
+                显式传入时直接使用（冷启动场景）；为 None 时从 league_results 表
                 按上月 CWL period 自动加载。
 
         返回:
@@ -501,17 +363,17 @@ class LeagueArranger:
         accounts = self._load_accounts(period)
         ordered = sort_accounts(accounts, weights or SORT_WEIGHTS)
 
-        # CWL 实际发生月 = 联赛时间 - 1（results.period 语义）
+        # CWL 实际发生月 = 联赛时间 - 1（league_results.period 语义）
         cwl_period = _prev_period(period)
         if star_data is None and cwl_period:
             star_data = self._load_combat_star_data(cwl_period)
         elif star_data is None:
             star_data = {}
 
-        # 加载上月实战名单（名单1 的成员+队伍归属，从 results 表获取）
+        # 加载上月实战名单（名单1 的成员+队伍归属，从 league_results 表获取）
         prev_combat_regs: list[dict] = []
         if cwl_period:
-            prev_combat_regs = self._load_prev_combat_from_results(cwl_period)
+            prev_combat_regs = self._load_prev_combat_from_league_results(cwl_period)
 
         # 从 league_teams 表读取上月队伍配置（用于升降级分组）
         prev_teams_cfg = self._load_prev_teams_config(cwl_period) if cwl_period else None
@@ -539,7 +401,7 @@ class LeagueArranger:
 
         # 注入 movement 标识 + 修正 league_type（供导出展示）
         # 优先用 player_tag 匹配（稳定唯一），回退到 account_name（兼容无 tag 场景）
-        # 避免 results 表反查的 account_name（最新昵称）与 registrations 表的
+        # 避免 league_results 中的 account_name（抓取时昵称）与 registrations 表的
         # account_name（报名时昵称）因改名不一致导致 movement 标记丢失
         movement_map: dict[str, str] = {}
         movement_map_by_name: dict[str, str] = {}
@@ -561,7 +423,7 @@ class LeagueArranger:
                 name = member.get("account_name")
                 if not name:
                     continue
-                # 修正 league_type：老兵来自 results 表无 league_type，按队伍 category 设置
+                # 修正 league_type：老兵来自 league_results 表，按队伍 category 设置
                 if member.get("league_type") is None:
                     member["league_type"] = tr["category"]
                 # 优先按 player_tag 匹配，回退到 account_name

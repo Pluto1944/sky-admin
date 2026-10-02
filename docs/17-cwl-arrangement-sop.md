@@ -59,7 +59,7 @@ env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
 脚本包含三步：
 
 1. 清理目标月份 `registrations` 旧快照，导入当前报名 Sheet，并合并当前 `#2QQ` 战营成员；
-2. 拉取上月 CWL 星数，写入 `league_results` 和 `results`；
+2. 拉取上月 CWL 星数，写入 `league_results`；
 3. 执行 `arrange`，更新安排文档 `ROSTER_DOC_FILE_ID`。
 
 导入时同一 COC Tag 对应多个报名昵称只告警并继续，不会中止；需在输出中记录并人工核对。

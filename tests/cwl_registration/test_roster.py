@@ -183,7 +183,7 @@ def test_load_previous_combat_includes_final_rank_order(
     )
     reg_repo.conn.commit()
 
-    previous = _arranger(player_service, reg_repo)._load_prev_combat_from_results(
+    previous = _arranger(player_service, reg_repo)._load_prev_combat_from_league_results(
         "2026-07"
     )
 

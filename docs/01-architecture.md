@@ -14,7 +14,7 @@
 | 脚本 | 执行频率 | 核心职责 |
 |------|---------|---------|
 | `sync_and_export.sh` | 每天 | COC API 同步成员 → accounts 表 |
-| `fetch_cwl_data.sh` | 每月 7 号 | COC API 拉取 CWL 战绩 → league_results + results |
+| `fetch_cwl_data.sh` | 每月 7 号 | COC API 拉取 CWL 战绩 → league_results |
 | `register_and_arrange.sh` | 每月底 | 报名导入 → 编排+升降级 → 发布联赛安排 |
 
 运维详情见 `06-operations.md`。
@@ -49,7 +49,7 @@
 
 ## 三、总体架构
 
-采用**领域分模块 + 依赖注入**架构。`player` 处于底层被依赖（数据中枢），三个业务模块都"更新到 player"，彼此互不感知；纯逻辑、IO、存储三者解耦。
+采用**领域分模块 + 依赖注入**架构。`player` 处于底层被依赖（数据中枢），业务模块彼此互不感知；纯逻辑、IO、存储三者解耦。
 
 ```mermaid
 flowchart TD
@@ -61,12 +61,7 @@ flowchart TD
         SORT[sorter/baseline_rebuilder/team_builder<br/>纯函数]
         RR[(registrations)]
     end
-    subgraph M3["③ war_result 战绩"]
-        RES[ResultImporter<br/>战绩→历史分]
-        HS[history_score<br/>纯函数·占位]
-        RES2[(results)]
-    end
-    subgraph M4["④ coc_sync COC同步（权威建档源）"]
+    subgraph M3["③ coc_sync COC同步（权威建档源）"]
         COC[CocSyncService<br/>唯一API出口]
         MAP[mapper 纯函数]
         API4[api_client 底层HTTP]
@@ -82,26 +77,24 @@ flowchart TD
         CFG[config/common + columns]
     end
 
-    CLI --> M2 & M3 & M4
+    CLI --> M2 & M3
     IMP -->|昵称只读反查+刷新状态| PSVC
     IMP -->|写报名事实| RR
     ROS -->|读账号得分| PSVC
-    RES -->|写历史分+昵称反查| PSVC
     COC -->|COC组建档/退部对账| PSVC
     COC --> API4 & MAP
     IMP --> SORT
-    ROS --> SORT --> HS
-    RES --> HS
+    ROS --> SORT
     PSVC --> PR & ST
-    M2 & M3 & M4 -.共享.-> INFRA
+    M2 & M3 -.共享.-> INFRA
     M1 -.共享.-> INFRA
 ```
 
 ### 分层职责
 
-- **纯函数层**：`rank_score`（排序综合分）、`sorter`（分组排序）、`status_rule`（状态推断）、`history_score`（历史分）、`mapper`（COC 字段映射）、`columns`（表头关键词解析），输入→输出无副作用
+- **纯函数层**：`rank_score`（排序综合分）、`sorter`（分组排序）、`status_rule`（状态推断）、`mapper`（COC 字段映射）、`columns`（表头关键词解析），输入→输出无副作用
 - **IO 层**：`shared/io_adapter/ExcelIO` 抽象，当前用 `LocalXlsxAdapter`，`TencentDocAdapter` 预留
-- **存储层**：三个各管一表的 Repository（`PlayerRepository` / `RegistrationRepository` / `ResultRepository`），共享同一个 SQLite 连接
+- **存储层**：领域 Repository 共享同一个 SQLite 连接
 - **中枢**：`PlayerService` 是账号数据读写的唯一入口，其他模块不直接碰 `accounts` 表
 
 ### 核心原则
@@ -174,13 +167,10 @@ flowchart TD
 
 名单调整统一采用稳定重排：普通成员可随删除、新增和强制插入上下移动；升级成员不得跌破升级目标，降级成员不得回到原队伍。白名单最后执行但业务优先级最高，若与升降级边界冲突则保留白名单目标并输出告警。队伍配置始终先排列全部实战队伍，再排列壳子队伍；两类队伍数量可按配置变化，但不交错编排。
 
-### ③ war_result —— 战绩
+### ③ coc_sync —— COC 同步（权威建档源）
 
-- `importer.py`：读战绩表 → 关键词解析 tag/联赛类型（其余列进 `raw_metrics` JSON）→ 按昵称反查，未知账号跳过告警 → upsert 写 `results` → 重算 `history_score` 回写
-- `history_score.py`：纯函数 `compute_history_score`，当前占位恒返回 `0.0`
-- `repository.py`：`results` 表读写，upsert（`(player_tag, period, league_type)` 唯一）
-
-### ④ coc_sync —— COC 同步（权威建档源）
+手工 `import-result`、占位 `history_score` 与旧 `results` 表已退役；CWL 历史战绩统一由
+`fetch_cwl_data.py` 写入结构化 `league_results`，并由编排和战绩统计读取。
 
 **唯一 API 出口**：所有 COC API 调用统一经 `CocSyncService` 封装。
 
@@ -226,12 +216,10 @@ flowchart TD
 | `sorter.py` | 分组排序（纯函数） | 纯输入输出断言 |
 | `baseline_rebuilder.py` | 基准重建（纯函数） | 纯输入输出断言 |
 | `team_builder.py` | 贪心填充+白名单+管理员（纯函数） | 纯输入输出断言 |
-| `history_score.py` | 历史分（占位） | 纯输入输出断言 |
 | `status_rule.py` | 状态推断（纯函数） | 纯输入输出断言 |
 | `player/service.py` | PlayerService | 内存库集成 |
 | `cwl_registration/importer.py` | 报名导入 | 注入 Fake IO |
 | `cwl_registration/roster.py` | 编排主控 | 注入 Fake IO |
-| `war_result/importer.py` | 战绩导入 | 注入 Fake IO |
 
 当前测试基线为 130 个测试，其中 127 个通过；剩余 3 项为旧测试/测试环境假设（详见测试运行记录），不涉及当前升降级保护断言。
 
@@ -275,13 +263,11 @@ sky-admin/
 │   │   ├── importer.py / roster.py / sorter.py / rank_score.py
 │   │   ├── baseline_rebuilder.py / team_builder.py
 │   │   ├── repository.py
-│   ├── war_result/                     # ③ 战绩
-│   │   ├── importer.py / history_score.py / repository.py
-│   └── coc_sync/                       # ④ COC 同步
+│   └── coc_sync/                       # ③ COC 同步
 │       ├── api_client.py / mapper.py / service.py
 ├── tests/                              # 按模块归类
 │   ├── conftest.py / fakes.py
-│   ├── shared/ / player/ / cwl_registration/ / war_result/ / coc_sync/
+│   ├── shared/ / player/ / cwl_registration/ / coc_sync/
 ├── scripts/                            # 运维脚本
 │   ├── load_env.sh / register_and_arrange.sh / sync_and_export.sh
 │   ├── fetch_cwl_data.py / fetch_cwl_data.sh
@@ -317,7 +303,6 @@ flowchart TD
     subgraph S2["fetch_cwl_data.sh（每月7号）"]
         COC2["COC API"] --> JSON["data/cwl_YYYYMM/"]
         JSON --> LR["league_results 表"]
-        JSON --> RES["results 表（双写）"]
     end
 
     subgraph S3["register_and_arrange.sh（每月底）"]
@@ -390,11 +375,10 @@ v1.x 按技术切层（`core` / `io_adapter` / `db`），三个编排器共用�
 |------|---------|------|
 | `infer_status` 状态推断 | player | 账号状态是 player 固有属性 |
 | `compute_rank_score` 名单排序分 | cwl_registration | 服务于"生成名单" |
-| `compute_history_score` 历史分 | war_result | 消费 results，产出 player.history_score |
 
 ### 12.3 数据访问拆分
 
-原大 `Repository` 拆为三个各管一表的 Repository（`PlayerRepository` / `RegistrationRepository` / `ResultRepository`），共享同一个 SQLite 连接，外键约束照常生效。
+Repository 按领域拆分并共享同一个 SQLite 连接，外键约束照常生效。
 
 ### 12.4 accounts 瘦身与旧库迁移（v2.1）
 
@@ -439,11 +423,7 @@ v2.2 把 `registrations` 升级为**自包含事实源**，从根上消除该复
 
 | 隐患 | 修复 | 落点 |
 |------|------|------|
-| #1 results 无唯一约束、重复导入累积 | 加 `UNIQUE(player_tag, period, league_type)`，`add_result` 改 upsert | `db/connection.py` + `war_result/repository.py` |
-| #2 未知账号导入触发外键硬失败 | 导入前校验，不存在则跳过 + stderr 告警 | `war_result/importer.py` |
-| #3 战绩 tag 体系与报名不一致 | 战绩表改关键词映射 + tag 同用"游戏昵称"来源 | `config/settings.yaml` + `war_result/importer.py` |
 | #8 孤立报名记录静默降级 | v2.2 起撤销告警——报名与 accounts 解耦后"报名有/COC无"是常态 | `roster.py` |
-| #9 战绩导入零测试 | 新增集成测试 | tests |
 
 ---
 

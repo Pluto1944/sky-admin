@@ -1,5 +1,7 @@
-"""数据访问层测试：PlayerRepository / RegistrationRepository / ResultRepository
-（基于共享内存 Database，验证外键与唯一约束）。"""
+"""数据访问层测试：PlayerRepository / RegistrationRepository。
+
+基于共享内存 Database，验证账号与报名事实的基础约束。
+"""
 from __future__ import annotations
 
 
@@ -51,27 +53,6 @@ def test_upsert_does_not_reset_history_score(player_repo):
     # 再次报名导入（upsert）不应把历史分清零
     player_repo.upsert(_acc("#A", account_name="changed"))
     assert player_repo.get("#A")["history_score"] == 88.0
-
-
-def test_results_roundtrip_json(player_repo, result_repo):
-    player_repo.upsert(_acc("#A"))
-    result_repo.add_result({"player_tag": "#A", "period": "2026-07",
-                            "league_type": "combat", "raw_metrics": {"star": 12, "win": 5}})
-    results = result_repo.get_results("#A")
-    assert len(results) == 1
-    assert results[0]["raw_metrics"] == {"star": 12, "win": 5}
-
-
-def test_results_unique_constraint_upserts(player_repo, result_repo):
-    # 修复 #1：同 (tag, period, league_type) 重复导入覆盖而非累积
-    player_repo.upsert(_acc("#A"))
-    result_repo.add_result({"player_tag": "#A", "period": "2026-07",
-                            "league_type": "combat", "raw_metrics": {"star": 10}})
-    result_repo.add_result({"player_tag": "#A", "period": "2026-07",
-                            "league_type": "combat", "raw_metrics": {"star": 20}})
-    results = result_repo.get_results("#A")
-    assert len(results) == 1
-    assert results[0]["raw_metrics"] == {"star": 20}
 
 
 def test_update_registration_arrangement(reg_repo):

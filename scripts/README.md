@@ -7,14 +7,13 @@
 | 接口 | period 含义 | 示例 |
 |------|------------|------|
 | `import-reg` | 联赛月份（报名表为该月联赛报名） | `--period 2026-08` |
-| `import-result` | 联赛月份（战绩所属月） | `--period 2026-08` |
 | `fetch_cwl_data.py` | CWL 实际发生月（拉哪月传哪月） | `--period 2026-07` |
 | `arrange` | 联赛月份（安排哪月联赛） | `--period 2026-08` |
 | `register_and_arrange.sh` | 联赛月份（一站式入口） | `2026-08` |
 
 | `publish-results` | 联赛月份 | `--period 2026-08` |
 
-规则：**registrations.period = 联赛月份，results.period = CWL/战绩实际发生月，league_teams.period = 联赛月份，league_results.period = CWL 实际发生月。**
+规则：**registrations.period = 联赛月份，league_teams.period = 联赛月份，league_results.period = CWL 实际发生月。**
 
 示例：8 月联赛需要 8 月报名数据 + 7 月 CWL 星数
 - 导入报名：`--period 2026-08`
@@ -36,7 +35,7 @@ scripts/register_and_arrange.sh 2026-08
 
 内部三步：
 1. 导入报名表 → `registrations`（联赛月份 = 2026-08；sheet 名按报名月 2026-07 推算）
-2. 拉取 CWL 星数 → `league_results` + `results` 表（CWL 月 = 2026-07，自动推算 = 联赛-1）
+2. 拉取 CWL 星数 → `league_results` 表（CWL 月 = 2026-07，自动推算 = 联赛-1）
 3. 编排名单 + 基准重建 + 升降级 → 腾讯在线文档（联赛月份 = 2026-08）
 
 前置：`.env` 中配置 `COC_API_TOKEN` + `TENCENT_DOC_*` + `REG_DOC_FILE_ID` + `ROSTER_DOC_FILE_ID`。推荐同时配置 `TENCENT_DOC_CLIENT_SECRET` 和 `TENCENT_DOC_REFRESH_TOKEN`，以便 Access Token 失效时自动刷新。
@@ -58,16 +57,16 @@ scripts/publish_to_results.sh 2026-08
 
 ---
 
-### `fetch_cwl_data.py` — 拉取 CWL 战绩 + 导入 league_results + results 表
+### `fetch_cwl_data.py` — 拉取 CWL 战绩 + 导入 league_results 表
 
 ```bash
-# 拉取 7 月 CWL 数据 + 导入 league_results + results 表（为 8 月联赛准备）
+# 拉取 7 月 CWL 数据 + 导入 league_results 表（为 8 月联赛准备）
 python scripts/fetch_cwl_data.py --period 2026-07
 ```
 
 流程（两级降级）：
 1. 查 `league_teams` 表获取当月 combat 队伍信息
-2. ClashKing War Log API 拉取 → 直接写入 `league_results` + `results`（双写）
+2. ClashKing War Log API 拉取 → 直接写入 `league_results`
 3. ClashKing 失败 → 降级本地 JSON（`data/cwl_YYYYMM/`）
 4. league_teams 查不到 → 冷启动：读本地 JSON 导入
 
@@ -147,6 +146,25 @@ venv/bin/python scripts/backup_to_cos.py --dry-run
 脚本只接受活动的 `fuse.cosfs` 挂载，避免 COS 挂载失效时误写本机目录。`.env` 与所有
 凭证均明确排除；恢复时需从安全的独立位置重新提供 `.env`。远端保留和清理由 COS 生命周期
 策略负责，脚本不会删除任何已上传的备份目录。
+
+---
+
+## `retire_legacy_results.py` — 删除已退役的旧战绩表
+
+仅在不再需要手工 `import-result`、且移除旧表读写代码已经部署后使用。脚本先验证
+每条旧 `results` 记录都能在结构化 `league_results` 找到对应玩家、月份和类别，再创建一份
+新的已校验 COS 恢复备份，最后才在 SQLite 事务中删除旧表。
+
+```bash
+# 只做生产库预检，不写 COS、不改数据库
+venv/bin/python scripts/retire_legacy_results.py --dry-run
+
+# 预检通过后执行；COS 挂载失效或存在未迁移数据会拒绝删除
+venv/bin/python scripts/retire_legacy_results.py --yes
+```
+
+该命令不可替代部署流程：先发布不再引用旧表的代码，再运行删除；切勿在旧版调度器或旧版
+CLI 仍可能运行时提前删表。
 
 ---
 

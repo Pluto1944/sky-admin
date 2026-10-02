@@ -61,9 +61,9 @@ class PlayerService:
         return direct["player_tag"] if direct else None
 
     def resolve_name_by_tag(self, player_tag: str) -> Optional[str]:
-        """按 player_tag 反查 account_name（升降级从 results 表关联报名的入口）。
+        """按 player_tag 反查 account_name（供历史编排关联报名）。
 
-        results 表以 player_tag 存战绩，升降级需以 account_name 匹配报名行。
+        结构化联赛战绩以 player_tag 存玩家身份，编排需以 account_name 匹配报名行。
         命中返回 account_name，未命中返回 None。
         """
         acc = self.repo.get(player_tag) if player_tag else None

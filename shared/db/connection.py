@@ -2,11 +2,9 @@
 
 设计要点：
 - 整个进程共享**同一个** sqlite3 连接（内存库必须单连接才能共享数据；文件库
-  单连接也简化了事务与外键行为）。三个业务模块的 Repository 都持有这个连接，
-  因此外键约束在 accounts / registrations / results 之间照常生效。
+  单连接也简化了事务与外键行为）。各业务模块的 Repository 都持有这个连接，
+  因此外键约束可以在关联数据表之间保持一致。
 - 建表脚本集中在此，业务模块不各自建表，避免 schema 分散。
-- results 表带 UNIQUE(player_tag, period, league_type)：同月同类型战绩重复导入
-  时走 upsert 覆盖而非累积（修复历史隐患 #1）。
 
 db_path 传 ":memory:" 用于测试。
 """
@@ -73,18 +71,6 @@ CREATE TABLE IF NOT EXISTS {table} (
     player_tag        TEXT,                    -- 可空：命中的真实账号 tag，作关联缓存（无 FK）
     team_info         TEXT,                    -- 分配到哪个队伍（如"0 泰坦二 苍穹·天空之城 #2QQ"），NULL=未分配
     UNIQUE(account_name, period)
-);
-"""
-
-_RESULTS_DDL = """
-CREATE TABLE IF NOT EXISTS results (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    player_tag   TEXT NOT NULL,
-    period       TEXT NOT NULL,
-    league_type  TEXT,
-    raw_metrics  TEXT,
-    UNIQUE(player_tag, period, league_type),
-    FOREIGN KEY(player_tag) REFERENCES accounts(player_tag)
 );
 """
 
@@ -389,7 +375,6 @@ CREATE TABLE IF NOT EXISTS sync_jobs (
 
 _CHILDREN_DDL = (
     _REGISTRATIONS_DDL.format(table="registrations")
-    + _RESULTS_DDL
     + _LEAGUE_TEAMS_DDL
     + _LEAGUE_RESULTS_DDL
     + _WECHAT_USERS_DDL
@@ -658,7 +643,7 @@ class Database:
             "capital_raid_member_results", "clan_games_member_snapshots",
             "current_war_cache",
             "clan_profile_cache",
-            "war_results", "league_results", "league_teams", "results",
+            "war_results", "league_results", "league_teams",
             "registrations", "accounts", "sync_jobs",
         ):
             self.conn.execute(f"DROP TABLE IF EXISTS {table}")

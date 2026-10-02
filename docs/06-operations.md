@@ -37,7 +37,7 @@ register_and_arrange.sh 2026-08
   │     腾讯文档报名表 → registrations(period=2026-08)
   │
   ├─ [2] fetch_cwl_data.py --period 2026-07
-  │     COC API → league_results + results（双写）
+  │     COC API → league_results
   │
   └─ [3] arrange --period 2026-08
         → 读 registrations(2026-08) + league_results(2026-07) + league_teams(2026-07)
@@ -54,7 +54,7 @@ arrange(period)
   ├─ _load_accounts() 加载报名 + 注入分数/奖杯
   ├─ sort_accounts() 分组+排序
   ├─ _load_combat_star_data() 从 league_results 读星数
-  ├─ _load_prev_combat_from_results() 从 league_results 读上月名单
+  ├─ _load_prev_combat_from_league_results() 从 league_results 读上月名单
   ├─ _load_prev_teams_config() 从 league_teams 读上月配置
   ├─ build_final_list() 基准重建+升降级+稳定重排保护（阶段0~6）
   ├─ build_teams() 贪心填充+边界校验+白名单+管理员（阶段7~9）
@@ -130,7 +130,7 @@ v2.4 新增，合并拉取+导入+回退。
 **功能**：
 - 对 6 支实战队伍调用 leaguegroup API 获取 warTag
 - 逐场拉明细 → 存 JSON
-- 导入 results 表（双写到 league_results + results）
+- 导入 league_results 表
 - API 失败自动回退到本地 JSON
 - 按队伍级缓存（<2h 跳过）
 - `--period` 为 CWL 实际发生月，`--fetch-only` 仅拉 JSON
@@ -190,7 +190,6 @@ data/
 | `import-reg` | 导入报名表 → registrations | 联赛月份 |
 | `arrange` | 编排名单 + 导出 Excel | 联赛月份 |
 | `publish-results` | 发布 Part4 到公示文档 | 联赛月份 |
-| `import-result` | 导入战绩 → results | 联赛月份 |
 | `coc-sync` | COC API 同步 → accounts | — |
 | `player-export` | 导出玩家档案 | — |
 | `accounts` | 查看账号列表 | — |
@@ -203,12 +202,11 @@ data/
 | 接口 | period 含义 | 示例 |
 |------|------------|------|
 | `import-reg` | 联赛月份 | `--period 2026-08` |
-| `import-result` | 联赛月份 | `--period 2026-08` |
 | `fetch_cwl_data.py` | CWL 实际发生月 | `--period 2026-07` |
 | `arrange` | 联赛月份 | `--period 2026-08` |
 | `register_and_arrange.sh` | 联赛月份 | `2026-08` |
 
-> `registrations.period` = 联赛月份，`results.period` = CWL/战绩实际发生月，`league_teams.period` = 联赛月份，`league_results.period` = CWL 实际发生月。
+> `registrations.period` = 联赛月份，`league_teams.period` = 联赛月份，`league_results.period` = CWL 实际发生月。
 > 编排 N 月联赛时：读 `registrations(N)` + `league_results(N-1)` + `league_teams(N-1)`。
 
 ---

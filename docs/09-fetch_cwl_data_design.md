@@ -28,9 +28,7 @@ fetch --period 2026-08
   │     └─ 通道3 🥉 本地 JSON → 成功则写 DB
   │           └─ 失败 → 🚨 该队全部失败
   │
-  └─ 3. 写入目标
-        ├─ league_results 表（主力表）
-        └─ results 旧表（双写，过渡期兼容）
+  └─ 3. 写入目标：league_results 表
 ```
 
 ## 3. 两种流程详解
@@ -70,7 +68,6 @@ fetch --period 2026-08
 
 3. 直接写入数据库（**不保存 JSON 文件**）
    - 写入 `league_results` 表
-   - 双写 `results` 旧表
 
 4. 输出数据来源汇总报告
 5. 输出升降级参与情况总结
@@ -90,7 +87,7 @@ fetch --period 2026-08
    ```
 
 2. 尝试读取 `data/cwl_YYYYMM/*.json` 目录
-   - 存在 JSON → 遍历所有 JSON 文件，导入 `league_results` + `results` 表
+   - 存在 JSON → 遍历所有 JSON 文件，导入 `league_results` 表
    - 不存在 JSON → 打印最终告警，退出
 
 ## 4. 写入数据库详情
@@ -112,17 +109,6 @@ fetch --period 2026-08
 | `raw_metrics` | 序列化为 JSON | 包含 total_stars, team_name, clan_tag, team_index |
 
 **去重策略**：`ON CONFLICT(period, team_index, player_tag) DO UPDATE`（幂等写入）
-
-### 4.2 results 旧表（双写）
-
-| 字段 | 来源 |
-|------|------|
-| `player_tag` | API 返回 |
-| `period` | `--period` 参数 |
-| `league_type` | 固定 `"combat"` |
-| `raw_metrics` | 同 league_results 的 raw_metrics |
-
-**去重策略**：`ON CONFLICT(player_tag, period, league_type) DO UPDATE`
 
 ## 5. 数据源
 
@@ -149,7 +135,7 @@ python scripts/fetch_cwl_data.py --period 2026-08
 | 不依赖 `config/settings.yaml` TEAMS | config 可能已更新为下月信息，且 team list 可能已删除 |
 | 不保存 JSON 文件 | JSON 仅用于冷启动，正常流程无需文件缓存 |
 | 查 league_teams 而非 league_clans | league_teams 是 arrange 时写入的队伍配置快照，是准确的当月队伍信息来源 |
-| 保留 results 旧表双写 | 过渡期兼容，编排时有回退逻辑 |
+| 仅写 league_results | 队伍身份和战绩字段完整，避免旧表按玩家/月度覆盖多队记录 |
 | 冷启动保留读 JSON 能力 | 首次使用时 league_teams 无数据，需要从历史 JSON 导入 |
 
 ## 8. league_teams 数据写入时机
