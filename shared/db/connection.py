@@ -251,6 +251,43 @@ CREATE TABLE IF NOT EXISTS cwl_live_war_cache (
 );
 """
 
+_CWL_ROSTER_SNAPSHOTS_DDL = """
+CREATE TABLE IF NOT EXISTS cwl_roster_snapshots (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    period       TEXT NOT NULL,
+    revision     INTEGER NOT NULL,
+    is_active    INTEGER NOT NULL DEFAULT 1,
+    source_sheet TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    data_json    TEXT NOT NULL,
+    created_at   TEXT NOT NULL,
+    UNIQUE(period, revision)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cwl_roster_active_period
+ON cwl_roster_snapshots(period) WHERE is_active = 1;
+"""
+
+_CWL_ASSEMBLY_CACHE_DDL = """
+CREATE TABLE IF NOT EXISTS cwl_assembly_cache (
+    period             TEXT NOT NULL,
+    clan_tag           TEXT NOT NULL,
+    roster_snapshot_id INTEGER NOT NULL,
+    team_index          INTEGER NOT NULL,
+    team_alias          TEXT NOT NULL,
+    team_name           TEXT,
+    category            TEXT NOT NULL,
+    status              TEXT NOT NULL,
+    data_json           TEXT,
+    error               TEXT,
+    updated_at          TEXT,
+    attempted_at        TEXT NOT NULL,
+    locked_at           TEXT,
+    PRIMARY KEY(period, clan_tag),
+    FOREIGN KEY(roster_snapshot_id) REFERENCES cwl_roster_snapshots(id)
+);
+"""
+
 # sync_jobs 表：周期调度器（scripts/scheduler.py）的任务状态。
 # last_status 取值：success / failed / skipped / running / never
 _SYNC_JOBS_DDL = """
@@ -283,6 +320,8 @@ _CHILDREN_DDL = (
     + _CLAN_PROFILE_CACHE_DDL
     + _CWL_LIVE_GROUP_CACHE_DDL
     + _CWL_LIVE_WAR_CACHE_DDL
+    + _CWL_ROSTER_SNAPSHOTS_DDL
+    + _CWL_ASSEMBLY_CACHE_DDL
     + _SYNC_JOBS_DDL
 )
 
@@ -429,6 +468,18 @@ class Database:
         elif "attempted_at" not in cwl_war_cols:
             self.conn.execute("ALTER TABLE cwl_live_war_cache ADD COLUMN attempted_at TEXT")
 
+        # CWL 正式名单快照与集结检查缓存
+        roster_cols = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(cwl_roster_snapshots)")
+        }
+        if not roster_cols:
+            self.conn.executescript(_CWL_ROSTER_SNAPSHOTS_DDL)
+        assembly_cols = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(cwl_assembly_cache)")
+        }
+        if not assembly_cols:
+            self.conn.execute(_CWL_ASSEMBLY_CACHE_DDL)
+
         # sync_jobs 表迁移（周期调度器状态）
         sj_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(sync_jobs)")}
         if not sj_cols:
@@ -491,6 +542,7 @@ class Database:
         """清空并重建所有业务表（历史数据清零）。"""
         self.conn.execute("PRAGMA foreign_keys = OFF")
         for table in (
+            "cwl_assembly_cache", "cwl_roster_snapshots",
             "cwl_live_war_cache", "cwl_live_group_cache", "war_history_cache",
             "current_war_cache",
             "clan_profile_cache",

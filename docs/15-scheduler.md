@@ -10,7 +10,7 @@
 
 ### 1.1 现状问题
 
-项目当前有 **7 类** 需要周期性执行的任务，其中数据刷新任务采用间隔调度，公众号阵型采用固定业务时刻：
+项目当前有 **8 类** 需要周期性执行的任务，其中数据刷新任务采用间隔调度，公众号阵型采用固定业务时刻：
 
 | 问题 | 现状 | 影响 |
 |------|------|------|
@@ -51,6 +51,8 @@
 | `clan_profile_cache` | 自有部落官方资料缓存 | `clan_tag` | COC 官方 API | **周期**（每 6 小时） |
 | `cwl_live_group_cache` | 当月联赛组缓存 | `(period, clan_tag)` | COC 官方 API | **周期**（联赛窗口） |
 | `cwl_live_war_cache` | CWL 逐场战争缓存 | `war_tag` | COC 官方 API | **周期**（活跃战争每 2 分钟） |
+| `cwl_roster_snapshots` | 正式名单月度 revision | `id` | 腾讯文档正式公示表 | **周期**（每月窗口内首次成功后锁定） |
+| `cwl_assembly_cache` | 联赛集结检查缓存 | `(period, clan_tag)` | COC 官方 API | **周期**（窗口内每 5 分钟） |
 | `sync_jobs` | 调度器任务状态 | `job_id` | `scheduler.py` | 实时（调度器维护） |
 
 > `results` 为过渡期旧表，`league_results` 写入时双写，稳定后废弃。
@@ -73,14 +75,17 @@
 | `clan_profile_cache` | `coc_sync` | `api_server`（clan overview 详情） |
 | `cwl_live_group_cache` | `cwl_live` | `api_server`（cwl-live、cwl-check-in） |
 | `cwl_live_war_cache` | `cwl_live` | `api_server`（cwl-live、cwl-check-in） |
+| `cwl_roster_snapshots` | `cwl_assembly` | `cwl_assembly`、`api_server`（cwl-assembly） |
+| `cwl_assembly_cache` | `cwl_assembly` | `api_server`（cwl-assembly） |
 | `sync_jobs` | `scheduler.py` | `scheduler.py`（`--list`） |
 
-### 2.3 需要周期性执行的任务（7 类）
+### 2.3 需要周期性执行的任务（8 类）
 
 | job_id | 数据表 | 脚本 | 数据源 | 频率 | 前端接口 |
 |--------|--------|------|--------|------|----------|
 | `current_wars` | `current_war_cache` + `war_history_cache` | `scheduler.py` | COC 官方 API | 每 2 分钟检查，按状态和开战时间限频 | `/api/clan/current-wars`、`/api/clan/war-history` |
 | `cwl_live` | `cwl_live_group_cache` + `cwl_live_war_cache` | `scheduler.py` | COC 官方 API | 活跃期每 2 分钟 | `/api/clan/cwl-live`、`/api/clan/cwl-check-in` |
+| `cwl_assembly` | `cwl_roster_snapshots` + `cwl_assembly_cache` | `scheduler.py` | 腾讯文档 + COC 官方 API | 月初窗口每 5 分钟 | `/api/clan/cwl-assembly` |
 | `coc_sync` | `accounts`、`clan_profile_cache` | `CocSyncService` | COC 官方 API | 每 6 小时 | `/api/members`、`/api/clan/overview/{tag}` |
 | `farm_stats` | `farm_stats` | `sync_farm_stats.py` | COC 官方 API | 每 30 分钟 | `/api/clan/farm-config` |
 | `war_results` | `war_results` | `fetch_war_data.py` | ClashKing API | 每天 | `/api/clan/war-stats` |
@@ -122,6 +127,21 @@
 实时功能上线前遗漏的历史月份不由调度器自动补抓；使用
 `scripts/backfill_cwl_live.py --period YYYY-MM` 先做只读完整性校验，备份数据库后再加
 `--apply` 一次性回填。历史来源、校验边界和限制见 `docs/19-cwl-live-dashboard.md`。
+
+#### `cwl_assembly` — CWL 集结检查
+
+| 项 | 内容 |
+|----|------|
+| 入口 | `scripts/scheduler.py::_run_cwl_assembly()` |
+| 名单来源 | `PUBLISH_DOC_FILE_ID` 的当月正式报名结果子表；首次成功后写入不可变 revision |
+| 成员来源 | Supercell 官方 `/clans/{tag}/members`，随后查询当月 `leaguegroup` 判断是否冻结 |
+| 频率 | `interval_min=5` |
+| 窗口 | 北京时间每月 1 日 14:00 至 3 日 16:00；服务晚启动时在窗口内自动补做首次快照 |
+| 停止 | 每个部落检测到当月联赛组后独立冻结；3 日 16:00 冻结剩余部落 |
+| 容错 | 名单失败不写半成品；成员失败保留上次成功 JSON 并在下轮重试 |
+
+调度器不会在快照成功后再次读取在线文档。明确需要纠错时可执行
+`python scripts/scheduler.py --once cwl_assembly --force` 生成新 revision 并重新核对；历史 revision 保留。完整设计见 [21-cwl-assembly-check.md](21-cwl-assembly-check.md)。
 
 #### `coc_sync` — 部落成员与官方资料（`accounts`、`clan_profile_cache`）
 
@@ -268,10 +288,14 @@ CREATE TABLE IF NOT EXISTS sync_jobs (
 
 | job_id | job_name | interval_min | 说明 |
 |--------|----------|-------------|------|
+| `current_wars` | 当前部落战 | 2 | 每 2 分钟检查，按战争状态和开战时间限频 |
+| `cwl_live` | CWL 实时看板 | 2 | 月初窗口刷新联赛组和活跃战争 |
+| `cwl_assembly` | CWL 集结检查 | 5 | 1 日 14:00 至 3 日 16:00 检查，按部落冻结 |
 | `farm_stats` | 互刷部落统计 | 30 | 拉 8 个互刷部落成员+战争，计算 TH 分布 |
 | `coc_sync` | COC 玩家与部落资料 | 360 | 同步联盟成员到 `accounts`，并更新 `clan_profile_cache`（每 6 小时一次） |
 | `war_results` | 普通部落战战绩 | 1440 | 拉取战营 `#2QQ` 部落战，写 `war_results` |
 | `cwl` | CWL 联赛战绩 | 1440 | 每天触发，`day==12` 才真正拉当月 CWL |
+| `war_layout` | 公众号阵型更新 | 1440 | 每天北京时间固定时刻创建草稿；不加入 `--once all` |
 
 > `interval_min` 首次写入 `sync_jobs` 后，可通过 `--set-interval` 调整。
 
@@ -364,6 +388,7 @@ python scripts/scheduler.py --once current_wars # 手动刷新当前部落战缓
 python scripts/scheduler.py --once farm_stats   # 手动执行单个任务（调试）
 python scripts/scheduler.py --once all         # 手动执行全部任务
 python scripts/scheduler.py --once cwl --force # --force 跳过 day==12 判断，强制拉取
+python scripts/scheduler.py --once cwl_assembly --force # 重建当月正式名单 revision 并刷新集结
 python scripts/scheduler.py --list             # 查看所有任务状态
 python scripts/scheduler.py --enable farm_stats    # 启用任务
 python scripts/scheduler.py --disable farm_stats   # 停用任务
@@ -373,7 +398,7 @@ python scripts/scheduler.py --set-interval farm_stats 60   # 调整间隔（分�
 | 参数 | 说明 |
 |------|------|
 | `--once <job_id\|all>` | 单次执行（不进入常驻循环），调试/补数据用 |
-| `--force` | 搭配 `--once` 使用，跳过 CWL 的 `day==12` 判断 |
+| `--force` | 搭配 `--once` 使用；`cwl` 跳过 12 号判断，`cwl_live` 跳过月初窗口，`cwl_assembly` 跳过窗口并重建当月名单 revision |
 | `--list` | 打印 `sync_jobs` 表全部任务状态 |
 | `--enable` / `--disable` | 切换任务启用状态 |
 | `--set-interval <分钟>` | 调整任务刷新间隔 |
@@ -419,6 +444,7 @@ journalctl -u sky-scheduler -f               # 实时日志
 | 查看全部任务状态 | `python scripts/scheduler.py --list` |
 | 手动补一次 farm 数据 | `python scripts/scheduler.py --once farm_stats` |
 | 强制拉当月 CWL（跳过日期判断） | `python scripts/scheduler.py --once cwl --force` |
+| 重建当月正式名单并刷新集结 | `python scripts/scheduler.py --once cwl_assembly --force` |
 | 临时停用某任务 | `python scripts/scheduler.py --disable farm_stats` |
 | 恢复某任务 | `python scripts/scheduler.py --enable farm_stats` |
 | 调整刷新频率 | `python scripts/scheduler.py --set-interval farm_stats 60` |

@@ -173,6 +173,17 @@ GET /api/clan/cwl-live/{clan_tag}?period=YYYY-MM&round=4
 
 两个接口只读取 `cwl_live_group_cache` 和 `cwl_live_war_cache`，不会在 HTTP 请求中访问 COC。实时同步与页面结构见 [19-cwl-live-dashboard.md](19-cwl-live-dashboard.md)。
 
+### 2.7 CWL 集结检查
+
+```
+GET /api/clan/cwl-assembly
+GET /api/clan/cwl-assembly/{clan_tag}
+```
+
+无需认证。汇总接口返回当月全部联赛部落的正式人数、已到位、未到位、额外成员、冻结状态和缓存时间；详情接口返回按“未到位、额外成员、正常成员”分组的数据，其中当前成员含职位和大本等级。`clan_tag` 必须属于当月 `league_teams`。
+
+两个接口只读取 `cwl_roster_snapshots` 和 `cwl_assembly_cache`，不会在请求内读取腾讯文档或调用 COC。正式名单和成员检查规则见 [21-cwl-assembly-check.md](21-cwl-assembly-check.md)。
+
 ---
 
 ### 3. 微信登录

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """周期数据刷新调度器（常驻 loop 进程）。
 
-统一管理 7 类需要周期性执行的任务，状态落 `sync_jobs` 表：
+统一管理 8 类需要周期性执行的任务，状态落 `sync_jobs` 表：
 
     current_wars 全部自有部落当前战争（战斗日 2 分钟，准备日动态 30/2 分钟）
     cwl_live    当月 CWL 联赛组与逐场战争（活跃期每 2 分钟）
+    cwl_assembly 正式名单与各联赛部落集结检查（每月 1 日 14:00 至 3 日 16:00）
     farm_stats  互刷部落统计（每 30 分钟）
     coc_sync    COC 玩家档案（每 6 小时）
     war_results 普通部落战战绩（每天）
@@ -15,6 +16,7 @@
     python scripts/scheduler.py                      # loop 模式（生产，systemd 守护）
     python scripts/scheduler.py --once current_wars  # 手动刷新当前部落战缓存
     python scripts/scheduler.py --once cwl_live --force  # 手动刷新当月 CWL 实时缓存
+    python scripts/scheduler.py --once cwl_assembly --force  # 手动重建当月名单快照并刷新集结
     python scripts/scheduler.py --once farm_stats    # 手动执行单个任务（调试）
     python scripts/scheduler.py --once all           # 手动执行全部任务
     python scripts/scheduler.py --once cwl --force   # --force 跳过 day==12 判断
@@ -635,6 +637,223 @@ def _run_coc_sync() -> dict:
     return {"status": "success", "reason": reason}
 
 
+def _run_cwl_assembly(force: bool = False, now: datetime | None = None) -> dict:
+    """生成正式名单月度快照，并按部落刷新集结检查缓存。"""
+    from modules.coc_sync.cwl_assembly import (
+        compare_roster_members,
+        parse_published_roster,
+        published_sheet_name,
+        roster_content_hash,
+    )
+    from modules.coc_sync.official.mapper import normalize_tag
+    from modules.coc_sync.service import CocSyncService
+    from shared.io_adapter.tencent_doc import TencentDocAdapter
+
+    local_now = (now or datetime.now(timezone.utc)).astimezone(BUSINESS_TZ)
+    period = local_now.strftime("%Y-%m")
+    window_start = local_now.replace(day=1, hour=14, minute=0, second=0, microsecond=0)
+    window_end = local_now.replace(day=3, hour=16, minute=0, second=0, microsecond=0)
+    if not force and local_now < window_start:
+        return {"status": "skipped", "reason": f"{period} 集结检查将在 1 日 14:00 开始"}
+
+    db = Database(config.DB_PATH)
+    db.init_schema()
+    teams = [dict(row) for row in db.conn.execute(
+        """SELECT period, team_index, team_alias, team_name, clan_tag,
+                  category, member_count, league_level
+           FROM league_teams
+           WHERE period = ? AND category IN ('combat', 'shell')
+           ORDER BY team_index""",
+        (period,),
+    ).fetchall()]
+    if not teams:
+        db.close()
+        return {"status": "skipped", "reason": f"{period} 无 league_teams 联赛队伍"}
+
+    attempted_at = local_now.astimezone(timezone.utc).isoformat(timespec="seconds")
+    snapshot_row = db.conn.execute(
+        "SELECT * FROM cwl_roster_snapshots WHERE period = ? AND is_active = 1",
+        (period,),
+    ).fetchone()
+    snapshot = dict(snapshot_row) if snapshot_row else None
+
+    if not force and local_now >= window_end and snapshot is None:
+        db.close()
+        return {"status": "skipped", "reason": f"{period} 集结窗口已结束且没有正式名单快照"}
+
+    if snapshot is None or force:
+        source_sheet = published_sheet_name(period)
+        file_id = os.environ.get("PUBLISH_DOC_FILE_ID", "").strip()
+        if not file_id:
+            db.close()
+            return {"status": "failed", "reason": "未配置 PUBLISH_DOC_FILE_ID"}
+        try:
+            rows = TencentDocAdapter().read_sheet(file_id, source_sheet)
+            roster = parse_published_roster(rows, teams)
+            content_hash = roster_content_hash(roster)
+            next_revision = db.conn.execute(
+                "SELECT COALESCE(MAX(revision), 0) + 1 FROM cwl_roster_snapshots WHERE period = ?",
+                (period,),
+            ).fetchone()[0]
+            with db.conn:
+                db.conn.execute(
+                    "UPDATE cwl_roster_snapshots SET is_active = 0 WHERE period = ? AND is_active = 1",
+                    (period,),
+                )
+                cursor = db.conn.execute(
+                    """INSERT INTO cwl_roster_snapshots
+                       (period, revision, is_active, source_sheet, content_hash, data_json, created_at)
+                       VALUES (?, ?, 1, ?, ?, ?, ?)""",
+                    (
+                        period, next_revision, source_sheet, content_hash,
+                        json.dumps(roster, ensure_ascii=False), attempted_at,
+                    ),
+                )
+                # 强制重建后让所有部落使用新 revision 重新核对。
+                if snapshot is not None:
+                    db.conn.execute("DELETE FROM cwl_assembly_cache WHERE period = ?", (period,))
+            snapshot = {
+                "id": cursor.lastrowid,
+                "period": period,
+                "revision": next_revision,
+                "data_json": json.dumps(roster, ensure_ascii=False),
+            }
+        except Exception as exc:  # noqa: BLE001 - 失败不能写入半成品快照
+            db.close()
+            return {"status": "failed", "reason": f"正式名单快照失败：{exc}"}
+
+    try:
+        roster = json.loads(snapshot["data_json"])
+    except (KeyError, TypeError, json.JSONDecodeError):
+        db.close()
+        return {"status": "failed", "reason": "正式名单快照内容损坏"}
+
+    # 截止时冻结尚未开启的部落；此后日常任务不再发外部请求。
+    if not force and local_now >= window_end:
+        changed = 0
+        for team in roster.get("teams", []):
+            clan_tag = normalize_tag(team.get("clan_tag"))
+            existing = db.conn.execute(
+                "SELECT locked_at FROM cwl_assembly_cache WHERE period = ? AND clan_tag = ?",
+                (period, clan_tag),
+            ).fetchone()
+            if existing and existing["locked_at"]:
+                continue
+            db.conn.execute(
+                """INSERT INTO cwl_assembly_cache
+                   (period, clan_tag, roster_snapshot_id, team_index, team_alias,
+                    team_name, category, status, data_json, error, updated_at,
+                    attempted_at, locked_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, 'cutoff', NULL, NULL, NULL, ?, ?)
+                   ON CONFLICT(period, clan_tag) DO UPDATE SET
+                       status = 'cutoff',
+                       attempted_at = excluded.attempted_at,
+                       locked_at = excluded.locked_at""",
+                (
+                    period, clan_tag, snapshot["id"], team.get("team_index"),
+                    team.get("team_alias") or clan_tag, team.get("team_name"),
+                    team.get("category") or "combat", attempted_at, attempted_at,
+                ),
+            )
+            changed += 1
+        db.conn.commit()
+        db.close()
+        return {"status": "skipped", "reason": f"{period} 集结窗口已结束，冻结 {changed} 个部落"}
+
+    service = CocSyncService()
+    success = failed = locked = skipped = 0
+    for team in roster.get("teams", []):
+        clan_tag = normalize_tag(team.get("clan_tag"))
+        cached_row = db.conn.execute(
+            "SELECT * FROM cwl_assembly_cache WHERE period = ? AND clan_tag = ?",
+            (period, clan_tag),
+        ).fetchone()
+        cached = dict(cached_row) if cached_row else None
+        if cached and cached.get("locked_at"):
+            skipped += 1
+            continue
+
+        try:
+            members = service.fetch_clan_members(clan_tag, team.get("team_name"))
+            comparison = compare_roster_members(team.get("members") or [], members)
+        except Exception as exc:  # noqa: BLE001 - 单部落失败隔离并保留成功缓存
+            failed += 1
+            if cached:
+                db.conn.execute(
+                    """UPDATE cwl_assembly_cache
+                       SET error = ?, attempted_at = ?
+                       WHERE period = ? AND clan_tag = ?""",
+                    (str(exc), attempted_at, period, clan_tag),
+                )
+            else:
+                db.conn.execute(
+                    """INSERT INTO cwl_assembly_cache
+                       (period, clan_tag, roster_snapshot_id, team_index, team_alias,
+                        team_name, category, status, data_json, error, updated_at,
+                        attempted_at, locked_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, 'error', NULL, ?, NULL, ?, NULL)""",
+                    (
+                        period, clan_tag, snapshot["id"], team.get("team_index"),
+                        team.get("team_alias") or clan_tag, team.get("team_name"),
+                        team.get("category") or "combat", str(exc), attempted_at,
+                    ),
+                )
+            db.conn.commit()
+            continue
+
+        status = "checking"
+        locked_at = None
+        group_error = None
+        try:
+            group = service.fetch_cwl_group(team)
+            if group and group.get("season") == period:
+                status = "started"
+                locked_at = attempted_at
+                locked += 1
+        except Exception as exc:  # noqa: BLE001 - 成员结果仍可成功缓存，下轮重试开赛检测
+            group_error = f"联赛开启状态查询失败：{exc}"
+
+        payload = {**team, **comparison}
+        db.conn.execute(
+            """INSERT INTO cwl_assembly_cache
+               (period, clan_tag, roster_snapshot_id, team_index, team_alias,
+                team_name, category, status, data_json, error, updated_at,
+                attempted_at, locked_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(period, clan_tag) DO UPDATE SET
+                   roster_snapshot_id = excluded.roster_snapshot_id,
+                   team_index = excluded.team_index,
+                   team_alias = excluded.team_alias,
+                   team_name = excluded.team_name,
+                   category = excluded.category,
+                   status = excluded.status,
+                   data_json = excluded.data_json,
+                   error = excluded.error,
+                   updated_at = excluded.updated_at,
+                   attempted_at = excluded.attempted_at,
+                   locked_at = excluded.locked_at""",
+            (
+                period, clan_tag, snapshot["id"], team.get("team_index"),
+                team.get("team_alias") or clan_tag, team.get("team_name"),
+                team.get("category") or "combat", status,
+                json.dumps(payload, ensure_ascii=False), group_error,
+                attempted_at, attempted_at, locked_at,
+            ),
+        )
+        db.conn.commit()
+        success += 1
+
+    db.close()
+    if not success and failed:
+        return {"status": "failed", "reason": f"全部 {failed} 个待检查部落同步失败"}
+    suffix = f"，失败 {failed}" if failed else ""
+    if locked:
+        suffix += f"，本轮冻结 {locked}"
+    if skipped:
+        suffix += f"，已冻结跳过 {skipped}"
+    return {"status": "success", "reason": f"检查 {success} 个联赛部落{suffix}"}
+
+
 def _run_war_results() -> dict:
     """拉取战营部落战战绩，写入 war_results 表。"""
     from modules.coc_sync.clashking.client import (
@@ -736,6 +955,11 @@ JOBS = {
         "interval": 2,
         "run": _run_cwl_live,
     },
+    "cwl_assembly": {
+        "name": "CWL集结检查",
+        "interval": 5,
+        "run": _run_cwl_assembly,
+    },
     "farm_stats": {
         "name": "互刷部落统计",
         "interval": 30,
@@ -824,7 +1048,7 @@ def run_one(db: Database, job_id: str, force: bool = False) -> dict:
     start = time.monotonic()
     try:
         run_fn = job["run"]
-        if job_id in {"current_wars", "cwl", "cwl_live"}:
+        if job_id in {"current_wars", "cwl", "cwl_live", "cwl_assembly"}:
             result = run_fn(force=force)
         else:
             result = run_fn()
@@ -994,7 +1218,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="配合 --once：cwl 跳过 12 号判断，cwl_live 跳过月初窗口判断",
+        help="配合 --once：cwl 跳过 12 号判断；cwl_live/cwl_assembly 跳过月初窗口判断",
     )
     parser.add_argument("--list", action="store_true", help="查看所有任务状态")
     parser.add_argument("--enable", metavar="JOB", default=None, help="启用任务")

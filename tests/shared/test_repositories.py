@@ -136,3 +136,14 @@ def test_cwl_live_cache_tables_are_created(db):
 
     assert {"period", "clan_tag", "data_json", "updated_at", "attempted_at"} <= group_columns
     assert {"war_tag", "state", "data_json", "updated_at", "attempted_at"} <= war_columns
+
+
+def test_cwl_assembly_tables_are_created(db):
+    roster_columns = {
+        row[1] for row in db.conn.execute("PRAGMA table_info(cwl_roster_snapshots)")
+    }
+    assembly_columns = {
+        row[1] for row in db.conn.execute("PRAGMA table_info(cwl_assembly_cache)")
+    }
+    assert {"period", "revision", "is_active", "content_hash", "data_json"} <= roster_columns
+    assert {"period", "clan_tag", "status", "data_json", "locked_at"} <= assembly_columns

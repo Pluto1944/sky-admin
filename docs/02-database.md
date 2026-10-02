@@ -7,7 +7,7 @@
 
 ## 一、数据库概览
 
-系统当前包含 **14 张业务与运行状态表**：
+系统当前包含 **16 张业务与运行状态表**：
 
 | 表名 | 职责 | 主键 | 状态 |
 |------|------|------|------|
@@ -23,6 +23,8 @@
 | `clan_profile_cache` | 自有部落官方资料缓存 | `clan_tag` | 活跃 |
 | `cwl_live_group_cache` | 当月 CWL 联赛组缓存 | `(period, clan_tag)` | 活跃 |
 | `cwl_live_war_cache` | CWL 单场战争缓存 | `war_tag` | 活跃 |
+| `cwl_roster_snapshots` | CWL 正式名单不可变版本快照 | `id` | 活跃 |
+| `cwl_assembly_cache` | 当月各联赛部落集结检查缓存 | `(period, clan_tag)` | 活跃 |
 | `wechat_users` | 微信用户和游戏账号绑定 | `openid` | 活跃 |
 | `sync_jobs` | 周期调度任务状态 | `job_id` | 活跃 |
 
@@ -33,6 +35,8 @@
 `clan_profile_cache` 每个已启用自有部落一行，保存 `/clans/{tag}` 规范化后的徽章、等级、战争战绩、联赛、三类积分、地区、标签、门槛和描述。跟随 `coc_sync` 每 6 小时更新；单部落失败时保留上次成功 JSON 并标记 `stale`。
 
 `cwl_live_group_cache` 以当月 `league_teams` 为部落范围，保存官方联赛组和轮次 warTag；`cwl_live_war_cache` 以 `war_tag` 去重保存完整逐场攻防数据。两表由 `cwl_live` 增量更新，页面 API 只读缓存。已结束战争不再重复拉取。
+
+`cwl_roster_snapshots` 保存每月正式公示表的 revision，同月只有一个 `is_active=1`；`cwl_assembly_cache` 保存正式名单与当前部落成员的比较结果。两表由 `cwl_assembly` 在每月 1 日 14:00 至 3 日 16:00 的窗口内维护，单部落开启当月联赛后冻结。完整边界见 [21-cwl-assembly-check.md](21-cwl-assembly-check.md)。
 
 ---
 
@@ -265,6 +269,8 @@ CREATE TABLE league_results (
 | `clan_profile_cache` | `scheduler.py`（coc_sync） | `api_server`（clan overview 详情） |
 | `cwl_live_group_cache` | `scheduler.py`（cwl_live） | `api_server`（cwl-live 汇总/详情） |
 | `cwl_live_war_cache` | `scheduler.py`（cwl_live） | `api_server`（cwl-live 详情与总览） |
+| `cwl_roster_snapshots` | `scheduler.py`（cwl_assembly） | `scheduler.py`、`api_server`（cwl-assembly） |
+| `cwl_assembly_cache` | `scheduler.py`（cwl_assembly） | `api_server`（cwl-assembly 汇总/详情） |
 | `wechat_users` | `api_server`（登录/绑定） | `api_server` |
 | `sync_jobs` | `scheduler.py` | `scheduler.py`（任务状态） |
 

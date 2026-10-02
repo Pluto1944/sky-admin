@@ -165,6 +165,16 @@ export function getCwlCheckIn() {
   return request('/api/clan/cwl-check-in')
 }
 
+/** 获取当月联赛正式名单与到位情况汇总。 */
+export function getCwlAssembly() {
+  return request('/api/clan/cwl-assembly')
+}
+
+/** 获取单个联赛部落的集结检查详情。 */
+export function getCwlAssemblyDetail(clanTag) {
+  return request(`/api/clan/cwl-assembly/${encodeURIComponent(clanTag)}`)
+}
+
 /** 获取单个联赛部落的战斗日与联赛总览。 */
 export function getCwlLiveDetail(clanTag, period, round) {
   const query = []
@@ -189,5 +199,7 @@ export default {
   getWarHistoryDetail,
   getCwlLive,
   getCwlCheckIn,
+  getCwlAssembly,
+  getCwlAssemblyDetail,
   getCwlLiveDetail
 }

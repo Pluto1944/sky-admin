@@ -656,6 +656,100 @@ def cwl_check_in(db: Database = Depends(get_db)):
     }
 
 
+def _active_cwl_roster_snapshot(db: Database, period: str) -> dict | None:
+    row = db.conn.execute(
+        "SELECT * FROM cwl_roster_snapshots WHERE period = ? AND is_active = 1",
+        (period,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def _cwl_assembly_item(team: dict, cache: dict | None) -> dict:
+    payload = _load_json((cache or {}).get("data_json")) or {}
+    status = (cache or {}).get("status") or "waiting_check"
+    return {
+        "period": team.get("period"),
+        "team_index": team.get("team_index"),
+        "team_alias": team.get("team_alias"),
+        "team_name": team.get("team_name") or team.get("team_alias") or team.get("clan_tag"),
+        "clan_tag": team.get("clan_tag"),
+        "category": team.get("category"),
+        "status": status,
+        "official_count": payload.get("official_count", 0),
+        "current_count": payload.get("current_count", 0),
+        "present_count": payload.get("present_count", 0),
+        "missing_count": payload.get("missing_count", 0),
+        "extra_count": payload.get("extra_count", 0),
+        "updated_at": (cache or {}).get("updated_at"),
+        "attempted_at": (cache or {}).get("attempted_at"),
+        "locked_at": (cache or {}).get("locked_at"),
+        "error": (cache or {}).get("error"),
+    }
+
+
+@router.get("/clan/cwl-assembly")
+def cwl_assembly(db: Database = Depends(get_db)):
+    """返回当月联赛集结检查的部落汇总；只读本地缓存。"""
+    period = _current_cwl_live_period()
+    teams = _cwl_live_teams(db, period)
+    snapshot = _active_cwl_roster_snapshot(db, period)
+    caches = {
+        normalize_tag(row["clan_tag"]): dict(row)
+        for row in db.conn.execute(
+            "SELECT * FROM cwl_assembly_cache WHERE period = ?",
+            (period,),
+        ).fetchall()
+    }
+    items = [_cwl_assembly_item(team, caches.get(team.get("clan_tag"))) for team in teams]
+    updated = [item["updated_at"] for item in items if item.get("updated_at")]
+    return {
+        "period": period,
+        "server_time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "status": "ready" if snapshot else "waiting_roster",
+        "snapshot": ({
+            "revision": snapshot.get("revision"),
+            "created_at": snapshot.get("created_at"),
+        } if snapshot else None),
+        "updated_at": max(updated) if updated else None,
+        "summary": {
+            "team_count": len(items),
+            "checked_team_count": sum(bool(item.get("updated_at")) for item in items),
+            "locked_team_count": sum(bool(item.get("locked_at")) for item in items),
+            "missing_count": sum(item["missing_count"] for item in items),
+            "extra_count": sum(item["extra_count"] for item in items),
+        },
+        "teams": items,
+    }
+
+
+@router.get("/clan/cwl-assembly/{clan_tag}")
+def cwl_assembly_detail(clan_tag: str, db: Database = Depends(get_db)):
+    """返回当月单个联赛部落的集结详情。"""
+    period = _current_cwl_live_period()
+    normalized = normalize_tag(clan_tag)
+    team = next(
+        (item for item in _cwl_live_teams(db, period) if item.get("clan_tag") == normalized),
+        None,
+    )
+    if team is None:
+        raise HTTPException(status_code=404, detail="部落不在当月联赛队伍列表中")
+    snapshot = _active_cwl_roster_snapshot(db, period)
+    row = db.conn.execute(
+        "SELECT * FROM cwl_assembly_cache WHERE period = ? AND clan_tag = ?",
+        (period, normalized),
+    ).fetchone()
+    cache = dict(row) if row else None
+    result = _cwl_assembly_item(team, cache)
+    payload = _load_json((cache or {}).get("data_json")) or {}
+    result.update({
+        "snapshot_revision": snapshot.get("revision") if snapshot else None,
+        "missing_members": payload.get("missing_members", []),
+        "extra_members": payload.get("extra_members", []),
+        "present_members": payload.get("present_members", []),
+    })
+    return result
+
+
 @router.get("/clan/cwl-live/{clan_tag}")
 def cwl_live_detail(
     clan_tag: str,
