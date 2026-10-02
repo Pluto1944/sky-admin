@@ -86,6 +86,7 @@ python scripts/fetch_cwl_data.py --period 2026-07
 | `fetch_cwl_data.sh` | `fetch_cwl_data.py` 的便捷包装 |
 | `backfill_cwl_live.py` | 从 ClashKing 历史战争日志重建指定月份的联赛看板缓存；默认 dry-run，`--apply` 才写库 |
 | `backfill_war_history.py` | 从 ClashKing 重建各自有部落最近 15 场普通战争详情；默认 dry-run，`--apply` 才写库 |
+| `backup_to_cos.py` | 通过 SQLite Online Backup API 创建一致快照，上传到已挂载的 COS；`.env` 永不进入备份 |
 
 ---
 
@@ -127,6 +128,25 @@ venv/bin/python scripts/backfill_war_history.py --apply
 实时同步保存的准备日或战斗日快照。生产执行前仍须先备份 `data/league.db`。
 
 脚本按部落幂等覆盖同一场战争并裁剪到最近 15 场；CWL 和不完整历史记录不会写入。
+
+---
+
+## `backup_to_cos.py` — 每日恢复备份
+
+`sky-admin-cos-backup.timer` 每天本机时间 03:15 调用本脚本。它会创建主库和阵型库的
+SQLite 一致性快照、Git bundle、非敏感恢复资料压缩包，并逐个校验 SHA-256 后写入
+`/sky_coc/rebuild/sky-admin/<UTC 时间戳>/`。最后写入的 `manifest.json` 是成功完成标记；
+没有该文件的目录不得用于恢复。
+
+首次安装或排障时可只做本地验证：
+
+```bash
+venv/bin/python scripts/backup_to_cos.py --dry-run
+```
+
+脚本只接受活动的 `fuse.cosfs` 挂载，避免 COS 挂载失效时误写本机目录。`.env` 与所有
+凭证均明确排除；恢复时需从安全的独立位置重新提供 `.env`。远端保留和清理由 COS 生命周期
+策略负责，脚本不会删除任何已上传的备份目录。
 
 ---
 

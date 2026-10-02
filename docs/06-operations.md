@@ -255,9 +255,11 @@ data/
 
 - [ ] 确认调度器正常运行：`sudo systemctl status sky-scheduler`
 - [ ] 确认各任务状态：`venv/bin/python scripts/scheduler.py --list`
+- [ ] 确认每日 COS 备份计时器正常：`sudo systemctl status sky-admin-cos-backup.timer`
+- [ ] 确认上一份 COS 备份目录含 `manifest.json` 和 `SHA256SUMS`
 - [ ] 检查退部对账统计（退部人数是否异常）
 - [ ] 腾讯文档 Refresh Token 到期前重新授权（官方有效期 1 年）
-- [ ] 定期备份 `data/league.db`
+- [ ] 定期确认 COS 生命周期策略已按预期保留和清理备份；备份脚本本身不会删除远端对象
 - [ ] 修改调度相关代码后重启：`sudo systemctl restart sky-scheduler`
 
 ---

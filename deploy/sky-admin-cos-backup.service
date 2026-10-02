@@ -1,0 +1,18 @@
+[Unit]
+Description=Sky Admin daily COS backup
+Wants=network-online.target
+After=network-online.target sky-coc-cosfs.service
+Requires=sky-coc-cosfs.service
+ConditionPathIsMountPoint=/sky_coc
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/YANG/sky-admin
+Environment="PATH=/home/ubuntu/YANG/sky-admin/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="SKY_ADMIN_ENV=production"
+ExecStartPre=/usr/bin/mountpoint -q /sky_coc
+ExecStart=/home/ubuntu/YANG/sky-admin/venv/bin/python scripts/backup_to_cos.py
+StandardOutput=append:/var/log/sky-admin-cos-backup.log
+StandardError=append:/var/log/sky-admin-cos-backup-error.log

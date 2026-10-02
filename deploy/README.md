@@ -459,9 +459,46 @@ sudo tail -f /var/log/sky-scheduler-error.log
 | FastAPI 错误 | `/var/log/sky-admin-error.log` | 应用错误日志 |
 | 调度器日志 | `/var/log/sky-scheduler.log` | 调度器标准输出日志 |
 | 调度器错误 | `/var/log/sky-scheduler-error.log` | 调度器错误日志 |
+| COS 备份日志 | `/var/log/sky-admin-cos-backup.log` | 每日恢复备份标准输出 |
+| COS 备份错误 | `/var/log/sky-admin-cos-backup-error.log` | 每日恢复备份错误输出 |
 | Nginx 访问日志 | `/var/log/nginx/sky-admin-access.log` | 请求记录 |
 | Nginx 错误日志 | `/var/log/nginx/sky-admin-error.log` | Nginx 错误 |
 | SSL 证书 | `/etc/letsencrypt/live/api.skycoc.cc/` | HTTPS 证书 |
+
+### 7.1 每日 COS 恢复备份
+
+当 `/sky_coc` 已由 `sky-coc-cosfs.service` 挂载后，安装仓库内的 service 和 timer 模板：
+
+```bash
+sudo install -d -m 0755 /etc/systemd/system/sky-coc-cosfs.service.d
+sudo install -m 0644 deploy/sky-coc-cosfs-backup.conf /etc/systemd/system/sky-coc-cosfs.service.d/backup.conf
+sudo install -m 0644 deploy/sky-admin-cos-backup.service /etc/systemd/system/
+sudo install -m 0644 deploy/sky-admin-cos-backup.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl restart sky-coc-cosfs.service
+sudo systemctl enable --now sky-admin-cos-backup.timer
+```
+
+计时器每天本机时间 03:15 执行；若主机当时关闭，`Persistent=true` 会在下次启动后补跑一次。
+备份目录为 `/sky_coc/rebuild/sky-admin/<UTC 时间戳>/`，含 SQLite 一致性快照、Git bundle、
+恢复资料、`SHA256SUMS` 和最后写入的 `manifest.json`。脚本只在该路径确认为活动
+`fuse.cosfs` 挂载时运行，`.env` 和所有密钥均不上传。
+
+挂载 drop-in 把 COSFS 的 `ensure_diskfree` 从 10GB 调整到 1GB。它仍为本地根盘保留空间，
+同时避免小于 10GB 空闲时所有上传都被 COSFS 拒绝；主机根盘应继续保有至少 1GB 空闲空间。
+
+首次安装后立即验证一次：
+
+```bash
+sudo systemctl start sky-admin-cos-backup.service
+sudo systemctl --no-pager --full status sky-admin-cos-backup.service sky-admin-cos-backup.timer
+```
+
+恢复前先下载完整目录并执行 `sha256sum -c SHA256SUMS`，然后核验 SQLite：
+
+```bash
+venv/bin/python -c 'import sqlite3; db=sqlite3.connect("file:league.db?mode=ro", uri=True); print(db.execute("PRAGMA integrity_check").fetchone()[0])'
+```
 
 ---
 
