@@ -106,36 +106,41 @@
             <text class="empty-hint">{{ nonActiveSummary }}</text>
           </view>
 
-          <view v-for="team in activeTeams" :key="team.clan_tag" class="team-card">
+          <view v-for="team in activeTeams" :key="team.clan_tag" class="team-card" :class="{ collapsed: isTeamCollapsed(team) }">
             <view class="team-header">
               <view class="team-identity">
                 <text class="category-badge" :class="'category-' + team.category">{{ categoryLabel(team.category) }}</text>
                 <text class="team-name">{{ team.team_name || team.team_alias }}</text>
                 <text class="team-alias">{{ team.team_alias }}</text>
               </view>
-              <text class="countdown" :class="urgencyClass(team.end_time)">{{ countdownLabel(team.end_time) }}</text>
-            </view>
-
-            <view class="match-row">
-              <text>第{{ team.round || '-' }}场</text>
-              <text class="opponent">VS {{ team.opponent ? team.opponent.name : '-' }}</text>
-              <text class="attack-progress">{{ team.attacked_count || 0 }}/{{ team.team_size || 0 }}已出刀</text>
-            </view>
-            <view v-if="team.error" class="team-warning">{{ team.error }}（已保留最近数据）</view>
-
-            <view v-if="team.pending_count" class="pending-section">
-              <view class="pending-title-row">
-                <text class="pending-title">未出刀成员</text>
-                <text class="pending-count">{{ team.pending_count }}人</text>
-              </view>
-              <view v-for="member in team.pending_members" :key="member.player_tag" class="member-row">
-                <text class="member-position">{{ member.position }}</text>
-                <text class="member-name">{{ member.name }}</text>
-                <text class="member-th">TH{{ member.town_hall_level || '-' }}</text>
-                <text class="member-tag">{{ member.player_tag }}</text>
+              <view class="team-header-actions">
+                <text class="countdown" :class="urgencyClass(team.end_time)">{{ countdownLabel(team.end_time) }}</text>
+                <text class="collapse-btn" @tap.stop="toggleTeam(team)">{{ isTeamCollapsed(team) ? '展开⌄' : '收起⌃' }}</text>
               </view>
             </view>
-            <view v-else class="all-attacked">全员已出刀</view>
+
+            <template v-if="!isTeamCollapsed(team)">
+              <view class="match-row">
+                <text>第{{ team.round || '-' }}场</text>
+                <text class="opponent">VS {{ team.opponent ? team.opponent.name : '-' }}</text>
+                <text class="attack-progress">{{ team.attacked_count || 0 }}/{{ team.team_size || 0 }}已出刀</text>
+              </view>
+              <view v-if="team.error" class="team-warning">{{ team.error }}（已保留最近数据）</view>
+
+              <view v-if="team.pending_count" class="pending-section">
+                <view class="pending-title-row">
+                  <text class="pending-title">未出刀成员</text>
+                  <text class="pending-count">{{ team.pending_count }}人</text>
+                </view>
+                <view v-for="member in team.pending_members" :key="member.player_tag" class="member-row">
+                  <text class="member-position">{{ member.position }}</text>
+                  <text class="member-name">{{ member.name }}</text>
+                  <text class="member-th">TH{{ member.town_hall_level || '-' }}</text>
+                  <text class="member-tag">{{ member.player_tag }}</text>
+                </view>
+              </view>
+              <view v-else class="all-attacked">全员已出刀</view>
+            </template>
           </view>
 
           <view v-if="teams.length" class="status-footer">{{ nonActiveSummary }}</view>
@@ -165,6 +170,7 @@ export default {
       updatedAt: '',
       summary: {},
       teams: [],
+      collapsedTeams: {},
       arrivalLoading: false,
       arrivalError: '',
       arrivalPeriod: '',
@@ -179,7 +185,16 @@ export default {
     }
   },
   computed: {
-    activeTeams() { return this.teams.filter(team => team.status === 'in_war') },
+    activeTeams() {
+      return this.teams
+        .filter(team => team.status === 'in_war')
+        .slice()
+        .sort((left, right) => {
+          const leftIndex = left.team_index == null ? Number.MAX_SAFE_INTEGER : Number(left.team_index)
+          const rightIndex = right.team_index == null ? Number.MAX_SAFE_INTEGER : Number(right.team_index)
+          return leftIndex - rightIndex
+        })
+    },
     periodLabel() { return this.period ? `${this.period.slice(0, 4)}年${Number(this.period.slice(5))}月` : '-' },
     arrivalPeriodLabel() { return this.arrivalPeriod ? `${this.arrivalPeriod.slice(0, 4)}年${Number(this.arrivalPeriod.slice(5))}月` : '-' },
     arrivalMembers() {
@@ -211,6 +226,12 @@ export default {
   },
   beforeDestroy() { this.stopTimers() },
   methods: {
+    isTeamCollapsed(team) { return Boolean(this.collapsedTeams[team.clan_tag]) },
+    toggleTeam(team) {
+      const clanTag = team.clan_tag
+      if (!clanTag) return
+      this.$set(this.collapsedTeams, clanTag, !this.isTeamCollapsed(team))
+    },
     setActiveView(view) {
       this.activeView = view
       this.$emit('view-change', view)
@@ -329,7 +350,7 @@ export default {
 .summary-metrics { margin-top: 20rpx; display: flex; }.summary-metric { flex: 1; display: flex; flex-direction: column; align-items: center; }.metric-number { color: #f0f0f5; font-size: 34rpx; font-weight: 600; }.warning-number { color: #fdcb6e; }.success-number { color: #55c99b !important; }.missing-number { color: #ff7675 !important; }.extra-number { color: #55c99b !important; }.metric-label { margin-top: 5rpx; color: #747c91; font-size: 21rpx; }.updated-at { display: block; margin-top: 18rpx; color: #596178; font-size: 20rpx; text-align: center; }
 .cache-warning, .team-warning { padding: 12rpx 15rpx; border-radius: 8rpx; color: #fdcb6e; background: rgba(253,203,110,.1); font-size: 21rpx; line-height: 1.5; }.cache-warning { margin-bottom: 18rpx; }.team-warning { margin: 0 18rpx 16rpx; }
 .empty-card { padding: 80rpx 20rpx; display: flex; flex-direction: column; align-items: center; }.empty-title { color: #aab4c8; font-size: 27rpx; }.empty-hint { margin-top: 12rpx; color: #66708a; font-size: 22rpx; }
-.team-card { overflow: hidden; }.team-header { min-height: 76rpx; padding: 14rpx 18rpx; display: flex; align-items: center; box-sizing: border-box; border-bottom: 1rpx solid #282844; }.team-identity { min-width: 0; display: flex; align-items: center; }.category-badge { flex-shrink: 0; margin-right: 10rpx; padding: 3rpx 9rpx; border-radius: 6rpx; color: #9fc9ff; background: rgba(74,144,217,.18); font-size: 20rpx; }.category-shell { color: #d9b8ff; background: rgba(162,111,212,.16); }.team-name { max-width: 230rpx; overflow: hidden; color: #f0f0f5; font-size: 27rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.team-alias { flex-shrink: 0; margin-left: 8rpx; color: #66708a; font-size: 20rpx; }.countdown { margin-left: auto; flex-shrink: 0; color: #74b9ff; font-size: 22rpx; }.countdown.warning { color: #fdcb6e; }.countdown.urgent { color: #ff7675; font-weight: 600; }
+.team-card { overflow: hidden; }.team-card.collapsed .team-header { border-bottom: 0; }.team-header { min-height: 76rpx; padding: 14rpx 18rpx; display: flex; align-items: center; box-sizing: border-box; border-bottom: 1rpx solid #282844; }.team-identity { min-width: 0; display: flex; align-items: center; }.category-badge { flex-shrink: 0; margin-right: 10rpx; padding: 3rpx 9rpx; border-radius: 6rpx; color: #9fc9ff; background: rgba(74,144,217,.18); font-size: 20rpx; }.category-shell { color: #d9b8ff; background: rgba(162,111,212,.16); }.team-name { max-width: 230rpx; overflow: hidden; color: #f0f0f5; font-size: 27rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.team-alias { flex-shrink: 0; margin-left: 8rpx; color: #66708a; font-size: 20rpx; }.team-header-actions { margin-left: auto; flex-shrink: 0; display: flex; align-items: center; }.countdown { flex-shrink: 0; color: #74b9ff; font-size: 22rpx; }.countdown.warning { color: #fdcb6e; }.countdown.urgent { color: #ff7675; font-weight: 600; }.collapse-btn { margin-left: 12rpx; padding: 9rpx 6rpx 9rpx 12rpx; color: #8d95a8; font-size: 21rpx; }
 .match-row { padding: 16rpx 18rpx; display: flex; align-items: center; color: #8d95a8; font-size: 22rpx; }.opponent { margin-left: 18rpx; color: #d8dce8; }.attack-progress { margin-left: auto; color: #74b9ff; }
 .pending-section { margin: 0 18rpx 18rpx; overflow: hidden; border: 1rpx solid #332f42; border-radius: 9rpx; }.pending-title-row { padding: 12rpx 14rpx; display: flex; align-items: center; background: #202037; }.pending-title { color: #d8dce8; font-size: 23rpx; }.pending-count { margin-left: auto; color: #fdcb6e; font-size: 22rpx; }.member-row { min-height: 62rpx; padding: 8rpx 14rpx; display: flex; align-items: center; box-sizing: border-box; border-top: 1rpx solid #292943; }.member-position { width: 44rpx; color: #74b9ff; font-size: 22rpx; }.member-name { min-width: 0; flex: 1; overflow: hidden; color: #f0f0f5; font-size: 24rpx; text-overflow: ellipsis; white-space: nowrap; }.member-th { margin-left: 10rpx; color: #aab4c8; font-size: 21rpx; }.member-tag { margin-left: 10rpx; color: #596178; font-size: 19rpx; }.all-attacked { margin: 0 18rpx 18rpx; padding: 18rpx; border-radius: 9rpx; color: #00b894; background: rgba(0,184,148,.08); font-size: 24rpx; text-align: center; }
 .status-footer { margin: 6rpx 0 20rpx; color: #66708a; font-size: 21rpx; text-align: center; }.bottom-space { height: 100rpx; }
