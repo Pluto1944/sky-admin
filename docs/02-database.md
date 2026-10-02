@@ -72,7 +72,7 @@ erDiagram
         TEXT account_type
         TEXT league_type
         INTEGER rank_order
-        TEXT team_name
+        TEXT team_info
         TEXT player_tag
     }
 
