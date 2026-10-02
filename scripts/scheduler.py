@@ -161,8 +161,9 @@ def _archive_current_war(
     item: dict,
     keep_ended: int = 15,
     cleanup_active: bool = True,
+    affected_player_tags: set[str] | None = None,
 ) -> bool:
-    """把普通战争快照幂等归档，并仅保留该部落最近若干场已结束战争。"""
+    """归档普通战争；可收集事实发生变化的玩家标签。"""
     from modules.coc_sync.war_history import is_archivable_war, war_history_record
 
     if not is_archivable_war(item):
@@ -172,9 +173,11 @@ def _archive_current_war(
     from modules.player.repository import PlayerRepository
     from modules.player.service import PlayerService
 
-    activity_tags = materialize_war_member_facts(db.conn, item, record["updated_at"])
+    fact_changes = materialize_war_member_facts(db.conn, item, record["updated_at"])
+    if affected_player_tags is not None:
+        affected_player_tags.update(fact_changes.changed_player_tags)
     player_service = PlayerService(PlayerRepository(db.conn))
-    for player_tag in activity_tags:
+    for player_tag in fact_changes.activity_player_tags:
         player_service.mark_activity(player_tag, record["updated_at"], "war_attack")
     db.conn.execute(
         """INSERT INTO war_history_cache
@@ -264,6 +267,7 @@ def _run_current_wars(force: bool = False, now: datetime | None = None) -> dict:
     items = CocSyncService().fetch_current_wars(due_clans)
     success = 0
     failed = 0
+    affected_player_tags: set[str] = set()
     for item in items:
         previous = cached_by_tag.get(item["clan_tag"], {})
         failure_count = (
@@ -313,13 +317,22 @@ def _run_current_wars(force: bool = False, now: datetime | None = None) -> dict:
             ),
         )
         if item["status"] != "error":
-            _archive_current_war(db, item)
+            # 进行中战争的事实用于活动观察和历史快照，但成员战斗摘要只统计
+            # 已结束战争；因此仅在结束状态收集需要重算的账号。
+            _archive_current_war(
+                db,
+                item,
+                affected_player_tags=(
+                    affected_player_tags if item.get("status") == "war_ended" else None
+                ),
+            )
         if item["status"] == "error":
             failed += 1
         else:
             success += 1
-    from modules.player.member_stats import refresh_member_combat_stats
-    refresh_member_combat_stats(db.conn, current_time)
+    if affected_player_tags:
+        from modules.player.member_stats import refresh_member_combat_stats_for_players
+        refresh_member_combat_stats_for_players(db.conn, affected_player_tags, current_time)
     db.conn.commit()
     db.close()
 

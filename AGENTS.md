@@ -142,9 +142,15 @@
 
 `scripts/scheduler.py` 是唯一的持续调度实现，状态存于 `sync_jobs`。当前任务为：
 
-- `current_wars`（5 分钟）；
+- `current_wars`（每 2 分钟检查，按部落状态限频）；
+- `cwl_live`（活跃期每 2 分钟）；
+- `cwl_assembly`（月初窗口每 5 分钟）；
 - `farm_stats`（30 分钟）；
 - `coc_sync`（6 小时）；
+- `player_details`（每天）；
+- `member_combat_stats`（每天，全量窗口过期校正）；
+- `capital_member_stats`（每 6 小时检查业务窗口）；
+- `clan_games_stats`（每 6 小时检查业务窗口）；
 - `war_results`（每天）；
 - `cwl`（每天触发，仅规则允许的日期实际抓取）；
 - `war_layout`（北京时间固定时刻，默认草稿）。

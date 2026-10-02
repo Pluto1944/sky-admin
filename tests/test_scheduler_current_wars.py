@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 import config
 import modules.coc_sync.service as service_module
+import modules.player.member_stats as member_stats_module
 from scripts.scheduler import _archive_current_war, _current_war_refresh_minutes, _run_current_wars
 from shared.db.connection import Database
 
@@ -45,6 +46,61 @@ def test_scheduler_writes_success_and_error_cache(tmp_path, monkeypatch):
     ]
     assert json.loads(rows[0]["data_json"])["error"] == "模拟失败"
     db.close()
+
+
+def _scheduler_war(status="in_war"):
+    return {
+        "clan_tag": "#OK", "clan_name": "成功部落", "category": "combat",
+        "status": status, "state": "warEnded" if status == "war_ended" else "inWar",
+        "war_type": "random", "team_size": 2, "attacks_per_member": 2,
+        "preparation_start_time": "20260927T000000.000Z",
+        "start_time": "20260927T230000.000Z", "end_time": "20260928T230000.000Z",
+        "opponent": {"tag": "#ENEMY", "name": "对手"},
+        "rows": [{"clan_member": {"player_tag": "#P1", "attacks": [
+            {"order": 1, "stars": 3, "target_position": 1},
+        ]}}],
+        "error": None, "synced_at": "2026-09-28T01:00:00+00:00",
+    }
+
+
+def test_current_war_only_refreshes_summary_after_ended_fact_changes(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "summary-refresh.sqlite3")
+    monkeypatch.setattr(config, "DB_PATH", db_path)
+    monkeypatch.setattr(config, "CLANS", [
+        {"tag": "#OK", "name": "成功部落", "category": "combat", "enabled": True},
+    ])
+    db = Database(db_path)
+    db.init_schema()
+    db.conn.execute(
+        "INSERT INTO accounts (player_tag, account_name) VALUES ('#P1', '甲')"
+    )
+    db.conn.commit()
+    db.close()
+
+    item = _scheduler_war("in_war")
+
+    class FakeService:
+        def fetch_current_wars(self, _clans):
+            return [item]
+
+    calls = []
+
+    def fake_refresh(conn, player_tags, now):
+        calls.append((set(player_tags), now))
+        return len(player_tags)
+
+    monkeypatch.setattr(service_module, "CocSyncService", FakeService)
+    monkeypatch.setattr(member_stats_module, "refresh_member_combat_stats_for_players", fake_refresh)
+
+    _run_current_wars(force=True, now=datetime(2026, 9, 28, 1, tzinfo=timezone.utc))
+    assert calls == []
+
+    item = _scheduler_war("war_ended")
+    _run_current_wars(force=True, now=datetime(2026, 9, 28, 1, 2, tzinfo=timezone.utc))
+    assert calls == [({"#P1"}, datetime(2026, 9, 28, 1, 2, tzinfo=timezone.utc))]
+
+    _run_current_wars(force=True, now=datetime(2026, 9, 28, 1, 4, tzinfo=timezone.utc))
+    assert len(calls) == 1
 
 
 def _seed_cache(db, tag, status, attempted_at, failure_count=0, start_time=None):

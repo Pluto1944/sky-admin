@@ -93,11 +93,11 @@
 - `cwl_live_*` 与 `league_results` 都涉及 CWL：前者保存联赛组/轮次/逐场详情，后者是个人聚合，
   不能互相替代。
 
-### 3.2 可优化但暂不合并的点
+### 3.2 已实施优化与待观察项
 
-1. `current_wars` 每次有任一部落到期就调用全量 `refresh_member_combat_stats()`；当前规模可接受，
-   但这是本地 SQLite 的写放大来源。若成员或战争量继续增长，应把重算收窄到受影响的
-   `player_tag`，每日任务仍保留全量窗口过期处理。
+1. `current_wars` 已改为：普通战进入 `war_ended` 且 `member_war_facts` 新增或变化时，才按受影响的
+   `player_tag` 重算成员摘要；进行中战争、相同结束快照和同步失败均不触发摘要写入。每日
+   `member_combat_stats` 保留全量窗口过期处理。
 2. 月末 `player_details` 与 `clan_games_stats` 可共享同轮玩家详情响应以降低请求数，但需要把两个
    独立失败边界改成共享批处理；在没有 API 限流或耗时证据前不建议改变。
 3. `member_war_facts`、CWL 实时缓存和贡献事实目前按业务历史保存，没有统一 TTL。当前体积很小，

@@ -8,8 +8,9 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Iterable
 from zoneinfo import ZoneInfo
 
 from modules.coc_sync.official.mapper import normalize_tag
@@ -17,6 +18,20 @@ from modules.coc_sync.war_history import war_history_key
 
 
 BUSINESS_TZ = ZoneInfo("Asia/Shanghai")
+
+
+@dataclass(frozen=True)
+class MemberWarFactChanges:
+    """一场战争物化后实际变化的成员事实。
+
+    ``changed_player_tags`` 驱动成员战斗摘要重算；
+    ``activity_player_tags`` 只表示本次观察到新增出刀，供活动时间记录使用。
+    两者不能混用：首次归档时成员事实都是新增的，但不应把整场结束战争
+    误判为本轮刚发生的出刀。
+    """
+
+    changed_player_tags: frozenset[str]
+    activity_player_tags: frozenset[str]
 
 
 def _int(value: Any) -> int:
@@ -87,19 +102,20 @@ def _effective_attack_orders(item: dict) -> set[int]:
 
 def materialize_war_member_facts(
     conn: sqlite3.Connection, item: dict, updated_at: str | None = None,
-) -> list[str]:
-    """幂等固化一场自有部落普通战的逐玩家事实，返回新增出刀的玩家。"""
+) -> MemberWarFactChanges:
+    """幂等固化一场自有部落普通战的逐玩家事实及变化集合。"""
     key = war_history_key(item)
     clan_tag = normalize_tag(item.get("clan_tag"))
     end_time = _iso(item.get("end_time"))
     if not key or not clan_tag or not end_time:
-        return []
+        return MemberWarFactChanges(frozenset(), frozenset())
     if item.get("war_type") == "cwl" or _int(item.get("attacks_per_member")) == 1:
-        return []
+        return MemberWarFactChanges(frozenset(), frozenset())
 
     timestamp = updated_at or item.get("synced_at") or datetime.now(timezone.utc).isoformat(timespec="seconds")
     effective_orders = _effective_attack_orders(item)
-    activity_tags: list[str] = []
+    changed_tags: set[str] = set()
+    activity_tags: set[str] = set()
     for row in item.get("rows") or []:
         member = row.get("clan_member") or {}
         player_tag = normalize_tag(member.get("player_tag"))
@@ -107,14 +123,26 @@ def materialize_war_member_facts(
             continue
         raw_attacks = member.get("attacks") or []
         effective = [attack for attack in raw_attacks if _int(attack.get("order")) in effective_orders]
-        observed = len(raw_attacks)
+        available_attacks = _int(item.get("attacks_per_member"))
+        actual_attacks = len(effective)
+        observed_attacks = len(raw_attacks)
+        three_stars = sum(1 for attack in effective if _int(attack.get("stars")) == 3)
         old = conn.execute(
-            """SELECT observed_attacks FROM member_war_facts
+            """SELECT end_time, status, category, available_attacks, actual_attacks,
+                      observed_attacks, three_stars
+               FROM member_war_facts
                WHERE clan_tag = ? AND war_key = ? AND player_tag = ?""",
             (clan_tag, key, player_tag),
         ).fetchone()
-        if old is not None and observed > _int(old["observed_attacks"]):
-            activity_tags.append(player_tag)
+        new_values = (
+            end_time, item.get("status") or "", item.get("category") or "normal",
+            available_attacks, actual_attacks, observed_attacks, three_stars,
+        )
+        old_values = tuple(old) if old is not None else None
+        if old_values == new_values:
+            continue
+        if old is not None and observed_attacks > _int(old["observed_attacks"]):
+            activity_tags.add(player_tag)
         conn.execute(
             """INSERT INTO member_war_facts
                (clan_tag, war_key, player_tag, end_time, status, category,
@@ -131,13 +159,13 @@ def materialize_war_member_facts(
                    updated_at = excluded.updated_at""",
             (
                 clan_tag, key, player_tag, end_time, item.get("status") or "",
-                item.get("category") or "normal", _int(item.get("attacks_per_member")),
-                len(effective), observed,
-                sum(1 for attack in effective if _int(attack.get("stars")) == 3),
+                item.get("category") or "normal", available_attacks,
+                actual_attacks, observed_attacks, three_stars,
                 timestamp,
             ),
         )
-    return activity_tags
+        changed_tags.add(player_tag)
+    return MemberWarFactChanges(frozenset(changed_tags), frozenset(activity_tags))
 
 
 def materialize_cached_war_facts(conn: sqlite3.Connection) -> int:
@@ -186,9 +214,44 @@ def refresh_member_combat_stats(
     """按玩家重建 90 天普通战与最近 3 个完整月 CWL 的轻量缓存。"""
     materialize_cached_war_facts(conn)
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    player_tags = [row["player_tag"] for row in conn.execute("SELECT player_tag FROM accounts")]
+    return _refresh_member_combat_stats_for_player_tags(conn, player_tags, current)
+
+
+def refresh_member_combat_stats_for_players(
+    conn: sqlite3.Connection,
+    player_tags: Iterable[str],
+    now: datetime | None = None,
+) -> int:
+    """只重建指定账号的成员战斗摘要，不扫描或物化其它历史战争。"""
+    requested_tags = set()
+    for tag in player_tags:
+        normalized = normalize_tag(tag)
+        if normalized:
+            requested_tags.add(normalized)
+    requested_tags = sorted(requested_tags)
+    if not requested_tags:
+        return 0
+    placeholders = ",".join("?" for _ in requested_tags)
+    existing_tags = [
+        row["player_tag"]
+        for row in conn.execute(
+            f"SELECT player_tag FROM accounts WHERE player_tag IN ({placeholders})",
+            requested_tags,
+        )
+    ]
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    return _refresh_member_combat_stats_for_player_tags(conn, existing_tags, current)
+
+
+def _refresh_member_combat_stats_for_player_tags(
+    conn: sqlite3.Connection, player_tags: list[str], current: datetime,
+) -> int:
+    """使用既定窗口口径重建指定账号的摘要；调用方负责事实物化边界。"""
+    if not player_tags:
+        return 0
     cutoff = (current - timedelta(days=90)).isoformat(timespec="seconds")
     periods = previous_complete_periods(current, 3)
-    player_tags = [row["player_tag"] for row in conn.execute("SELECT player_tag FROM accounts")]
 
     placeholders = ",".join("?" for _ in periods)
     cwl_by_player: dict[str, dict] = defaultdict(

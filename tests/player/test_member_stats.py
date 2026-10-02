@@ -7,6 +7,7 @@ from modules.player.member_stats import (
     materialize_war_member_facts,
     member_summary_map,
     refresh_member_combat_stats,
+    refresh_member_combat_stats_for_players,
 )
 from modules.player.repository import PlayerRepository
 
@@ -75,6 +76,42 @@ def test_cross_clan_war_and_cwl_summary_uses_player_tag(db):
     assert summaries["#P2"]["war_recent_15"]["attacks"] == 0
     assert summaries["#P1"]["cwl_recent_3m"]["attacks"] == 7
     assert summaries["#P1"]["cwl_recent_3m"]["three_star_rate"] == 57.1
+
+
+def test_war_fact_changes_distinguish_first_archive_and_new_attack(db):
+    _seed_accounts(db)
+    first = materialize_war_member_facts(db.conn, _war())
+    assert first.changed_player_tags == frozenset({"#P1", "#P2"})
+    assert first.activity_player_tags == frozenset()
+
+    unchanged = materialize_war_member_facts(db.conn, _war())
+    assert unchanged.changed_player_tags == frozenset()
+    assert unchanged.activity_player_tags == frozenset()
+
+    corrected = _war()
+    corrected["rows"][0]["clan_member"]["attacks"].append(
+        {"order": 2, "stars": 2, "target_position": 2}
+    )
+    changed = materialize_war_member_facts(db.conn, corrected)
+    assert changed.changed_player_tags == frozenset({"#P1"})
+    assert changed.activity_player_tags == frozenset({"#P1"})
+
+
+def test_selected_member_combat_refresh_only_writes_affected_accounts(db):
+    _seed_accounts(db)
+    materialize_war_member_facts(db.conn, _war())
+
+    count = refresh_member_combat_stats_for_players(
+        db.conn, {"#P1"}, datetime(2026, 10, 3, tzinfo=timezone.utc),
+    )
+
+    assert count == 1
+    rows = db.conn.execute(
+        "SELECT player_tag, war_count, war_attacks FROM member_combat_stats_cache ORDER BY player_tag"
+    ).fetchall()
+    assert [(row["player_tag"], row["war_count"], row["war_attacks"]) for row in rows] == [
+        ("#P1", 1, 1),
+    ]
 
 
 def test_member_api_derives_public_fields_and_hides_raw(db, monkeypatch):
