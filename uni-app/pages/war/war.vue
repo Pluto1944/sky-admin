@@ -238,6 +238,19 @@ function currentBusinessPeriod() {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`
 }
 
+function consumeReturnTopTab() {
+  const app = getApp()
+  if (!app || !app.globalData) return ''
+  const tab = app.globalData.warReturnTopTab || ''
+  app.globalData.warReturnTopTab = ''
+  return tab
+}
+
+function rememberReturnTopTab(tab) {
+  const app = getApp()
+  if (app && app.globalData) app.globalData.warReturnTopTab = tab
+}
+
 export default {
   components: { TopBar, CwlCheckIn },
   data() {
@@ -364,11 +377,8 @@ export default {
     else this.fetchCurrentWars()
   },
   onShow() {
-    const storedTab = uni.getStorageSync('war_active_top_tab')
-    if (['clan-war', 'league', 'check-in'].indexOf(storedTab) >= 0) {
-      this.activeTopTab = storedTab
-      uni.removeStorageSync('war_active_top_tab')
-    }
+    const returnTab = consumeReturnTopTab()
+    if (['clan-war', 'league', 'check-in'].indexOf(returnTab) >= 0) this.activeTopTab = returnTab
     this.startTimers()
     if (this.activeTopTab === 'check-in') this.$nextTick(() => { if (this.$refs.checkIn) this.$refs.checkIn.startTimers() })
     if (this.activeTopTab === 'league' && this.leagueClans.length && this.isCurrentLeaguePeriod) this.fetchCwlLive(this.leaguePeriod)
@@ -556,7 +566,7 @@ export default {
     },
     openLeagueDetail(clan) {
       if (!clan.clan_tag) return
-      uni.setStorageSync('war_active_top_tab', 'league')
+      rememberReturnTopTab('league')
       uni.navigateTo({ url: `/pages/war/cwl-detail?clan_tag=${encodeURIComponent(clan.clan_tag)}&period=${encodeURIComponent(this.leaguePeriod)}&view=war-day` })
     },
     categoryLabel(key) {

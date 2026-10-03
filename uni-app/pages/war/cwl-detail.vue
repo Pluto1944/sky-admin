@@ -158,6 +158,11 @@ function currentBusinessPeriod() {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`
 }
 
+function rememberLeagueList() {
+  const app = getApp()
+  if (app && app.globalData) app.globalData.warReturnTopTab = 'league'
+}
+
 export default {
   components: { TopBar },
   data() {
@@ -191,11 +196,11 @@ export default {
     this.period = (options && options.period) || ''
     this.activeView = options && options.view === 'overview' ? 'overview' : 'war-day'
     this.requestedRound = Number((options && options.round) || 0) || null
-    uni.setStorageSync('war_active_top_tab', 'league')
+    rememberLeagueList()
     this.fetchDetail()
   },
   onShow() {
-    uni.setStorageSync('war_active_top_tab', 'league')
+    rememberLeagueList()
     this.stopTimer()
     if (this.isCurrentPeriod) {
       if (this.detail) this.fetchDetail()

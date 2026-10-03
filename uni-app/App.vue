@@ -41,7 +41,8 @@ export default {
     // 域名备案已通过，使用正式域名访问后端
     apiBase: 'https://api.skycoc.cc',
     userInfo: null,
-    isLoggedIn: false
+    isLoggedIn: false,
+    warReturnTopTab: ''
   }
 }
 </script>
