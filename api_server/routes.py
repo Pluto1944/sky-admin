@@ -665,7 +665,7 @@ def cwl_live(period: Optional[str] = None, db: Database = Depends(get_db)):
 
 @router.get("/clan/cwl-check-in")
 def cwl_check_in(db: Database = Depends(get_db)):
-    """返回当月各联赛队伍的当前战斗日和未出刀成员。"""
+    """返回当月各队当前未出刀成员及此前已结束场次漏刀记录。"""
     period = _current_cwl_live_period()
     teams = _cwl_live_teams(db, period)
     items = []
@@ -695,6 +695,7 @@ def cwl_check_in(db: Database = Depends(get_db)):
                 "attacked_count": 0,
                 "pending_count": 0,
                 "pending_members": [],
+                "missed_rounds": [],
                 "updated_at": (cache or {}).get("updated_at"),
                 "error": "联赛队伍缺少部落标签" if not clan_tag else (cache or {}).get("error"),
             }

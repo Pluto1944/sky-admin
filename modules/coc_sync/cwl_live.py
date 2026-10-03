@@ -316,12 +316,28 @@ def build_team_rounds(group: dict, wars_by_tag: dict[str, dict], clan_tag: str) 
     return rounds
 
 
-def build_cwl_attack_reminder(group: dict, wars_by_tag: dict[str, dict]) -> dict:
-    """生成单支联赛队伍的当前战斗日提醒。
+def _round_pending_members(round_item: dict) -> list[dict]:
+    members = [
+        row.get("clan_member")
+        for row in round_item.get("rows") or []
+        if row.get("clan_member")
+    ]
+    pending = [
+        {
+            "player_tag": member.get("player_tag"),
+            "name": member.get("name"),
+            "town_hall_level": member.get("town_hall_level"),
+            "position": member.get("position"),
+        }
+        for member in members
+        if not member.get("attack")
+    ]
+    pending.sort(key=lambda member: member.get("position") or 999)
+    return pending
 
-    只有当前实际上阵的成员才参与“未出刀”判定；准备日和已结束
-    轮次不产生未出刀成员。
-    """
+
+def build_cwl_attack_reminder(group: dict, wars_by_tag: dict[str, dict]) -> dict:
+    """生成单支联赛队伍的当前战斗日提醒及已结束轮次漏刀记录。"""
     clan_tag = group.get("clan_tag")
     rounds = build_team_rounds(group, wars_by_tag, clan_tag)
     active = next((item for item in rounds if item.get("status") == "in_war"), None)
@@ -347,17 +363,25 @@ def build_cwl_attack_reminder(group: dict, wars_by_tag: dict[str, dict]) -> dict
             for row in active.get("rows") or []
             if row.get("clan_member")
         ]
-        pending_members = [
-            {
-                "player_tag": member.get("player_tag"),
-                "name": member.get("name"),
-                "town_hall_level": member.get("town_hall_level"),
-                "position": member.get("position"),
-            }
-            for member in members
-            if not member.get("attack")
-        ]
-        pending_members.sort(key=lambda member: member.get("position") or 999)
+        pending_members = _round_pending_members(active)
+
+    selected_round = (selected or {}).get("round")
+    missed_rounds = []
+    for round_item in rounds:
+        if round_item.get("status") != "war_ended":
+            continue
+        if selected_round is not None and round_item.get("round", 0) >= selected_round:
+            continue
+        missed_members = _round_pending_members(round_item)
+        if not missed_members:
+            continue
+        missed_rounds.append({
+            "round": round_item.get("round"),
+            "opponent": round_item.get("opponent"),
+            "end_time": round_item.get("end_time"),
+            "missed_count": len(missed_members),
+            "missed_members": missed_members,
+        })
 
     team_size = int((selected or {}).get("team_size") or len(members) or 0)
     return {
@@ -377,6 +401,7 @@ def build_cwl_attack_reminder(group: dict, wars_by_tag: dict[str, dict]) -> dict
         "attacked_count": len(members) - len(pending_members) if active else 0,
         "pending_count": len(pending_members),
         "pending_members": pending_members,
+        "missed_rounds": missed_rounds,
         "updated_at": (selected or {}).get("synced_at") or group.get("synced_at"),
     }
 

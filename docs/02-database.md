@@ -42,8 +42,10 @@
 表同时承载当前月和历史月。
 
 `raw_status` 取 `collecting`、`complete`、`incomplete`。只有分组所列全部战争均存在且为最终
-`war_ended` 时，才可替换对应队伍的 `league_results` 投影。`league_results` 因此可删除并重建，
-但在当前规模下保留以服务编排和快速查询。详细规则见 [`12-league-stats.md`](12-league-stats.md)。
+`war_ended` 时，才可替换对应队伍的 `league_results` 投影。该投影除星数和实际进攻外，还保存
+`appearances`（进入阵容场次）与 `missed_attacks`（漏刀次数）；旧月份未重建时两列为 `NULL`，
+不能按零漏刀处理。`league_results` 可删除并重建，但在当前规模下保留以服务编排和快速查询。
+详细规则见 [`12-league-stats.md`](12-league-stats.md)。
 
 ## 不可破坏的约束
 

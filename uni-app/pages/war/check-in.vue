@@ -141,6 +141,25 @@
                 <view v-else class="all-attacked">全员已出刀</view>
               </template>
               <view v-else class="team-status-placeholder">{{ teamStatusPlaceholder(team.status) }}</view>
+              <view v-if="team.missed_rounds && team.missed_rounds.length" class="missed-history-section">
+                <view class="missed-history-title-row">
+                  <text class="missed-history-title">已结束场次漏刀</text>
+                  <text class="missed-history-total">{{ historyMissedCount(team) }}人次</text>
+                </view>
+                <view v-for="round in team.missed_rounds" :key="round.round" class="missed-history-round">
+                  <view class="missed-history-round-title">
+                    <text>第{{ round.round }}场</text>
+                    <text class="missed-history-opponent">VS {{ round.opponent ? round.opponent.name : '-' }}</text>
+                    <text class="missed-history-count">{{ round.missed_count }}人</text>
+                  </view>
+                  <view v-for="member in round.missed_members" :key="member.player_tag" class="missed-member-row">
+                    <text class="missed-member-position">{{ member.position }}</text>
+                    <text class="missed-member-name">{{ member.name }}</text>
+                    <text class="missed-member-th">TH{{ member.town_hall_level || '-' }}</text>
+                    <text class="missed-member-tag">{{ member.player_tag }}</text>
+                  </view>
+                </view>
+              </view>
               <view v-if="team.error" class="team-warning">{{ team.error }}（已保留最近数据）</view>
             </template>
           </view>
@@ -232,6 +251,9 @@ export default {
       const clanTag = team.clan_tag
       if (!clanTag) return
       this.$set(this.collapsedTeams, clanTag, !this.isTeamCollapsed(team))
+    },
+    historyMissedCount(team) {
+      return (team.missed_rounds || []).reduce((total, round) => total + Number(round.missed_count || 0), 0)
     },
     setActiveView(view) {
       this.activeView = view
@@ -371,6 +393,7 @@ export default {
 .team-card { overflow: hidden; }.team-card.collapsed .team-header { border-bottom: 0; }.team-header { min-height: 76rpx; padding: 14rpx 18rpx; display: flex; align-items: center; box-sizing: border-box; border-bottom: 1rpx solid #282844; }.team-identity { min-width: 0; display: flex; align-items: center; }.category-badge { flex-shrink: 0; margin-right: 10rpx; padding: 3rpx 9rpx; border-radius: 6rpx; color: #9fc9ff; background: rgba(74,144,217,.18); font-size: 20rpx; }.category-shell { color: #d9b8ff; background: rgba(162,111,212,.16); }.team-name { max-width: 230rpx; overflow: hidden; color: #f0f0f5; font-size: 27rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.team-alias { flex-shrink: 0; margin-left: 8rpx; color: #66708a; font-size: 20rpx; }.team-header-actions { margin-left: auto; flex-shrink: 0; display: flex; align-items: center; }.countdown { flex-shrink: 0; color: #74b9ff; font-size: 22rpx; }.countdown.inactive { color: #8d95a8; }.countdown.warning { color: #fdcb6e; }.countdown.urgent { color: #ff7675; font-weight: 600; }.collapse-btn { margin-left: 12rpx; padding: 9rpx 6rpx 9rpx 12rpx; color: #8d95a8; font-size: 21rpx; }
 .match-row { padding: 16rpx 18rpx; display: flex; align-items: center; color: #8d95a8; font-size: 22rpx; }.opponent { margin-left: 18rpx; color: #d8dce8; }.attack-progress { margin-left: auto; color: #74b9ff; }
 .pending-section { margin: 0 18rpx 18rpx; overflow: hidden; border: 1rpx solid rgba(255,118,117,.36); border-radius: 9rpx; }.pending-title-row { padding: 12rpx 14rpx; display: flex; align-items: center; background: rgba(255,118,117,.10); }.pending-title { color: #ff9b97; font-size: 23rpx; }.pending-count { margin-left: auto; color: #ff7675; font-size: 22rpx; font-weight: 600; }.member-row { min-height: 62rpx; padding: 8rpx 14rpx; display: flex; align-items: center; box-sizing: border-box; border-top: 1rpx solid rgba(255,118,117,.18); background: rgba(255,118,117,.06); }.member-position { width: 44rpx; color: #ff8a86; font-size: 22rpx; font-weight: 600; }.member-name { min-width: 0; flex: 1; overflow: hidden; color: #ff7675; font-size: 24rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.member-th { margin-left: 10rpx; color: #ffaaa7; font-size: 21rpx; }.member-tag { margin-left: 10rpx; color: #a86569; font-size: 19rpx; }.all-attacked { margin: 0 18rpx 18rpx; padding: 18rpx; border-radius: 9rpx; color: #00b894; background: rgba(0,184,148,.08); font-size: 24rpx; text-align: center; }
+.missed-history-section { margin: 0 18rpx 18rpx; overflow: hidden; border: 1rpx solid #30304a; border-radius: 9rpx; background: #15152a; }.missed-history-title-row { padding: 12rpx 14rpx; display: flex; align-items: center; background: #202037; }.missed-history-title { color: #aab4c8; font-size: 23rpx; }.missed-history-total { margin-left: auto; color: #7d8498; font-size: 21rpx; }.missed-history-round { border-top: 1rpx solid #292943; }.missed-history-round-title { min-height: 56rpx; padding: 8rpx 14rpx; display: flex; align-items: center; box-sizing: border-box; color: #8d95a8; font-size: 21rpx; }.missed-history-opponent { min-width: 0; margin-left: 16rpx; overflow: hidden; color: #aab4c8; text-overflow: ellipsis; white-space: nowrap; }.missed-history-count { margin-left: auto; padding-left: 12rpx; flex-shrink: 0; color: #8d95a8; }.missed-member-row { min-height: 58rpx; padding: 7rpx 14rpx; display: flex; align-items: center; box-sizing: border-box; border-top: 1rpx solid #252540; color: #8d95a8; background: #18182d; }.missed-member-position { width: 44rpx; color: #747c91; font-size: 21rpx; }.missed-member-name { min-width: 0; flex: 1; overflow: hidden; color: #c1c7d3; font-size: 23rpx; text-overflow: ellipsis; white-space: nowrap; }.missed-member-th { margin-left: 10rpx; color: #8d95a8; font-size: 20rpx; }.missed-member-tag { margin-left: 10rpx; color: #596178; font-size: 18rpx; }
 .team-status-placeholder { margin: 0 18rpx 18rpx; padding: 22rpx 18rpx; border-radius: 9rpx; color: #8d95a8; background: #141428; font-size: 23rpx; text-align: center; }
 .status-footer { margin: 6rpx 0 20rpx; color: #66708a; font-size: 21rpx; text-align: center; }.bottom-space { height: 100rpx; }
 .arrival-team-card { cursor: pointer; }.arrival-arrow { margin-left: auto; color: #66708a; font-size: 38rpx; line-height: 1; }.arrival-card-body { padding: 20rpx 12rpx 14rpx; display: flex; }.arrival-count { flex: 1; display: flex; flex-direction: column; align-items: center; color: #747c91; font-size: 20rpx; }.arrival-count-number { margin-bottom: 4rpx; color: #f0f0f5; font-size: 29rpx; font-weight: 600; }.arrival-card-footer { padding: 0 18rpx 16rpx; display: flex; justify-content: space-between; color: #66708a; font-size: 20rpx; }

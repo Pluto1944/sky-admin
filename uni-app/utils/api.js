@@ -167,7 +167,7 @@ export function getCwlLive(period) {
   return request(`/api/clan/cwl-live${query}`)
 }
 
-/** 获取当月各联赛队伍的当前战斗日和未出刀成员。 */
+/** 获取当月各联赛队伍的当前战斗日未出刀成员及已结束场次漏刀记录。 */
 export function getCwlCheckIn() {
   return request('/api/clan/cwl-check-in')
 }

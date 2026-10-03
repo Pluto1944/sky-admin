@@ -107,3 +107,34 @@ def test_attack_reminder_only_counts_current_lineup_members_without_attack():
         "town_hall_level": 17,
         "position": 2,
     }]
+    assert reminder["missed_rounds"] == []
+
+
+def test_attack_reminder_keeps_missed_attacks_from_earlier_ended_rounds():
+    group = normalize_cwl_group(league_group(), team(), "2026-09-05T00:00:00+00:00")
+    current = league_war_two()
+    current["state"] = "inWar"
+    wars = {
+        "#W1": normalize_cwl_war(
+            league_war_one(state="warEnded"), "#W1", "2026-09-04T00:00:00+00:00"
+        ),
+        "#W2": normalize_cwl_war(current, "#W2", "2026-09-05T00:00:00+00:00"),
+    }
+
+    reminder = build_cwl_attack_reminder(group, wars)
+
+    assert reminder["status"] == "in_war"
+    assert reminder["round"] == 2
+    missed = reminder["missed_rounds"]
+    assert [{key: value for key, value in item.items() if key != "opponent"} for item in missed] == [{
+        "round": 1,
+        "end_time": "20260904T010000.000Z",
+        "missed_count": 1,
+        "missed_members": [{
+            "player_tag": "#A2",
+            "name": "乙",
+            "town_hall_level": 17,
+            "position": 2,
+        }],
+    }]
+    assert missed[0]["opponent"]["name"] == "对方"

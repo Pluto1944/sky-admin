@@ -306,6 +306,8 @@ def build_temp_lists(
             "team_index": reg.get("team_index"),
             "stars": stars if stars is not None else -1,  # 无星数排最后
             "attacks": reg.get("attacks"),
+            "appearances": reg.get("appearances"),
+            "missed_attacks": reg.get("missed_attacks"),
             "prev_rank_order": reg.get("rank_order"),
         }
         # 构建 prev_team："index name" 拼接，用于区分同名队伍

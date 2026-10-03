@@ -224,6 +224,8 @@ class LeagueArranger:
           - team_index: 队伍编号（分组用）
           - stars: 上月总星数（无则为 None）
           - attacks: 上月实际进攻次数（旧数据无则为 None）
+          - appearances: 上月实际进入阵容的场次（旧投影未重建则为 None）
+          - missed_attacks: 上月漏刀次数（旧投影未重建则为 None）
           - rank_order: 上月最终全局位次（用于同战绩时保持上月队内顺序）
         """
         # 上月 registrations 保存的是当时最终编排顺序。优先按稳定的
@@ -272,6 +274,8 @@ class LeagueArranger:
                 "team_index": r["team_index"],
                 "stars": r["total_stars"],
                 "attacks": r["attacks"],
+                "appearances": r["appearances"],
+                "missed_attacks": r["missed_attacks"],
                 "rank_order": previous_rank(
                     r["player_tag"], r["account_name"]
                 ),

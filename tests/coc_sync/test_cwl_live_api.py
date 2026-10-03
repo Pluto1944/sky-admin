@@ -87,6 +87,7 @@ def test_cwl_check_in_aggregates_active_teams_and_pending_attacks(db, monkeypatc
     assert team_item["round"] == 1
     assert team_item["attacked_count"] == 1
     assert team_item["pending_members"][0]["player_tag"] == "#A2"
+    assert team_item["missed_rounds"] == []
 
 
 def test_cwl_live_detail_rejects_clan_outside_month_snapshot(db):

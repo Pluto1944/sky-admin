@@ -4,6 +4,8 @@
 """
 from __future__ import annotations
 
+import sqlite3
+
 
 def _acc(tag, **kw):
     base = {
@@ -132,6 +134,56 @@ def test_cwl_live_cache_tables_are_created(db):
 
     assert {"period", "clan_tag", "data_json", "updated_at", "attempted_at"} <= group_columns
     assert {"war_tag", "state", "data_json", "updated_at", "attempted_at"} <= war_columns
+
+
+def test_league_results_tracks_appearances_and_missed_attacks(db):
+    columns = {
+        row[1] for row in db.conn.execute("PRAGMA table_info(league_results)")
+    }
+    assert {"appearances", "missed_attacks"} <= columns
+
+
+def test_league_results_migration_preserves_old_rows_as_unknown(tmp_path):
+    from shared.db.connection import Database
+
+    path = str(tmp_path / "legacy-league-results.sqlite3")
+    conn = sqlite3.connect(path)
+    conn.execute(
+        """CREATE TABLE league_results (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               period TEXT NOT NULL,
+               team_index INTEGER NOT NULL,
+               team_alias TEXT NOT NULL,
+               team_name TEXT,
+               clan_tag TEXT,
+               category TEXT NOT NULL,
+               player_tag TEXT NOT NULL,
+               account_name TEXT,
+               total_stars INTEGER,
+               attacks INTEGER,
+               offense_3stars INTEGER DEFAULT 0,
+               defense_3stars INTEGER DEFAULT 0,
+               defense_total INTEGER DEFAULT 0,
+               fetched_at TEXT,
+               raw_metrics TEXT,
+               UNIQUE(period, team_index, player_tag)
+           )"""
+    )
+    conn.execute(
+        """INSERT INTO league_results
+           (period, team_index, team_alias, category, player_tag, attacks)
+           VALUES ('2026-09', 0, '一队', 'combat', '#P1', 5)"""
+    )
+    conn.commit()
+    conn.close()
+
+    migrated = Database(path)
+    migrated.init_schema()
+    row = migrated.conn.execute(
+        "SELECT attacks, appearances, missed_attacks FROM league_results"
+    ).fetchone()
+    assert tuple(row) == (5, None, None)
+    migrated.close()
 
 
 def test_schema_removes_retired_war_results_job(tmp_path):

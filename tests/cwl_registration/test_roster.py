@@ -173,12 +173,12 @@ def test_load_previous_combat_includes_final_rank_order(
         """
         INSERT INTO league_results
             (period, team_index, team_alias, category, player_tag,
-             account_name, total_stars, attacks)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             account_name, total_stars, attacks, appearances, missed_attacks)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
-            ("2026-07", 0, "T0", LEAGUE_COMBAT, "#B", "乙", 15, 5),
-            ("2026-07", 0, "T0", LEAGUE_COMBAT, "#A", "甲", 15, 5),
+            ("2026-07", 0, "T0", LEAGUE_COMBAT, "#B", "乙", 15, 5, 7, 2),
+            ("2026-07", 0, "T0", LEAGUE_COMBAT, "#A", "甲", 15, 5, 6, 1),
         ],
     )
     reg_repo.conn.commit()
@@ -189,6 +189,11 @@ def test_load_previous_combat_includes_final_rank_order(
 
     ranks = {member["player_tag"]: member["rank_order"] for member in previous}
     assert ranks == {"#A": 1, "#B": 2}
+    attendance = {
+        member["player_tag"]: (member["appearances"], member["missed_attacks"])
+        for member in previous
+    }
+    assert attendance == {"#A": (6, 1), "#B": (7, 2)}
 
 
 def test_arrange_and_export_writes_sheet(player_service, reg_repo):
