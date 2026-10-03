@@ -58,6 +58,7 @@ def test_dashboard_builds_rounds_standings_town_halls_and_member_stats():
     assert own["average_destruction"] == 47.5
     assert [item["attacks"] for item in own["rounds"]] == [1, 1]
     assert [item["result"] for item in own["rounds"]] == ["losing", "victory"]
+    assert [item["opponent_tag"] for item in own["rounds"]] == ["#BBB", "#BBB"]
     assert dashboard["summary"]["current_result"] == "losing"
 
     opponent = next(row for row in dashboard["overview"]["standings"]["rows"] if row["clan_tag"] == "#BBB")
