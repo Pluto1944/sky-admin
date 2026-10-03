@@ -278,7 +278,10 @@ export default {
 .clan-members-even { background: #19192f; }
 .clan-members-td { display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-sizing: border-box; height: 100%; color: #d0d0dc; font-size: 24rpx; border-right: 2rpx solid #33334d; white-space: nowrap; overflow: hidden; }
 .clan-members-head .clan-members-td { color: #fff; font-weight: 600; background: #262644; border-color: #5a5a80; }
-.cm-name { width: 190rpx; padding: 0 12rpx; justify-content: flex-start; border-left: 2rpx solid #33334d; }.cm-tag { width: 145rpx; }.cm-clan { width: 185rpx; padding: 0 8rpx; }.cm-role { width: 100rpx; }.cm-th { width: 60rpx; }.cm-league { width: 145rpx; }.cm-trophy { width: 95rpx; }.cm-attacks { width: 115rpx; }.cm-donation { width: 110rpx; }.cm-activity { width: 190rpx; }.cm-war { width: 215rpx; }.cm-cwl { width: 195rpx; }.cm-capital { width: 230rpx; }.cm-games { width: 175rpx; }
+.cm-name { position: sticky; left: 0; z-index: 2; width: 190rpx; padding: 0 12rpx; justify-content: flex-start; border-left: 2rpx solid #33334d; background: #0f0f23; box-shadow: 6rpx 0 10rpx rgba(5, 5, 18, .32); }
+.clan-members-even .cm-name { background: #19192f; }
+.clan-members-head .cm-name { z-index: 3; background: #262644; }
+.cm-tag { width: 145rpx; }.cm-clan { width: 185rpx; padding: 0 8rpx; }.cm-role { width: 100rpx; }.cm-th { width: 60rpx; }.cm-league { width: 145rpx; }.cm-trophy { width: 95rpx; }.cm-attacks { width: 115rpx; }.cm-donation { width: 110rpx; }.cm-activity { width: 190rpx; }.cm-war { width: 215rpx; }.cm-cwl { width: 195rpx; }.cm-capital { width: 230rpx; }.cm-games { width: 175rpx; }
 .clan-members-name-text { color: #f0f0f5; }
 .clan-members-left-badge { flex-shrink: 0; margin-left: 8rpx; padding: 2rpx 7rpx; color: #7d859d; background: #29293d; border-radius: 6rpx; font-size: 18rpx; }
 .clan-members-two-lines { flex-direction: column; line-height: 1.35; white-space: normal; }
