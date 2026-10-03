@@ -114,7 +114,7 @@ def test_member_activity_and_contribution_tables_are_created(db):
         "activity_observed_since",
     } <= account_columns
     for table in (
-        "member_war_facts", "member_combat_stats_cache",
+        "member_war_facts",
         "capital_raid_member_results", "clan_games_member_snapshots",
     ):
         assert db.conn.execute(
@@ -132,6 +132,26 @@ def test_cwl_live_cache_tables_are_created(db):
 
     assert {"period", "clan_tag", "data_json", "updated_at", "attempted_at"} <= group_columns
     assert {"war_tag", "state", "data_json", "updated_at", "attempted_at"} <= war_columns
+
+
+def test_schema_removes_retired_war_results_job(tmp_path):
+    from shared.db.connection import Database
+
+    path = str(tmp_path / "retired-job.sqlite3")
+    first = Database(path)
+    first.init_schema()
+    first.conn.execute(
+        "INSERT INTO sync_jobs (job_id, job_name, interval_min, enabled) VALUES ('war_results', '旧任务', 1440, 1)"
+    )
+    first.conn.commit()
+    first.close()
+
+    second = Database(path)
+    second.init_schema()
+    assert second.conn.execute(
+        "SELECT 1 FROM sync_jobs WHERE job_id = 'war_results'"
+    ).fetchone() is None
+    second.close()
 
 
 def test_cwl_assembly_tables_are_created(db):

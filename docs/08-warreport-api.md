@@ -2,6 +2,9 @@
 
 > 外部 API 参考 · Clash of Clans 第三方数据平台
 > 整理日期：2026-08-02
+>
+> **参考与历史信息，不是当前实现规范。** 第三方接口的可用性、字段和限流会变化；生产数据链路、
+> 调用入口与回补约束以当前客户端代码及 `12-league-stats.md`、`13-war-stats.md` 为准。
 
 ---
 
@@ -259,7 +262,8 @@ curl -s https://api.clashk.ing/global/counts
 - `/cwl/{clan_tag}/group` — 当前赛季 CWL 小组
 - `/cwl/{clan_tag}/{season}` — **历史赛季 CWL 数据**（`YYYY-MM` 格式）
 
-这意味着如果某个月忘记运行 `fetch_cwl_data.py`，可以用 ClashKing API 作为**数据回补方案**。
+这意味着若某个月缺少完整原始档案，可用 ClashKing API 作为**数据回补来源**；回补必须先经
+`backfill_cwl_live.py` 写入并验证分组和逐场档案，不能直接写入 `league_results`。
 
 ### 3.3 推荐使用策略
 
@@ -280,7 +284,9 @@ curl -s https://api.clashk.ing/global/counts
 
 > Supercell 官方 API **不提供历史 CWL 赛季完整数据**——只能查"当前战争"和"最近战争日志预览"。War Report 依赖 ClashKing 每月 13 号导入 CWL 数据（因为部分部落 CWL 到 12 号才结束）。
 
-**因此**：本项目 `fetch_cwl_data.py` 在 CWL 结束后**立即**通过 Supercell API 拉取并存库的做法是唯一可靠方案。ClashKing API 的 CWL 接口可作为**灾备回补**。
+**当前实现**：`cwl_live` 在联赛活跃窗口从官方 API 保存分组和逐场原始档案；
+`fetch_cwl_data.py` 只从完整本地档案重建 `league_results`。ClashKing API 仅作为显式历史补档来源，
+补档后同样必须通过完整性校验与投影重建。
 
 ---
 

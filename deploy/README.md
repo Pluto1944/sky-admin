@@ -183,7 +183,7 @@ sudo systemctl enable sky-scheduler
 | `cwl_live` | 当月 CWL 联赛组与逐场战争缓存 | 联赛活跃期每 2 分钟；已结束增量跳过 |
 | `farm_stats` | 互刷部落统计 | 每 30 分钟 |
 | `coc_sync` | COC 玩家档案 | 每 6 小时 |
-| `war_results` | 普通部落战战绩 | 每天 |
+| `current_wars` | 当前普通战同步；结束时归档历史 | 每 2 分钟检查（按状态限频） |
 | `cwl` | CWL 联赛战绩 | 每天触发，仅 12 号真正拉取 |
 | `war_layout` | 公众号阵型更新 | 每天北京时间 09:00；`WAR_LAYOUT_ENABLED=true` 时创建草稿，另有群发权限时才启用 `WAR_LAYOUT_AUTO_MASS_SEND` |
 
@@ -198,7 +198,7 @@ venv/bin/python scripts/scheduler.py --set-interval current_wars 2 # 既有环�
 venv/bin/python scripts/scheduler.py --once farm_stats            # 手动触发某任务
 venv/bin/python scripts/scheduler.py --once all                   # 手动触发全部任务
 venv/bin/python scripts/scheduler.py --once cwl --force           # 强制拉当月 CWL（跳过 12 号判断）
-venv/bin/python scripts/scheduler.py --disable war_results        # 停用某任务
+venv/bin/python scripts/scheduler.py --disable current_wars       # 停用某任务
 venv/bin/python scripts/scheduler.py --enable farm_stats          # 启用某任务
 venv/bin/python scripts/scheduler.py --set-interval farm_stats 60 # 调整频率（分钟）
 ```

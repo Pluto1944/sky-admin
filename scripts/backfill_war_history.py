@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""从 ClashKing 回填各自有部落最近 15 场普通部落战完整详情。
+"""从 ClashKing 回填各自有部落最近 45 场普通部落战完整详情。
 
 默认只执行 dry-run；全部部落请求和数据校验通过后，显式传入 ``--apply`` 才写库。
 """
@@ -37,6 +37,7 @@ def prepare_clan_history(raw_wars: list[dict], clan: dict, keep: int, synced_at:
     )
     for raw in candidates:
         item = normalize_current_war(raw, clan, synced_at)
+        item["history_source"] = "clashking_history_backfill"
         key = war_history_key(item)
         if not is_archivable_war(item) or item.get("status") != "war_ended" or not key:
             continue
@@ -53,7 +54,7 @@ def prepare_clan_history(raw_wars: list[dict], clan: dict, keep: int, synced_at:
     return prepared
 
 
-def run(limit: int = 100, keep: int = 15, apply: bool = False) -> int:
+def run(limit: int = 100, keep: int = 45, apply: bool = False) -> int:
     clans = [clan for clan in config.CLANS if clan.get("enabled", True)]
     synced_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     bundles = []
@@ -92,8 +93,6 @@ def run(limit: int = 100, keep: int = 15, apply: bool = False) -> int:
                     keep_ended=keep,
                     cleanup_active=False,
                 )
-        from modules.player.member_stats import refresh_member_combat_stats
-        refresh_member_combat_stats(db.conn)
         db.conn.commit()
     except Exception:
         db.conn.rollback()
@@ -107,7 +106,7 @@ def run(limit: int = 100, keep: int = 15, apply: bool = False) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="回填各自有部落最近普通部落战详情")
     parser.add_argument("--limit", type=int, default=100, help="每个部落拉取的历史日志上限")
-    parser.add_argument("--keep", type=int, default=15, help="每个部落保留的已结束战争数")
+    parser.add_argument("--keep", type=int, default=45, help="每个部落保留的已结束战争数")
     parser.add_argument("--apply", action="store_true", help="校验通过后写数据库；默认 dry-run")
     args = parser.parse_args()
     if args.limit < 1 or args.keep < 1:

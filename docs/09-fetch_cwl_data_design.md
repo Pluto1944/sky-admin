@@ -1,4 +1,8 @@
-# fetch_cwl_data 整体设计文档
+# fetch_cwl_data 历史设计文档
+
+> **历史文档（2026-10-03 起不代表当前实现）。** 本文描述的第三方拉取和直接写
+> `league_results` 链路已退役。当前 `scripts/fetch_cwl_data.py` 只从本地完整 CWL 原始档案
+> 重建投影；请以 [12-league-stats.md](12-league-stats.md) 为准。
 
 ## 1. 概述
 

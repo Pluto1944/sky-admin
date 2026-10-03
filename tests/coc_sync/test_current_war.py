@@ -154,6 +154,22 @@ def test_fifty_player_war_keeps_all_map_positions():
     assert item["rows"][-1]["opponent_member"]["name"] == "敌50"
 
 
+def test_normalizer_keeps_every_attack_for_archive_rebuilds():
+    raw = _war()
+    raw["clan"]["members"][0]["attacks"] = [
+        {"attackerTag": "#A1", "defenderTag": "#B1", "stars": 1,
+         "destructionPercentage": 40, "order": 1},
+        {"attackerTag": "#A1", "defenderTag": "#B2", "stars": 3,
+         "destructionPercentage": 100, "order": 3},
+        {"attackerTag": "#A1", "defenderTag": "#B3", "stars": 2,
+         "destructionPercentage": 80, "order": 5},
+    ]
+
+    item = normalize_current_war(raw, {"tag": "#AAA", "name": "我方"})
+
+    assert [attack["order"] for attack in item["rows"][0]["clan_member"]["attacks"]] == [1, 3, 5]
+
+
 def test_service_isolates_current_war_failure():
     api = FakeCocApiClient(wars_by_clan={"#OK": _war()}, fail_clans={"#BAD"})
     items = CocSyncService(api_client=api).fetch_current_wars([

@@ -7,7 +7,7 @@
     <view v-if="loading" class="clan-stats-state"><text>加载中...</text></view>
     <view v-else-if="!stats.length" class="clan-stats-state"><text class="clan-stats-empty-icon">📊</text><text>暂无战营数据</text></view>
     <view v-else class="clan-stats-table-wrap">
-      <view v-if="updatedAt" class="clan-stats-update">数据更新于 {{ updatedAt }}</view>
+      <view v-if="updatedAt" class="clan-stats-update">数据更新于 {{ updatedAt }}<text v-if="tab === 'war' && coverage"> · 已收录 {{ coverage.available }}/{{ coverage.target }} 场</text></view>
       <view class="clan-stats-tr clan-stats-head">
         <text class="clan-stats-td cs-name">昵称</text><text class="clan-stats-td cs-th">本</text>
         <text v-for="column in columns" :key="column.key" class="clan-stats-td cs-data clan-stats-head-cell" @tap="onSort(column.key)">
@@ -17,7 +17,7 @@
       <scroll-view scroll-y class="clan-stats-body">
         <view v-for="(item, index) in sortedStats" :key="item.player_tag" class="clan-stats-tr" :class="{ 'clan-stats-even': index % 2 === 1 }">
           <text class="clan-stats-td cs-name clan-stats-name">{{ item.account_name }}</text><text class="clan-stats-td cs-th clan-stats-th">{{ item.town_hall_level || '-' }}</text>
-          <text v-for="column in columns" :key="column.key" class="clan-stats-td cs-data clan-stats-data" :style="{ color: getColor(item[column.key], column.key) }">{{ formatRate(item[column.key]) }}</text>
+          <text v-for="column in columns" :key="column.key" class="clan-stats-td cs-data clan-stats-data" :style="{ color: getColor(item[column.key], column.key) }">{{ formatRate(item[column.key], item[column.key + '_sample']) }}</text>
         </view>
       </scroll-view>
     </view>
@@ -39,7 +39,7 @@ const statsCache = { war: null, league: null }
 
 export default {
   name: 'ClanStats',
-  data() { return { loading: true, stats: [], updatedAt: '', tab: 'war', sortKey: 'offense_45', sortOrder: 'desc' } },
+  data() { return { loading: true, stats: [], updatedAt: '', coverage: null, tab: 'war', sortKey: 'offense_45', sortOrder: 'desc' } },
   computed: {
     columns() { return this.tab === 'war' ? WAR_COLUMNS : LEAGUE_COLUMNS },
     sortedStats() {
@@ -51,7 +51,7 @@ export default {
   created() { this.fetchData() },
   methods: {
     switchTab(tab) { if (this.tab === tab) return; this.tab = tab; this.sortKey = tab === 'war' ? 'offense_45' : 'offense_6m'; this.sortOrder = 'desc'; this.fetchData() },
-    applyResponse(response) { this.stats = response.stats || []; this.updatedAt = response.updated_at ? this.formatTime(response.updated_at) : '' },
+    applyResponse(response) { this.stats = response.stats || []; this.updatedAt = response.updated_at ? this.formatTime(response.updated_at) : ''; this.coverage = response.history_coverage || null },
     async fetchData() {
       this.loading = true
       try {
@@ -62,7 +62,7 @@ export default {
     },
     formatTime(value) { if (!value) return ''; const date = new Date(value.replace('+00:00', 'Z')); if (isNaN(date.getTime())) return value; return `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}` },
     onSort(key) { if (this.sortKey === key) this.sortOrder = this.sortOrder === 'desc' ? 'asc' : 'desc'; else { this.sortKey = key; this.sortOrder = 'desc' } },
-    formatRate(value) { return value == null ? '-' : (value * 100).toFixed(0) + '%' },
+    formatRate(value, sample) { if (value == null) return '无'; const rate = (value * 100).toFixed(0) + '%'; return sample ? `${rate} ${sample.three_stars}/${sample.attacks}` : rate },
     getColor(value, key) { if (value == null) return '#666'; if (key && key.startsWith('defense')) return value <= 0.571 ? '#00b894' : value <= 0.857 ? '#fdcb6e' : '#e17055'; return value > 0.857 ? '#00b894' : value > 0.571 ? '#fdcb6e' : '#e17055' }
   }
 }

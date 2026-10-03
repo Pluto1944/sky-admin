@@ -10,7 +10,7 @@ import sqlite3
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Iterable
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from modules.coc_sync.official.mapper import normalize_tag
@@ -72,25 +72,38 @@ def previous_complete_periods(now: datetime, count: int = 3) -> list[str]:
     return result
 
 
-def _effective_attack_orders(item: dict) -> set[int]:
-    """返回我方达到满星前（含达成满星的一刀）的全局攻击顺序。"""
+def _attack_identity(attack: dict) -> tuple:
+    """为规范化攻击构造稳定身份；``order`` 为主，其他字段防御异常重复。"""
+    return (
+        _int(attack.get("order")) or 999999,
+        normalize_tag(attack.get("attacker_tag")) or "",
+        normalize_tag(attack.get("defender_tag")) or "",
+        _int(attack.get("target_position")),
+    )
+
+
+def _effective_attack_identities(item: dict, side: str) -> set[tuple]:
+    """返回指定阵营满星前（含达成满星的一刀）的攻击身份。
+
+    满星进度按每个目标的最高星数累积，而非累加补刀的原始星数。
+    """
+    member_key = "clan_member" if side == "clan" else "opponent_member"
     attacks = []
     for row in item.get("rows") or []:
-        member = row.get("clan_member") or {}
+        member = row.get(member_key) or {}
         attacks.extend(member.get("attacks") or [])
-    attacks.sort(key=lambda attack: _int(attack.get("order")) or 999999)
+    attacks.sort(key=lambda attack: _attack_identity(attack)[0])
     max_stars = _int(item.get("team_size")) * 3
     if max_stars <= 0:
-        return {_int(attack.get("order")) for attack in attacks}
+        return {_attack_identity(attack) for attack in attacks}
 
-    best_by_target: dict[Any, int] = {}
+    best_by_target: dict[object, int] = {}
     total = 0
-    included: set[int] = set()
+    included: set[tuple] = set()
     for attack in attacks:
         if total >= max_stars:
             break
-        order = _int(attack.get("order"))
-        included.add(order)
+        included.add(_attack_identity(attack))
         target = attack.get("target_position") or attack.get("defender_tag")
         stars = _int(attack.get("stars"))
         before = best_by_target.get(target, 0)
@@ -98,6 +111,28 @@ def _effective_attack_orders(item: dict) -> set[int]:
             total += stars - before
             best_by_target[target] = stars
     return included
+
+
+def _attacks_for_member(item: dict, side: str, player_tag: str) -> list[dict]:
+    member_key = "clan_member" if side == "clan" else "opponent_member"
+    normalized = normalize_tag(player_tag)
+    result = []
+    for row in item.get("rows") or []:
+        member = row.get(member_key) or {}
+        if normalize_tag(member.get("player_tag")) == normalized:
+            result.extend(member.get("attacks") or [])
+    return result
+
+
+def _incoming_attacks(item: dict, player_tag: str) -> list[dict]:
+    normalized = normalize_tag(player_tag)
+    result = []
+    for row in item.get("rows") or []:
+        member = row.get("opponent_member") or {}
+        for attack in member.get("attacks") or []:
+            if normalize_tag(attack.get("defender_tag")) == normalized:
+                result.append(attack)
+    return result
 
 
 def materialize_war_member_facts(
@@ -113,7 +148,8 @@ def materialize_war_member_facts(
         return MemberWarFactChanges(frozenset(), frozenset())
 
     timestamp = updated_at or item.get("synced_at") or datetime.now(timezone.utc).isoformat(timespec="seconds")
-    effective_orders = _effective_attack_orders(item)
+    offense_effective = _effective_attack_identities(item, "clan")
+    defense_effective = _effective_attack_identities(item, "opponent")
     changed_tags: set[str] = set()
     activity_tags: set[str] = set()
     for row in item.get("rows") or []:
@@ -121,15 +157,22 @@ def materialize_war_member_facts(
         player_tag = normalize_tag(member.get("player_tag"))
         if not player_tag:
             continue
-        raw_attacks = member.get("attacks") or []
-        effective = [attack for attack in raw_attacks if _int(attack.get("order")) in effective_orders]
+        raw_attacks = _attacks_for_member(item, "clan", player_tag)
+        effective = [attack for attack in raw_attacks if _attack_identity(attack) in offense_effective]
+        raw_defense = _incoming_attacks(item, player_tag)
+        effective_defense = [
+            attack for attack in raw_defense if _attack_identity(attack) in defense_effective
+        ]
         available_attacks = _int(item.get("attacks_per_member"))
         actual_attacks = len(effective)
         observed_attacks = len(raw_attacks)
         three_stars = sum(1 for attack in effective if _int(attack.get("stars")) == 3)
         old = conn.execute(
             """SELECT end_time, status, category, available_attacks, actual_attacks,
-                      observed_attacks, three_stars
+                      observed_attacks, three_stars, town_hall_level_at_war, map_position,
+                      offense_observed_attacks, offense_effective_attacks,
+                      offense_effective_3stars, defense_observed_attacks,
+                      defense_effective_attacks, defense_effective_3stars, metric_version
                FROM member_war_facts
                WHERE clan_tag = ? AND war_key = ? AND player_tag = ?""",
             (clan_tag, key, player_tag),
@@ -137,6 +180,11 @@ def materialize_war_member_facts(
         new_values = (
             end_time, item.get("status") or "", item.get("category") or "normal",
             available_attacks, actual_attacks, observed_attacks, three_stars,
+            _int(member.get("town_hall_level")), _int(member.get("position")),
+            observed_attacks, actual_attacks, three_stars,
+            len(raw_defense), len(effective_defense),
+            sum(1 for attack in effective_defense if _int(attack.get("stars")) == 3),
+            2,
         )
         old_values = tuple(old) if old is not None else None
         if old_values == new_values:
@@ -146,8 +194,12 @@ def materialize_war_member_facts(
         conn.execute(
             """INSERT INTO member_war_facts
                (clan_tag, war_key, player_tag, end_time, status, category,
-                available_attacks, actual_attacks, observed_attacks, three_stars, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                available_attacks, actual_attacks, observed_attacks, three_stars,
+                town_hall_level_at_war, map_position,
+                offense_observed_attacks, offense_effective_attacks,
+                offense_effective_3stars, defense_observed_attacks,
+                defense_effective_attacks, defense_effective_3stars, metric_version, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(clan_tag, war_key, player_tag) DO UPDATE SET
                    end_time = excluded.end_time,
                    status = excluded.status,
@@ -156,11 +208,25 @@ def materialize_war_member_facts(
                    actual_attacks = excluded.actual_attacks,
                    observed_attacks = excluded.observed_attacks,
                    three_stars = excluded.three_stars,
+                   town_hall_level_at_war = excluded.town_hall_level_at_war,
+                   map_position = excluded.map_position,
+                   offense_observed_attacks = excluded.offense_observed_attacks,
+                   offense_effective_attacks = excluded.offense_effective_attacks,
+                   offense_effective_3stars = excluded.offense_effective_3stars,
+                   defense_observed_attacks = excluded.defense_observed_attacks,
+                   defense_effective_attacks = excluded.defense_effective_attacks,
+                   defense_effective_3stars = excluded.defense_effective_3stars,
+                   metric_version = excluded.metric_version,
                    updated_at = excluded.updated_at""",
             (
                 clan_tag, key, player_tag, end_time, item.get("status") or "",
                 item.get("category") or "normal", available_attacks,
                 actual_attacks, observed_attacks, three_stars,
+                _int(member.get("town_hall_level")), _int(member.get("position")),
+                observed_attacks, actual_attacks, three_stars,
+                len(raw_defense), len(effective_defense),
+                sum(1 for attack in effective_defense if _int(attack.get("stars")) == 3),
+                2,
                 timestamp,
             ),
         )
@@ -178,6 +244,7 @@ def materialize_cached_war_facts(conn: sqlite3.Connection) -> int:
                  SELECT 1 FROM member_war_facts facts
                  WHERE facts.clan_tag = history.clan_tag
                    AND facts.war_key = history.war_key
+                   AND facts.metric_version >= 2
              )"""
     ).fetchall()
     count = 0
@@ -208,151 +275,82 @@ def cwl_attack_counts(war: dict | None, own_clan_tags: set[str]) -> dict[str, in
     return result
 
 
-def refresh_member_combat_stats(
-    conn: sqlite3.Connection, now: datetime | None = None,
-) -> int:
-    """按玩家重建 90 天普通战与最近 3 个完整月 CWL 的轻量缓存。"""
-    materialize_cached_war_facts(conn)
-    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    player_tags = [row["player_tag"] for row in conn.execute("SELECT player_tag FROM accounts")]
-    return _refresh_member_combat_stats_for_player_tags(conn, player_tags, current)
-
-
-def refresh_member_combat_stats_for_players(
-    conn: sqlite3.Connection,
-    player_tags: Iterable[str],
-    now: datetime | None = None,
-) -> int:
-    """只重建指定账号的成员战斗摘要，不扫描或物化其它历史战争。"""
-    requested_tags = set()
-    for tag in player_tags:
-        normalized = normalize_tag(tag)
-        if normalized:
-            requested_tags.add(normalized)
-    requested_tags = sorted(requested_tags)
-    if not requested_tags:
-        return 0
-    placeholders = ",".join("?" for _ in requested_tags)
-    existing_tags = [
-        row["player_tag"]
-        for row in conn.execute(
-            f"SELECT player_tag FROM accounts WHERE player_tag IN ({placeholders})",
-            requested_tags,
-        )
-    ]
-    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    return _refresh_member_combat_stats_for_player_tags(conn, existing_tags, current)
-
-
-def _refresh_member_combat_stats_for_player_tags(
-    conn: sqlite3.Connection, player_tags: list[str], current: datetime,
-) -> int:
-    """使用既定窗口口径重建指定账号的摘要；调用方负责事实物化边界。"""
-    if not player_tags:
-        return 0
-    cutoff = (current - timedelta(days=90)).isoformat(timespec="seconds")
-    periods = previous_complete_periods(current, 3)
-
-    placeholders = ",".join("?" for _ in periods)
-    cwl_by_player: dict[str, dict] = defaultdict(
-        lambda: {"three_stars": 0, "attacks": 0, "clan_tags": set()}
-    )
-    if periods:
-        rows = conn.execute(
-            f"""SELECT lr.player_tag, lr.clan_tag, lr.offense_3stars, lr.attacks
-                FROM league_results lr
-                WHERE lr.period IN ({placeholders})
-                  AND EXISTS (
-                      SELECT 1 FROM league_teams lt
-                      WHERE lt.period = lr.period AND lt.clan_tag = lr.clan_tag
-                  )""",
-            periods,
-        ).fetchall()
-        for row in rows:
-            entry = cwl_by_player[row["player_tag"]]
-            entry["three_stars"] += _int(row["offense_3stars"])
-            entry["attacks"] += _int(row["attacks"])
-            if row["clan_tag"]:
-                entry["clan_tags"].add(normalize_tag(row["clan_tag"]))
-
-    timestamp = current.isoformat(timespec="seconds")
-    for player_tag in player_tags:
-        wars = conn.execute(
-            """SELECT clan_tag, war_key, three_stars, actual_attacks, available_attacks
-               FROM member_war_facts
-               WHERE player_tag = ? AND status = 'war_ended' AND end_time >= ? AND end_time <= ?
-               ORDER BY end_time DESC, war_key DESC
-               LIMIT 15""",
-            (player_tag, cutoff, timestamp),
-        ).fetchall()
-        cwl = cwl_by_player[player_tag]
-        conn.execute(
-            """INSERT INTO member_combat_stats_cache
-               (player_tag, war_window_start, war_count, war_three_stars, war_attacks,
-                war_available_attacks, war_keys_json, war_clan_tags_json, cwl_periods_json,
-                cwl_clan_tags_json, cwl_three_stars, cwl_attacks, status, error, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'success', NULL, ?)
-               ON CONFLICT(player_tag) DO UPDATE SET
-                   war_window_start = excluded.war_window_start,
-                   war_count = excluded.war_count,
-                   war_three_stars = excluded.war_three_stars,
-                   war_attacks = excluded.war_attacks,
-                   war_available_attacks = excluded.war_available_attacks,
-                   war_keys_json = excluded.war_keys_json,
-                   war_clan_tags_json = excluded.war_clan_tags_json,
-                   cwl_periods_json = excluded.cwl_periods_json,
-                   cwl_clan_tags_json = excluded.cwl_clan_tags_json,
-                   cwl_three_stars = excluded.cwl_three_stars,
-                   cwl_attacks = excluded.cwl_attacks,
-                   status = 'success', error = NULL, updated_at = excluded.updated_at""",
-            (
-                player_tag, cutoff, len(wars),
-                sum(_int(row["three_stars"]) for row in wars),
-                sum(_int(row["actual_attacks"]) for row in wars),
-                sum(_int(row["available_attacks"]) for row in wars),
-                json.dumps([row["war_key"] for row in wars]),
-                json.dumps(sorted({row["clan_tag"] for row in wars if row["clan_tag"]})),
-                json.dumps(periods), json.dumps(sorted(cwl["clan_tags"])),
-                cwl["three_stars"], cwl["attacks"], timestamp,
-            ),
-        )
-    return len(player_tags)
-
-
 def _rate(numerator: int, denominator: int) -> float | None:
     return round(numerator * 100 / denominator, 1) if denominator else None
 
 
 def member_summary_map(conn: sqlite3.Connection, player_tags: list[str]) -> dict[str, dict]:
-    """批量读取成员页四类摘要，避免逐成员 N+1 查询。"""
+    """批量派生成员页四类摘要；不依赖可过期的战斗摘要缓存。"""
     if not player_tags:
         return {}
     result = {tag: {} for tag in player_tags}
     placeholders = ",".join("?" for _ in player_tags)
 
-    for row in conn.execute(
-        f"SELECT * FROM member_combat_stats_cache WHERE player_tag IN ({placeholders})",
-        player_tags,
-    ):
-        war_attacks = _int(row["war_attacks"])
-        war_available = _int(row["war_available_attacks"])
-        cwl_attacks = _int(row["cwl_attacks"])
-        result[row["player_tag"]].update({
+    now = datetime.now(timezone.utc)
+    cutoff = (now - timedelta(days=90)).isoformat(timespec="seconds")
+    timestamp = now.isoformat(timespec="seconds")
+    war_rows = conn.execute(
+        f"""SELECT facts.player_tag, facts.war_key, facts.actual_attacks, facts.three_stars,
+                   facts.available_attacks, facts.updated_at
+            FROM member_war_facts facts
+            JOIN war_history_cache history
+              ON history.clan_tag = facts.clan_tag AND history.war_key = facts.war_key
+            WHERE facts.player_tag IN ({placeholders})
+              AND facts.status = 'war_ended' AND history.status = 'war_ended'
+              AND facts.end_time >= ? AND facts.end_time <= ?
+            ORDER BY facts.player_tag, facts.end_time DESC, facts.war_key DESC""",
+        (*player_tags, cutoff, timestamp),
+    ).fetchall()
+    wars_by_player: dict[str, list[sqlite3.Row]] = defaultdict(list)
+    for row in war_rows:
+        if len(wars_by_player[row["player_tag"]]) < 15:
+            wars_by_player[row["player_tag"]].append(row)
+
+    periods = previous_complete_periods(now, 3)
+    cwl_by_player: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {"three_stars": 0, "attacks": 0, "periods": set(), "updated_at": None}
+    )
+    if periods:
+        period_placeholders = ",".join("?" for _ in periods)
+        cwl_rows = conn.execute(
+            f"""SELECT lr.player_tag, lr.period, lr.offense_3stars, lr.attacks, lr.fetched_at
+                FROM league_results lr
+                WHERE lr.player_tag IN ({placeholders}) AND lr.period IN ({period_placeholders})
+                  AND EXISTS (
+                      SELECT 1 FROM league_teams teams
+                      WHERE teams.period = lr.period AND teams.clan_tag = lr.clan_tag
+                  )""",
+            (*player_tags, *periods),
+        ).fetchall()
+        for row in cwl_rows:
+            entry = cwl_by_player[row["player_tag"]]
+            entry["three_stars"] += _int(row["offense_3stars"])
+            entry["attacks"] += _int(row["attacks"])
+            entry["periods"].add(row["period"])
+            if row["fetched_at"] and (entry["updated_at"] is None or row["fetched_at"] > entry["updated_at"]):
+                entry["updated_at"] = row["fetched_at"]
+
+    for player_tag in player_tags:
+        wars = wars_by_player[player_tag]
+        war_attacks = sum(_int(row["actual_attacks"]) for row in wars)
+        war_available = sum(_int(row["available_attacks"]) for row in wars)
+        war_three_stars = sum(_int(row["three_stars"]) for row in wars)
+        cwl = cwl_by_player[player_tag]
+        war_updated = max((row["updated_at"] for row in wars if row["updated_at"]), default=None)
+        updated = max((value for value in (war_updated, cwl["updated_at"]) if value), default=None)
+        result[player_tag].update({
             "war_recent_15": {
-                "war_count": _int(row["war_count"]),
-                "three_stars": _int(row["war_three_stars"]),
-                "attacks": war_attacks,
-                "available_attacks": war_available,
-                "three_star_rate": _rate(_int(row["war_three_stars"]), war_attacks),
+                "war_count": len(wars), "three_stars": war_three_stars,
+                "attacks": war_attacks, "available_attacks": war_available,
+                "three_star_rate": _rate(war_three_stars, war_attacks),
                 "attack_rate": _rate(war_attacks, war_available),
             },
             "cwl_recent_3m": {
-                "periods": json.loads(row["cwl_periods_json"] or "[]"),
-                "three_stars": _int(row["cwl_three_stars"]),
-                "attacks": cwl_attacks,
-                "three_star_rate": _rate(_int(row["cwl_three_stars"]), cwl_attacks),
+                "periods": sorted(cwl["periods"], reverse=True),
+                "three_stars": cwl["three_stars"], "attacks": cwl["attacks"],
+                "three_star_rate": _rate(cwl["three_stars"], cwl["attacks"]),
             },
-            "combat_updated_at": row["updated_at"],
+            "combat_updated_at": updated,
         })
 
     capital_rows = conn.execute(

@@ -7,7 +7,7 @@ from modules.coc_sync.current_war import current_war_summary
 from modules.coc_sync.official.mapper import normalize_tag
 
 
-ARCHIVABLE_STATUSES = {"preparation", "in_war", "war_ended"}
+ARCHIVABLE_STATUSES = {"war_ended"}
 
 
 def war_history_key(item: dict) -> str | None:
@@ -26,7 +26,7 @@ def war_history_key(item: dict) -> str | None:
 
 
 def is_archivable_war(item: dict) -> bool:
-    """仅归档带完整身份的普通战争；CWL、空状态和错误不得进入历史。"""
+    """仅归档已结束且带完整身份的普通战争；CWL、进行中、空状态和错误不得进入历史。"""
     return (
         item.get("status") in ARCHIVABLE_STATUSES
         and item.get("war_type") != "cwl"
@@ -53,6 +53,9 @@ def war_history_record(item: dict) -> dict:
         "preparation_start_time": item.get("preparation_start_time"),
         "start_time": item.get("start_time"),
         "end_time": item.get("end_time"),
+        "source": item.get("history_source") or "official_currentwar",
+        "finalized_at": item.get("synced_at"),
+        "payload_version": int(item.get("payload_version") or 1),
         "updated_at": item.get("synced_at"),
         "data": item,
     }

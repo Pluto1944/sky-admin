@@ -49,7 +49,13 @@ def test_apply_backfill_preserves_current_active_snapshot(tmp_path, monkeypatch)
     active = normalize_current_war(active_raw, clan, "2026-10-02T00:00:00+00:00")
     db = Database(db_path)
     db.init_schema()
-    assert _archive_current_war(db, active)
+    assert not _archive_current_war(db, active)
+    db.conn.execute(
+        """INSERT INTO current_war_cache
+           (clan_tag, clan_name, category, status, data_json, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        ("#AAA", "我方", "combat", "in_war", "{}", "2026-10-02T00:00:00+00:00"),
+    )
     db.conn.commit()
     db.close()
 
@@ -62,5 +68,8 @@ def test_apply_backfill_preserves_current_active_snapshot(tmp_path, monkeypatch)
     rows = db.conn.execute(
         "SELECT status FROM war_history_cache WHERE clan_tag='#AAA' ORDER BY status"
     ).fetchall()
-    assert [row["status"] for row in rows] == ["in_war", "war_ended"]
+    assert [row["status"] for row in rows] == ["war_ended"]
+    assert db.conn.execute(
+        "SELECT status FROM current_war_cache WHERE clan_tag='#AAA'"
+    ).fetchone()["status"] == "in_war"
     db.close()

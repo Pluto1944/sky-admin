@@ -5,6 +5,7 @@ from modules.coc_sync.cwl_backfill import (
     build_historical_cwl_cache,
     infer_group_tags,
 )
+from scripts.backfill_cwl_live import _write_cache
 
 
 def _side(tag, name):
@@ -99,3 +100,28 @@ def test_build_historical_cache_rejects_incomplete_round():
 
     with pytest.raises(CwlBackfillError, match="战争不完整"):
         build_historical_cwl_cache(_team(), history, "2026-09-30T01:00:00+00:00")
+
+
+def test_backfill_writes_complete_raw_archive_and_projection(db):
+    group, wars, _summary = build_historical_cwl_cache(
+        _team(), _history(), "2026-09-30T01:00:00+00:00"
+    )
+    db.conn.execute(
+        "INSERT INTO accounts (player_tag, account_name) VALUES (?, ?)",
+        ("#AAA1", "AAA成员"),
+    )
+    db.conn.commit()
+
+    written_groups, written_wars = _write_cache(
+        db, "2026-09", [(group, wars)], "2026-09-30T01:00:00+00:00"
+    )
+
+    assert (written_groups, written_wars) == (1, 6)
+    raw_group = db.conn.execute(
+        "SELECT raw_status, source FROM cwl_live_group_cache"
+    ).fetchone()
+    assert tuple(raw_group) == ("complete", "clashking_history_backfill")
+    projection = db.conn.execute(
+        "SELECT period, team_index, player_tag, attacks FROM league_results"
+    ).fetchone()
+    assert tuple(projection) == ("2026-09", 0, "#AAA1", 0)

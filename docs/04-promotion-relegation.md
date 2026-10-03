@@ -1,5 +1,9 @@
 # 04 — 实战队伍升降级系统
 
+> **2026-10-03 说明。** 文中将 `fetch_cwl_data.py` 视为第三方拉取/JSON 导入器的步骤为历史内容。
+> 它现在只从完整本地 CWL 原始档案重建 `league_results`；历史补档先使用
+> `backfill_cwl_live.py`。编排月份与战绩月份的 period 语义不变。
+
 > 版本：v3.1（基准重建内嵌升降级 + 稳定重排保护）
 > 日期：2026-09-08
 > 状态：已实现
@@ -209,7 +213,7 @@ def arrange(self, period, ...):
 |------|------|------|
 | ① COC API 采集 | 对 6 支实战队伍调 leaguegroup API | 28 warTag/队 |
 | ② 拉明细 | 逐 warTag 调 clanwarleagues/wars/{warTag} | 每人每场星数 |
-| ③ 导出 JSON | `fetch_cwl_data.py` | `data/cwl_YYYYMM/*.json` |
+| ③ 重建上月成绩投影 | `fetch_cwl_data.py` | 完整本地 CWL 分组与逐场档案 |
 | ④ 战营手工补录 | 手动提供 tag+星数 | `泰坦二_战营.json` |
 
 ### 执行

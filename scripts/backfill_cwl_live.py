@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -28,6 +29,7 @@ from modules.coc_sync.cwl_backfill import (  # noqa: E402
     infer_group_tags,
 )
 from modules.coc_sync.cwl_live import build_cwl_dashboard  # noqa: E402
+from modules.coc_sync.cwl_projection import group_raw_status, rebuild_league_results  # noqa: E402
 from modules.coc_sync.official.mapper import normalize_tag  # noqa: E402
 from shared.db.connection import Database  # noqa: E402
 
@@ -114,29 +116,48 @@ def _write_cache(
     try:
         db.conn.execute("BEGIN IMMEDIATE")
         for group, wars in bundles:
+            group_payload = json.dumps(group, ensure_ascii=False, sort_keys=True)
             db.conn.execute(
                 """INSERT INTO cwl_live_group_cache
                    (period, clan_tag, team_index, team_alias, team_name, category,
                     league_level, season, state, status, data_json, error,
-                    updated_at, attempted_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ended', 'ended', ?, NULL, ?, ?)""",
+                    updated_at, attempted_at, raw_status, raw_complete_at, source,
+                    payload_version, payload_hash)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ended', 'ended', ?, NULL, ?, ?,
+                           'complete', ?, ?, ?, ?)""",
                 (
                     period, group["clan_tag"], group["team_index"], group["team_alias"],
                     group.get("team_name"), group["category"], group.get("league_level"),
-                    period, json.dumps(group, ensure_ascii=False), timestamp, timestamp,
+                    period, group_payload, timestamp, timestamp, timestamp,
+                    group.get("source") or "clashking_history_backfill",
+                    int(group.get("payload_version") or 1),
+                    hashlib.sha256(group_payload.encode("utf-8")).hexdigest(),
                 ),
             )
             unique_wars.update(wars)
         for war_tag, war in unique_wars.items():
+            war_payload = json.dumps(war, ensure_ascii=False, sort_keys=True)
             db.conn.execute(
                 """INSERT INTO cwl_live_war_cache
-                   (war_tag, season, state, status, data_json, error, updated_at, attempted_at)
-                   VALUES (?, ?, ?, ?, ?, NULL, ?, ?)""",
+                   (war_tag, season, state, status, data_json, error, updated_at, attempted_at,
+                    source, finalized_at, payload_version, payload_hash)
+                   VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)""",
                 (
                     war_tag, period, war["state"], war["status"],
-                    json.dumps(war, ensure_ascii=False), timestamp, timestamp,
+                    war_payload, timestamp, timestamp,
+                    war.get("source") or "clashking_history_backfill", timestamp,
+                    int(war.get("payload_version") or 1),
+                    hashlib.sha256(war_payload.encode("utf-8")).hexdigest(),
                 ),
             )
+        for group, wars in bundles:
+            if group_raw_status(group, wars) != "complete":
+                raise CwlBackfillError(f"{group['clan_tag']} 回填后仍非完整分组")
+            team = {
+                key: group.get(key)
+                for key in ("period", "team_index", "team_alias", "team_name", "clan_tag", "category")
+            }
+            rebuild_league_results(db.conn, group, wars, team, rebuilt_at=timestamp)
         db.conn.commit()
     except Exception:
         db.conn.rollback()

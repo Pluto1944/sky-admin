@@ -97,7 +97,7 @@
 | --- | --- |
 | `registrations.period`、`league_teams.period`、`import-reg`、`arrange`、`publish-results` | 即将参赛的联赛月份 |
 | `league_results.period`、`fetch_cwl_data.py` | CWL 实际发生月份 |
-| 普通战 `war_results.end_time` | 单场战争结束时间，不是月份事实 |
+| 普通战 `war_history_cache.end_time` | 单场战争结束时间，不是月份事实 |
 
 编排月份 `N` 必须读取 `registrations(N)`、`league_results(N-1)` 与 `league_teams(N-1)`。
 
@@ -114,7 +114,7 @@
 
 ### 战绩统计
 
-- 联赛统计基于 `league_results`，按月窗口计算进攻 / 防守三星率；普通战统计基于 `war_results`，按每位玩家自己的最近 5/15/45 场计算。
+- 联赛统计基于 `league_results`，按月窗口计算进攻 / 防守三星率；普通战统计基于 `member_war_facts` 与已结束 `war_history_cache`，按指定部落固定最近 5/15/45 场计算。
 - 普通战“满星前”规则不可简化：进攻仅统计我方达到 `team_size * 3` 星前的攻击；防守仅统计对手达到同一满星阈值前的攻击。两边各自按全局 `order` 排序累加。
 - 互刷统计 API 只读 `farm_stats` 缓存，不可在请求路径直接批量调用 COC API；去速本算法使用双方 `mapPosition` 阶段判断，但只统计本方成员。
 - 当前部落战从官方 `currentwar` 获取后先规范化并缓存到 `current_war_cache`；单个部落失败要隔离，不能抹掉其他部落结果。
@@ -148,10 +148,9 @@
 - `farm_stats`（30 分钟）；
 - `coc_sync`（6 小时）；
 - `player_details`（每天）；
-- `member_combat_stats`（每天，全量窗口过期校正）；
+- `member_combat_stats`（每天，补齐旧档案的新版成员战斗事实）；
 - `capital_member_stats`（每 6 小时检查业务窗口）；
 - `clan_games_stats`（每 6 小时检查业务窗口）；
-- `war_results`（每天）；
 - `cwl`（每天触发，仅规则允许的日期实际抓取）；
 - `war_layout`（北京时间固定时刻，默认草稿）。
 

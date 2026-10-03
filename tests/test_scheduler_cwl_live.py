@@ -118,7 +118,7 @@ def test_cwl_live_scheduler_labels_not_in_war_as_waiting(tmp_path, monkeypatch):
 
     assert result == {
         "status": "success",
-        "reason": "2026-09 队伍 1（更新 0、等待 1），战争更新 0、跳过 0",
+        "reason": "2026-09 队伍 1（更新 0、等待 1），战争更新 0、跳过 0，完整分组 0、投影 0 行",
     }
     db = Database(db_path)
     row = db.conn.execute(

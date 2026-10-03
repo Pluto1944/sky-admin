@@ -119,10 +119,12 @@ export function getLeagueStats(period) {
 
 /**
  * 获取部落战战绩统计（按场次滚动窗口三星率）
- * @returns {Promise} { period, updated_at, stats: [{ player_tag, account_name, town_hall_level, offense_5, ... }] }
+ * @param {string} clanTag - 自有部落标签；不传时保留战营默认值
+ * @returns {Promise} { clan_tag, updated_at, history_coverage, stats: [{ player_tag, account_name, town_hall_level, offense_5, ... }] }
  */
-export function getWarStats() {
-  return request('/api/clan/war-stats')
+export function getWarStats(clanTag) {
+  const query = clanTag ? `?clan_tag=${encodeURIComponent(clanTag)}` : ''
+  return request(`/api/clan/war-stats${query}`)
 }
 
 /**

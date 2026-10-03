@@ -81,6 +81,7 @@ def test_assembly_scheduler_snapshots_once_freezes_started_and_preserves_cache(t
     assert before["missing_count"] == 1
     assert before["extra_count"] == 1
     first_locked_at = rows["#AAA"]["locked_at"]
+    first_snapshot_id = rows["#AAA"]["roster_snapshot_id"]
     db.close()
 
     # 仅抬头元数据变化的强制 revision 不得清空或重算已经冻结的集结结果。
@@ -92,9 +93,11 @@ def test_assembly_scheduler_snapshots_once_freezes_started_and_preserves_cache(t
         "SELECT COUNT(*) FROM cwl_roster_snapshots WHERE period='2026-10'"
     ).fetchone()[0] == 2
     preserved = db.conn.execute(
-        "SELECT locked_at FROM cwl_assembly_cache WHERE period='2026-10' AND clan_tag='#AAA'"
+        """SELECT locked_at, roster_snapshot_id FROM cwl_assembly_cache
+           WHERE period='2026-10' AND clan_tag='#AAA'"""
     ).fetchone()
     assert preserved["locked_at"] == first_locked_at
+    assert preserved["roster_snapshot_id"] == first_snapshot_id
     db.close()
 
     fail_b["value"] = True

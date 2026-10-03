@@ -1,335 +1,100 @@
-# 06 — 运维手册
+# 06 — 运维与月度操作
 
-> 月度循环、脚本说明、数据目录
+> 当前生产链路：`微信小程序 -> api.skycoc.cc -> Nginx -> sky-admin.service -> SQLite`。
+> 常驻调度器是 `sky-scheduler.service`；不要再配置独立 cron 或手工常驻脚本。
 
----
-
-## 一、月度循环时间线
-
-| 频率 | 操作 | 任务 |
-|------|------|------|
-| 每 6 小时 | COC API 同步成员（自动） | `scheduler.py` → `coc_sync` |
-| 每天 | 拉取部落战数据（自动） | `scheduler.py` → `war_results` |
-| 每 30 分钟 | 同步互刷统计数据（自动） | `scheduler.py` → `farm_stats` |
-| 每月 12 号 | 拉取 CWL 战绩（自动） | `scheduler.py` → `cwl` |
-| 每月底 | 上月数据审计 → 报名导入 → 编排+升降级 → 发布 | 人工审计 + `register_and_arrange.sh` |
-| 日常 | 查看/管理调度任务 | `scheduler.py --list` 等 |
-
-> 周期任务统一由 `scripts/scheduler.py`（systemd 服务 `sky-scheduler`）接管，详见 [`15-scheduler.md`](./15-scheduler.md) 与 [`deploy/README.md`](../deploy/README.md)。旧的 `sky-sync-*.timer` + `manage-cron.sh` 方案已废弃。
-
----
-
-## 二、register_and_arrange.sh（报名一体化入口）
-
-报名导入按目标联赛月份作为完整快照处理：导入前仅清理
-`registrations` 中该月份的旧记录，再写入当前报名表与战营成员，避免已从报名表
-移除的账号残留。导入前会检查多个报名昵称是否解析到同一个 COC Tag；发现冲突
-会告警并提示人工核对，但不会因此中止整次导入。
-
-**场景**：每月开赛前跑一次，串联"报名导入 → 名单编排"全流程。
-
-### 流程
-
-```
-register_and_arrange.sh 2026-08
-  │
-  ├─ [1] import-reg --period 2026-08
-  │     腾讯文档报名表 → registrations(period=2026-08)
-  │
-  ├─ [2] fetch_cwl_data.py --period 2026-07
-  │     COC API → league_results
-  │
-  └─ [3] arrange --period 2026-08
-        → 读 registrations(2026-08) + league_results(2026-07) + league_teams(2026-07)
-        → 基准重建（阶段0~6）+ 贪心填充（阶段7~9）
-        → 导出腾讯文档 "名单_2026-08"
-```
-
-### 编排流程（v3.1）
-
-```
-arrange(period)
-  ├─ _write_league_teams() 幂等写入当月配置
-  ├─ _fetch_clan_info() 从 COC API 获取部落名和首领
-  ├─ _load_accounts() 加载报名 + 注入分数/奖杯
-  ├─ sort_accounts() 分组+排序
-  ├─ _load_combat_star_data() 从 league_results 读星数
-  ├─ _load_prev_combat_from_league_results() 从 league_results 读上月名单
-  ├─ _load_prev_teams_config() 从 league_teams 读上月配置
-  ├─ build_final_list() 基准重建+升降级+稳定重排保护（阶段0~6）
-  ├─ build_teams() 贪心填充+边界校验+白名单+管理员（阶段7~9）
-  ├─ 构建 ordered_with_team + 注入 movement 标识
-  ├─ 清空本期旧 league_type / rank_order / team_info
-  ├─ 回写本次实际分配 → registrations
-  └─ arrange_and_export() 导出 Excel（Part1-4）
-```
-
-### 参数与环境变量
-
-| 参数 | 来源 | 说明 |
-|------|------|------|
-| `PERIOD` | 命令行 `$1` 或 `LEAGUE_PERIOD` | 月份 `YYYY-MM`，含格式校验 |
-| `REG_DOC_FILE_ID` | `.env` 必填 | 报名表在线文档 fileId |
-| `ROSTER_DOC_FILE_ID` | `.env` 必填 | 名单写入在线文档 fileId |
-| `REG_SHEET` | `.env` 可选 | 报名子表名；留空自动推算 |
-| `ROSTER_SHEET` | `.env` 可选 | 名单写入子表名；默认 `名单_<period>` |
-
-### 设计要点
-
-- `set -euo pipefail` 严格错误处理
-- 所有凭证从 `.env` 加载
-- 第 [1] 步 `coc-sync` 当前已注释（战营成员变化不频繁）
-- 报名子表名自动推算：`YYYYMMDD-YYYYMMDD（收集结果）`
-- **排除名单 `EXCLUDED_CAMP_NAMES`** 在导入阶段 + 排序阶段双阶段生效
-
-### 每月完整流程（以 8 月联赛为例）
+## 日常检查
 
 ```bash
-# 一站式（推荐）
-scripts/register_and_arrange.sh 2026-08
-
-# 或分步执行：
-# 1) 拉上月 CWL 战绩（CWL 月 = 联赛-1）
-python scripts/fetch_cwl_data.py --period 2026-07
-
-# 2) 导入报名表（联赛月份）
-python cli.py import-reg 报名表.xlsx --period 2026-08
-
-# 3) 编排名单（联赛月份）
-python cli.py arrange --period 2026-08 -o 2026-08名单.xlsx
+systemctl status sky-admin.service sky-scheduler.service
+venv/bin/python scripts/scheduler.py --list
+curl --fail https://api.skycoc.cc/api/ping
 ```
 
----
+服务代码、配置或 schema 变更后：先运行目标测试和 `git diff --check`，再以 systemd 重启服务。
+不要手工启动额外 uvicorn 或 scheduler。重启后检查 `/api/ping`、目标业务接口与
+`PRAGMA integrity_check`。
 
-## 三、sync_and_export.sh（长期维护：COC 同步 → 导出档案）
-
-**当前状态**：步骤 [1]（COC 同步成员）已由调度器任务 `coc_sync` 自动执行（每 6 小时）。如需导出到腾讯文档（步骤 [2]），需单独手动执行。
-
-### 流程
-
-```
-[1] COC API → player 数据库（建档 / 更新 / 退部对账）
-[2] player 数据库 → 腾讯在线文档（导出玩家档案）
-```
-
-### 对应 CLI 命令
-
-| 步骤 | 命令 | 对应代码 | 是否自动化 |
-|------|------|---------|-----------|
-| [1] | `python cli.py coc-sync` | `coc_sync/service.py` → `player/service.py` | 是（调度器 `coc_sync` 任务） |
-| [2] | `python cli.py player-export --to tencent -o <fileId>` | `player/exporter.py` | 否（手动触发） |
-
-> 调度任务的详细管理方式（状态查看、手动执行、日志查询、重启等）请参见 [`15-scheduler.md`](./15-scheduler.md) 与 [`deploy/README.md`](../deploy/README.md)。
-
----
-
-## 四、fetch_cwl_data.py（CWL 战绩拉取）
-
-v2.4 新增，合并拉取+导入+回退。
-
-**功能**：
-- 对 6 支实战队伍调用 leaguegroup API 获取 warTag
-- 逐场拉明细 → 存 JSON
-- 导入 league_results 表
-- API 失败自动回退到本地 JSON
-- 按队伍级缓存（<2h 跳过）
-- `--period` 为 CWL 实际发生月，`--fetch-only` 仅拉 JSON
-
-## 五、发布脚本
-
-### publish_to_results.sh（v2.6）
-
-发布 Part4 网格到公示文档：
+COS 每天本机时间 03:15 备份。高风险 SQLite 迁移、批量回填或物理删表前，额外执行：
 
 ```bash
-python cli.py publish-results --period 2026-08
+venv/bin/python scripts/backup_to_cos.py --dry-run
+venv/bin/python scripts/backup_to_cos.py
 ```
 
-需 `registrations` 表已有编排数据。前 20 行固定文字硬编码，Part4 复用 `arrange()` 结果保证一致性。
+备份目录必须含最终 `manifest.json`；没有 manifest 的目录视为未完成，不能用于恢复。
 
----
+## 月度 CWL 操作
 
-## 六、数据目录结构
+`period` 的含义必须分清：
 
+| 数据 / 命令 | period 含义 |
+|---|---|
+| `registrations`、`league_teams`、`import-reg`、`arrange` | 即将参赛的联赛月 N |
+| `league_results`、`fetch_cwl_data.py`、`backfill_cwl_live.py` | 实际发生的 CWL 月 |
+
+编排 N 月联赛时读取 `registrations(N)`、`league_results(N-1)` 和 `league_teams(N-1)`。
+
+推荐流程：
+
+1. 先确认上月原始 CWL 档案完整：分组目录的所有 `war_tag` 均为最终战争；
+2. 运行 `venv/bin/python scripts/fetch_cwl_data.py --period N-1`，它只从本地完整档案重建
+   `league_results`，不会访问第三方 API；
+3. 导入报名并编排：`scripts/register_and_arrange.sh N`；
+4. 审核 Part1–4 和升降级结果；外部公示是独立操作，确认后才运行发布脚本。
+
+若缺少历史原始档案，先执行：
+
+```bash
+venv/bin/python scripts/backfill_cwl_live.py --period YYYY-MM
 ```
-data/
-├── league.db                    # SQLite 主数据库
-├── cwl_202607/                  # CWL 战绩 JSON 缓存（兜底用）
-│   ├── 0_泰坦二.json
-│   └── ...
+
+dry-run 必须覆盖全部当月队伍、分组和逐场战争，并与现有投影比对。确认无误后才添加 `--apply`。
+该脚本会写入完整分组/逐场档案并重建投影；已有同月原始缓存时拒绝覆盖。
+
+## 普通部落战
+
+`current_wars` 按部落状态限频刷新官方 `currentwar`。只有完整的最终普通战才会归档到
+`war_history_cache` 并物化 `member_war_facts`；每个启用部落保留最近 45 场。同步失败会保留
+上次成功快照，不能以空响应覆盖。
+
+补齐历史时使用：
+
+```bash
+venv/bin/python scripts/backfill_war_history.py --limit 100 --keep 45
+venv/bin/python scripts/backfill_war_history.py --limit 100 --keep 45 --apply
 ```
 
----
+默认是 dry-run；任一部落抓取或完整性检查失败即拒绝写入。旧 `war_results` 和
+`member_combat_stats_cache` 已物理删除，不能重新创建或恢复旧聚合写入链路。
 
-## 七、公共环境变量加载器 `load_env.sh`
+## 调度与异常
 
-被其它脚本 `source` 引用，从项目根 `.env` 安全读取凭证：
+| 场景 | 正确处理 |
+|---|---|
+| 单个 COC 部落请求失败 | 保留该部落最后成功快照，记录 error/attempted_at；其他部落继续 |
+| CWL 分组未完整 | 标记 `collecting` 或 `incomplete`，不写 `league_results` |
+| 历史 CWL 缺档 | 用 `backfill_cwl_live.py` dry-run 后显式回填，不能导入第三方汇总数字 |
+| SQLite 完整性异常 | 停止写入，使用最新有 manifest 的 COS 快照恢复并核验 |
+| 小程序接口异常 | 先检查 `sky-admin.service`、本机 `/api/ping`、Nginx 日志，再检查域名和证书 |
 
-- **安全解析**：逐行读取 `KEY=VALUE`，不使用 `source .env`（防注入）
-- **环境变量优先**：已 export 的变量优先，不被 .env 覆盖
-- **Key 合法性校验**：仅允许 `[A-Za-z_][A-Za-z0-9_]*` 格式
-- **兼容 CRLF**：自动去除 `\r`
-- 加载失败（.env 不存在）直接报错退出
+敏感凭证只在 `.env` 中。运行脚本前用 `source scripts/load_env.sh` 或脚本内置安全加载器，
+不要打印 `.env`、Token、OAuth Header 或用户隐私数据。
 
----
+## 常用命令
 
-## 九、凭证管理约定
+```bash
+# 只读查看任务状态
+venv/bin/python scripts/scheduler.py --list
 
-- 所有凭证（`COC_API_TOKEN` / `TENCENT_DOC_ACCESS_TOKEN` / `TENCENT_DOC_CLIENT_ID` / `TENCENT_DOC_CLIENT_SECRET` / `TENCENT_DOC_REFRESH_TOKEN` / `TENCENT_DOC_OPEN_ID` / 文档 fileId）**只放 `.env`，不写进脚本、不提交仓库**
-- 首次使用：`cp .env.example .env` 然后填入真实凭证
-- 腾讯文档正式 OAuth 会在授权码换取 Token 时返回 `refresh_token`；配置后，Access Token 失效会自动刷新并重试一次
-- 腾讯文档 `refresh_token` 官方有效期为 1 年，到期后需重新走一次 OAuth 授权；调试 Access Token 不包含 Refresh Token，仍需手动更新
-- 调试时可临时 `export` 覆盖 .env 中的值
+# 手动刷新一个本地缓存任务
+venv/bin/python scripts/scheduler.py --once current_wars
+venv/bin/python scripts/scheduler.py --once cwl_live --force
 
----
+# 重建已有完整 CWL 原始档案的投影
+venv/bin/python scripts/fetch_cwl_data.py --period 2026-09
 
-## 十、CLI 命令参考
-
-| 命令 | 说明 | period 语义 |
-|------|------|------------|
-| `import-reg` | 导入报名表 → registrations | 联赛月份 |
-| `arrange` | 编排名单 + 导出 Excel | 联赛月份 |
-| `publish-results` | 发布 Part4 到公示文档 | 联赛月份 |
-| `coc-sync` | COC API 同步 → accounts | — |
-| `player-export` | 导出玩家档案 | — |
-| `accounts` | 查看账号列表 | — |
-| `reset-db` | 清空数据库 | — |
-
----
-
-## 十一、period 语义总结
-
-| 接口 | period 含义 | 示例 |
-|------|------------|------|
-| `import-reg` | 联赛月份 | `--period 2026-08` |
-| `fetch_cwl_data.py` | CWL 实际发生月 | `--period 2026-07` |
-| `arrange` | 联赛月份 | `--period 2026-08` |
-| `register_and_arrange.sh` | 联赛月份 | `2026-08` |
-
-> `registrations.period` = 联赛月份，`league_teams.period` = 联赛月份，`league_results.period` = CWL 实际发生月。
-> 编排 N 月联赛时：读 `registrations(N)` + `league_results(N-1)` + `league_teams(N-1)`。
-
----
-
-## 十二、月度操作 Checklist
-
-### 每月开赛前（月底）
-
-- [ ] 在修改本月配置和编排名单前，只读打印上月每支队伍：`team_index`、别名、真实部落名、Tag、实际参赛人数、战绩条数、联赛结束后的新等级
-- [ ] 对照 `league_teams(N-1)` 历史快照与 `league_results(N-1)`；确认每支实战队都有结果，Tag/实际参赛部落无误，缺口已说明或修复
-- [ ] 确认特殊赛程按实际轮次换算（例如五轮队满星 15，12/15 及以下降级），不要按固定 21 星误判
-- [ ] 确认 `coc-sync` 已执行（保持 accounts 数据最新）
-- [ ] 确认报名收集表已关闭，子表已生成
-- [ ] 检查 `.env` 中 `REG_DOC_FILE_ID`、`ROSTER_DOC_FILE_ID` 已配置
-- [ ] 检查腾讯文档 OAuth 刷新凭证已配置；如仍使用调试 Token，确认 Access Token 未过期
-- [ ] 检查 `EXCLUDED_CAMP_NAMES` 排除名单是否需要更新
-- [ ] 检查 `TEAMS` 配置是否为本月最新（队伍数、容量、reserved_slots）
-- [ ] 检查 `BLACK_LIST` 和 `WHITE_LIST` 是否需要更新
-- [ ] 黑名单按 `account_name` 精确匹配且区分大小写；同一昵称存在大小写变体时分别列出
-
-### 执行流程
-
-- [ ] 运行 `register_and_arrange.sh 2026-08`
-- [ ] 检查 stderr 输出无异常告警（去重告警、未知账号告警）
-- [ ] 打开腾讯文档"名单_2026-08" sheet 核对：
-  - Part1 排序名单顺序合理
-  - Part2 队伍分配人数正确
-  - Part3 缺失老兵列表准确
-  - Part4 网格排布整齐
-- [ ] 确认升降级日志合理（无意外大幅波动）
-- [ ] 交叉核对升降级日志与 Part3 缺失名单；本月缺席者仍按上月战绩参与配对，随后在阶段3删除，配对另一方的升降级结果保留
-- [ ] 如本月曾修改黑名单/排除名单后重跑，确认被过滤账号不在 Part1/2/4，且数据库旧编排字段已清空
-- [ ] 运行 `publish_to_results.sh 2026-08` 发布到公示文档
-- [ ] 打开公示文档确认当月同名 Sheet 已更新，队伍数和最终人数与审核结果一致
-
-### 每月 CWL 结束后（7号）
-
-- [ ] 确认 COC API token 未过期
-- [ ] 运行 `fetch_cwl_data.sh --period 2026-08` 拉取战绩
-- [ ] 检查 `data/cwl_202608/` 目录下 JSON 文件齐全
-- [ ] 确认 `league_results` 表数据已写入
-
-### 日常维护
-
-- [ ] 确认调度器正常运行：`sudo systemctl status sky-scheduler`
-- [ ] 确认各任务状态：`venv/bin/python scripts/scheduler.py --list`
-- [ ] 确认每日 COS 备份计时器正常：`sudo systemctl status sky-admin-cos-backup.timer`
-- [ ] 确认上一份 COS 备份目录含 `manifest.json` 和 `SHA256SUMS`
-- [ ] 检查退部对账统计（退部人数是否异常）
-- [ ] 腾讯文档 Refresh Token 到期前重新授权（官方有效期 1 年）
-- [ ] 定期确认 COS 生命周期策略已按预期保留和清理备份；备份脚本本身不会删除远端对象
-- [ ] 修改调度相关代码后重启：`sudo systemctl restart sky-scheduler`
-
----
-
-## 十三、异常场景处理
-
-### COC API 调用失败
-
-| 场景 | 影响 | 处理 |
-|------|------|------|
-| `coc-sync` 单部落失败 | 该部落成员本次不更新 | `FAIL_FAST` 隔离，其他部落正常；退部对账跳过失败部落 |
-| `fetch_cwl_data.py` API 失败 | 无法拉取星数 | 自动回退到本地 JSON 缓存；全部失败则编排时自动跳过升降级 |
-| `fetch_cwl_data.py` 部分队伍失败 | 缺星数队伍不参与升降级 | 相邻两队都成功才参与升降级配对 |
-| 上月部落临时更换 | 先按实际参赛 Tag 修正/补齐上月历史快照和战绩，再安排本月；不能用本月 YAML 覆盖上月事实 |
-
-### 报名数据异常
-
-| 场景 | 处理 |
-|------|------|
-| 报名表缺 `account_name` 列 | 该行跳过，不影响其他行 |
-| 同昵称多次提交 | `_dedup_latest()` 按 `submit_time` 保留最新，stderr 告警 |
-| 主号列为空 | `_fill_player_name_forward()` 前向填充兜底 |
-| 战营成员未报名 | `_merge_camp()` 自动纳入（`match_value=None`） |
-| 报名昵称无法反查 COC Tag | `player_tag` 留空，排序得 0 分 |
-
-### 编排异常
-
-| 场景 | 处理 |
-|------|------|
-| 冷启动（无上月数据） | 名单1 为空，全部由当月新人构成 |
-| 无星数数据 | 跳过升降级，名单1 直接展开 |
-| 本月队伍数变化 | 贪心填充自然消化：队多不满员，队少溢出入壳子 |
-| 白名单人员未报名 | 强制插入到指定队伍开头；白名单优先级最高 |
-| 白名单超员 | 普通成员连锁后移；无法同时满足升降级边界时保留白名单目标并打印告警 |
-| 删除或新增造成升降级边界变化 | 稳定重排；升级成员不得跌破目标，降级成员不得回到原队伍；冲突打印告警 |
-| 黑名单命中 | 阶段0 从所有数据源排除，记录到 Part3 |
-| 升级或降级候选本月缺席 | 仍按上月表现完成配对，再在阶段3删除缺席者；配对另一方结果保留，空位由后续人员补齐 |
-| 修改名单后重跑 | 本期旧 `league_type` / `rank_order` / `team_info` 会先清空，再只写入当前结果 |
-
-### 脚本运行异常
-
-| 场景 | 处理 |
-|------|------|
-| `.env` 文件不存在 | `load_env.sh` 报错退出 |
-| `--period` 格式非法 | `register_and_arrange.sh` 格式校验，非法报错退出 |
-| 导入 0 条报名数据 | 当前不校验，会继续生成空名单（建议加校验） |
-| 腾讯文档 API 调用失败 | 命令报错退出（`set -e`） |
-
----
-
-## 十四、常见问题排查
-
-### 战营成员没出现在名单中
-
-1. 检查 `EXCLUDED_CAMP_NAMES` 是否误排除
-2. 检查 `coc-sync` 是否已执行（`accounts.clan_tag = '#2QQ'` 才有战营成员）
-3. 检查该成员是否退部（`membership_status = left`）
-
-### 排序结果与预期不符
-
-1. 确认 `history_score` 当前恒为 0，排序实际只看匹配值
-2. 战营账号按奖杯排序（非综合分）
-3. 检查 `match_value` 是否正确导入（报名表列名是否被关键词命中）
-
-### 升降级未生效
-
-1. 确认上月 CWL 战绩已拉取（`fetch_cwl_data.py`）
-2. 确认 `league_results` 表中有 `total_stars` 数据
-3. 新人无星数数据，不参与升降级
-
-### 腾讯文档写入失败
-
-1. 如返回 `400006`，确认 `TENCENT_DOC_CLIENT_SECRET` / `TENCENT_DOC_REFRESH_TOKEN` 已配置且 Refresh Token 未超过 1 年；调试 Token 需手动更新
-2. 确认 `fileId` 正确且当前用户有写入权限
-3. 确认 sheet 名不包含非法字符
+# 验证生产数据库
+source scripts/load_env.sh
+venv/bin/python -c "from shared.db.connection import Database; import config; db=Database(config.DB_PATH); print(db.conn.execute('PRAGMA integrity_check').fetchone()[0])"
+```

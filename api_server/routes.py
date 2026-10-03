@@ -1083,103 +1083,88 @@ def league_stats(
 
 @router.get("/clan/war-stats")
 def war_stats(
+    clan_tag: Optional[str] = None,
     db: Database = Depends(get_db),
 ):
-    """获取部落战战绩统计（按场次滚动窗口三星率）。
-
-    返回每个战营成员的 6 列滚动三星率：
-        offense_5, offense_15, offense_45,
-        defense_5, defense_15, defense_45
-
-    窗口定义：按 end_time 倒序取每个玩家各自最近 N 场的数据。
-    """
+    """按指定自有部落的固定战争窗口返回当前实际成员攻防三星率。"""
     conn = db.conn
+    configured = {normalize_tag(clan["tag"]): clan for clan in _enabled_clans()}
+    default_tag = normalize_tag("#2QQ")
+    selected = normalize_tag(clan_tag) if clan_tag else (
+        default_tag if default_tag in configured else next(iter(configured), None)
+    )
+    if not selected or selected not in configured:
+        raise HTTPException(status_code=404, detail="部落不在允许查询的自有部落列表中")
 
-    # 确定基准月份（用于筛选战营成员）
-    period = _get_current_period()
-
-    # ── 1. 查询当月战营成员 ──
     member_rows = conn.execute(
-        """SELECT a.player_tag, a.account_name, a.town_hall_level
-           FROM registrations r
-           JOIN accounts a ON a.account_name = r.account_name
-           WHERE r.period = ?
-             AND r.account_type = ?
-           ORDER BY a.account_name""",
-        (period, LEAGUE_COMBAT),
+        """SELECT player_tag, account_name, town_hall_level
+           FROM accounts
+           WHERE clan_tag = ? AND COALESCE(membership_status, 'member') != 'left'
+           ORDER BY account_name""",
+        (selected,),
     ).fetchall()
-
-    if not member_rows:
-        return {"stats": [], "period": period}
-
-    member_tags = {r["player_tag"] for r in member_rows}
-
-    # ── 2. 查询 war_results 表，按 end_time 倒序 ──
-    wr_rows = conn.execute(
-        """SELECT wr.player_tag, wr.end_time, wr.attacks, wr.offense_3stars,
-                  wr.defense_3stars, wr.defense_total
-           FROM war_results wr
-           WHERE wr.clan_tag = '#2QQ'
-             AND wr.player_tag IN (
-                 SELECT a.player_tag
-                 FROM registrations r
-                 JOIN accounts a ON a.account_name = r.account_name
-                 WHERE r.period = ? AND r.account_type = ?
-             )
-           ORDER BY wr.end_time DESC""",
-        (period, LEAGUE_COMBAT),
+    history_rows = conn.execute(
+        """SELECT war_key, updated_at FROM war_history_cache
+           WHERE clan_tag = ? AND status = 'war_ended'
+           ORDER BY end_time DESC, war_key DESC LIMIT 45""",
+        (selected,),
     ).fetchall()
+    windows = {"5": [row["war_key"] for row in history_rows[:5]],
+               "15": [row["war_key"] for row in history_rows[:15]],
+               "45": [row["war_key"] for row in history_rows]}
+    member_tags = [row["player_tag"] for row in member_rows]
+    facts_by_player: dict[str, dict[str, dict]] = defaultdict(dict)
+    if member_tags and history_rows:
+        member_placeholders = ",".join("?" for _ in member_tags)
+        key_placeholders = ",".join("?" for _ in history_rows)
+        fact_rows = conn.execute(
+            f"""SELECT player_tag, war_key, offense_effective_attacks,
+                       offense_effective_3stars, defense_effective_attacks,
+                       defense_effective_3stars
+                FROM member_war_facts
+                WHERE clan_tag = ? AND status = 'war_ended'
+                  AND player_tag IN ({member_placeholders})
+                  AND war_key IN ({key_placeholders})""",
+            (selected, *member_tags, *(row["war_key"] for row in history_rows)),
+        ).fetchall()
+        for row in fact_rows:
+            facts_by_player[row["player_tag"]][row["war_key"]] = dict(row)
 
-    # ── 3. 按 player_tag 分组，截取最近 N 场 ──
-    # player_tag → [{end_time, attacks, offense_3stars, defense_3stars, defense_total}, ...]
-    # 已按 end_time DESC 排序，直接按顺序分组即可
-    player_wars: dict[str, list[dict]] = defaultdict(list)
-    for row in wr_rows:
-        player_wars[row["player_tag"]].append({
-            "attacks": row["attacks"] or 0,
-            "offense_3stars": row["offense_3stars"] or 0,
-            "defense_3stars": row["defense_3stars"] or 0,
-            "defense_total": row["defense_total"] or 0,
-        })
-
-    windows = {"5": 5, "15": 15, "45": 45}
-
-    def _aggregate_window(war_list: list[dict], n: int) -> dict[str, int]:
-        """取 war_list 前 n 场，累计战绩数据。"""
-        subset = war_list[:n]
+    def _aggregate(player_tag: str, keys: list[str]) -> dict[str, int]:
+        facts = facts_by_player.get(player_tag, {})
+        rows = [facts[key] for key in keys if key in facts]
         return {
-            "offense_3stars": sum(w["offense_3stars"] for w in subset),
-            "attacks": sum(w["attacks"] for w in subset),
-            "defense_3stars": sum(w["defense_3stars"] for w in subset),
-            "defense_total": sum(w["defense_total"] for w in subset),
+            "offense_3stars": sum(int(row["offense_effective_3stars"] or 0) for row in rows),
+            "attacks": sum(int(row["offense_effective_attacks"] or 0) for row in rows),
+            "defense_3stars": sum(int(row["defense_effective_3stars"] or 0) for row in rows),
+            "defense_total": sum(int(row["defense_effective_attacks"] or 0) for row in rows),
         }
 
-    # ── 4. 组装返回结果 ──
     result = []
     for member in member_rows:
         tag = member["player_tag"]
-        wars = player_wars.get(tag, [])
-
         item = {
             "player_tag": tag,
             "account_name": member["account_name"],
             "town_hall_level": member["town_hall_level"],
         }
-
-        for wk_key, wk_n in windows.items():
-            agg = _aggregate_window(wars, wk_n)
+        for wk_key, keys in windows.items():
+            agg = _aggregate(tag, keys)
             item[f"offense_{wk_key}"] = _calc_rate(agg["offense_3stars"], agg["attacks"])
             item[f"defense_{wk_key}"] = _calc_rate(agg["defense_3stars"], agg["defense_total"])
-
+            item[f"offense_{wk_key}_sample"] = {
+                "three_stars": agg["offense_3stars"], "attacks": agg["attacks"],
+            }
+            item[f"defense_{wk_key}_sample"] = {
+                "three_stars": agg["defense_3stars"], "attacks": agg["defense_total"],
+            }
         result.append(item)
-
-    # 数据更新时间：取战营 war_results 最近一次同步时间
-    updated_at = _max_fetched_at(conn, "war_results", "clan_tag", ["#2QQ"])
-
     return {
-        "period": period,
+        "clan_tag": selected,
+        "clan_name": configured[selected].get("name") or selected,
         "stats": result,
-        "updated_at": updated_at,
+        "updated_at": max((row["updated_at"] for row in history_rows if row["updated_at"]), default=None),
+        "history_coverage": {"available": len(history_rows), "target": 45, "complete": len(history_rows) >= 45},
     }
 
 

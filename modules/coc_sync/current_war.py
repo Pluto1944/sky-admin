@@ -106,7 +106,7 @@ def _member_view(
     attacks = sorted(
         (_attack_view(attack, defender_positions) for attack in (member.get("attacks") or [])),
         key=lambda attack: attack["order"],
-    )[:2]
+    )
 
     incoming = [
         attack for attack in incoming_attacks

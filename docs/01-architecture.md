@@ -1,7 +1,7 @@
 # 01 — 系统架构
 
 > 联赛报名与名单编排管理系统 · 架构设计文档
-> 版本：v3.1（2026-09）
+> 版本：v3.2（2026-10）
 
 ---
 
@@ -13,8 +13,8 @@
 
 | 脚本 | 执行频率 | 核心职责 |
 |------|---------|---------|
-| `sync_and_export.sh` | 每天 | COC API 同步成员 → accounts 表 |
-| `fetch_cwl_data.sh` | 每月 7 号 | COC API 拉取 CWL 战绩 → league_results |
+| `scheduler.py` | 常驻 | COC 同步、当前普通战归档、CWL 原始档案与业务窗口任务 |
+| `fetch_cwl_data.py` | 按需 / 月度 | 完整本地 CWL 原始档案 → `league_results` 投影 |
 | `register_and_arrange.sh` | 每月底 | 报名导入 → 编排+升降级 → 发布联赛安排 |
 
 运维详情见 `06-operations.md`。
@@ -33,7 +33,7 @@
 6. 实战人员排在一起：战营在前、普通实战在后，两类内部再按匹配值+历史战绩排序
 7. 部落人员流动，需要长期跟踪每个账号状态
 8. 需要数据库保存每月报名信息
-9. 每月联赛结束后上传战绩，更新账号历史战绩
+9. 每月联赛结束后归档完整分组和逐场战争，并重建月度战绩投影
 10. 每月活动名单输出到在线 Excel
 
 ### 关键决策
@@ -170,7 +170,8 @@ flowchart TD
 ### ③ coc_sync —— COC 同步（权威建档源）
 
 手工 `import-result`、占位 `history_score` 与旧 `results` 表已退役；CWL 历史战绩统一由
-`fetch_cwl_data.py` 写入结构化 `league_results`，并由编排和战绩统计读取。
+`fetch_cwl_data.py` 从完整本地 CWL 分组和逐场档案重建结构化 `league_results`，并由编排和战绩统计读取；
+它不再访问第三方聚合 API 或直接导入汇总 JSON。
 
 **唯一 API 出口**：所有 COC API 调用统一经 `CocSyncService` 封装。
 
@@ -295,14 +296,18 @@ sky-admin/
 
 ```mermaid
 flowchart TD
-    subgraph S1["sync_and_export.sh（每天）"]
+    subgraph S1["scheduler.py（常驻）"]
         COC1["COC API"] --> ACC["accounts 表"]
-        ACC --> TD1["腾讯文档 玩家档案"]
+        COC1 --> CW["current_war_cache"]
+        CW --> WH["war_history_cache"]
+        WH --> MWF["member_war_facts"]
     end
 
-    subgraph S2["fetch_cwl_data.sh（每月7号）"]
-        COC2["COC API"] --> JSON["data/cwl_YYYYMM/"]
-        JSON --> LR["league_results 表"]
+    subgraph S2["CWL 原始档案与投影"]
+        COC2["COC API"] --> CG["cwl_live_group_cache"]
+        COC2 --> CWLWAR["cwl_live_war_cache"]
+        CG --> LR["league_results 表"]
+        CWLWAR --> LR
     end
 
     subgraph S3["register_and_arrange.sh（每月底）"]

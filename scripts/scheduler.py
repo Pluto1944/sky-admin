@@ -8,7 +8,6 @@
     cwl_assembly 正式名单与各联赛部落集结检查（每月 1 日 14:00 至 3 日 16:00）
     farm_stats  互刷部落统计（每 30 分钟）
     coc_sync    COC 玩家档案（每 6 小时）
-    war_results 普通部落战战绩（每天）
     cwl         CWL 联赛战绩（每天触发，day==12 才真正拉取）
     player_details 玩家详情（每天，赛季进攻与活动估算）
     member_combat_stats 成员战斗摘要窗口清理（每天）
@@ -37,6 +36,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sqlite3
@@ -159,7 +159,7 @@ def _current_war_refresh_minutes(cache: dict, now: datetime) -> int:
 def _archive_current_war(
     db: Database,
     item: dict,
-    keep_ended: int = 15,
+    keep_ended: int = 45,
     cleanup_active: bool = True,
     affected_player_tags: set[str] | None = None,
 ) -> bool:
@@ -173,18 +173,14 @@ def _archive_current_war(
     from modules.player.repository import PlayerRepository
     from modules.player.service import PlayerService
 
-    fact_changes = materialize_war_member_facts(db.conn, item, record["updated_at"])
-    if affected_player_tags is not None:
-        affected_player_tags.update(fact_changes.changed_player_tags)
-    player_service = PlayerService(PlayerRepository(db.conn))
-    for player_tag in fact_changes.activity_player_tags:
-        player_service.mark_activity(player_tag, record["updated_at"], "war_attack")
+    payload = json.dumps(record["data"], ensure_ascii=False, sort_keys=True)
+    payload_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
     db.conn.execute(
         """INSERT INTO war_history_cache
            (clan_tag, war_key, clan_name, category, opponent_tag, opponent_name,
             status, result, preparation_start_time, start_time, end_time,
-            data_json, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            source, finalized_at, payload_version, payload_hash, data_json, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(clan_tag, war_key) DO UPDATE SET
                clan_name = excluded.clan_name,
                category = excluded.category,
@@ -195,6 +191,10 @@ def _archive_current_war(
                preparation_start_time = excluded.preparation_start_time,
                start_time = excluded.start_time,
                end_time = excluded.end_time,
+               source = excluded.source,
+               finalized_at = excluded.finalized_at,
+               payload_version = excluded.payload_version,
+               payload_hash = excluded.payload_hash,
                data_json = excluded.data_json,
                updated_at = excluded.updated_at""",
         (
@@ -202,10 +202,17 @@ def _archive_current_war(
             record["category"], record["opponent_tag"], record["opponent_name"],
             record["status"], record["result"], record["preparation_start_time"],
             record["start_time"], record["end_time"],
-            json.dumps(record["data"], ensure_ascii=False), record["updated_at"],
+            record["source"], record["finalized_at"], record["payload_version"],
+            payload_hash, payload, record["updated_at"],
         ),
     )
-    # 实时同步发现新战争时清理旧草稿；历史回填不得删除当前活动战争快照。
+    fact_changes = materialize_war_member_facts(db.conn, item, record["updated_at"])
+    if affected_player_tags is not None:
+        affected_player_tags.update(fact_changes.changed_player_tags)
+    player_service = PlayerService(PlayerRepository(db.conn))
+    for player_tag in fact_changes.activity_player_tags:
+        player_service.mark_activity(player_tag, record["updated_at"], "war_attack")
+    # 兼容历史升级遗留的未结束草稿；新的归档链路只写 war_ended。
     if cleanup_active:
         db.conn.execute(
             """DELETE FROM war_history_cache
@@ -221,6 +228,16 @@ def _archive_current_war(
                LIMIT -1 OFFSET ?
            )""",
         (record["clan_tag"], record["clan_tag"], keep_ended),
+    )
+    db.conn.execute(
+        """DELETE FROM member_war_facts
+           WHERE clan_tag = ? AND NOT EXISTS (
+               SELECT 1 FROM war_history_cache history
+               WHERE history.clan_tag = member_war_facts.clan_tag
+                 AND history.war_key = member_war_facts.war_key
+                 AND history.status = 'war_ended'
+           )""",
+        (record["clan_tag"],),
     )
     return True
 
@@ -267,7 +284,6 @@ def _run_current_wars(force: bool = False, now: datetime | None = None) -> dict:
     items = CocSyncService().fetch_current_wars(due_clans)
     success = 0
     failed = 0
-    affected_player_tags: set[str] = set()
     for item in items:
         previous = cached_by_tag.get(item["clan_tag"], {})
         failure_count = (
@@ -290,11 +306,18 @@ def _run_current_wars(force: bool = False, now: datetime | None = None) -> dict:
             failed += 1
             continue
 
+        payload = json.dumps(item, ensure_ascii=False, sort_keys=True)
+        payload_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        war_key = None
+        if item.get("status") == "war_ended":
+            from modules.coc_sync.war_history import war_history_key
+            war_key = war_history_key(item)
         db.conn.execute(
             """INSERT INTO current_war_cache
                (clan_tag, clan_name, category, status, data_json, error, updated_at,
-                attempted_at, failure_count)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                attempted_at, failure_count, war_key, expected_end_at, payload_version,
+                payload_hash, last_success_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(clan_tag) DO UPDATE SET
                    clan_name = excluded.clan_name,
                    category = excluded.category,
@@ -303,36 +326,47 @@ def _run_current_wars(force: bool = False, now: datetime | None = None) -> dict:
                    error = excluded.error,
                    updated_at = excluded.updated_at,
                    attempted_at = excluded.attempted_at,
-                   failure_count = excluded.failure_count""",
+                   failure_count = excluded.failure_count,
+                   war_key = excluded.war_key,
+                   expected_end_at = excluded.expected_end_at,
+                   payload_version = excluded.payload_version,
+                   payload_hash = excluded.payload_hash,
+                   last_success_at = excluded.last_success_at""",
             (
                 item["clan_tag"],
                 item["clan_name"],
                 item["category"],
                 item["status"],
-                json.dumps(item, ensure_ascii=False),
+                payload,
                 item.get("error"),
                 item["synced_at"],
                 attempted_at,
                 failure_count,
+                war_key,
+                item.get("end_time"),
+                int(item.get("payload_version") or 1),
+                payload_hash,
+                item["synced_at"] if item["status"] != "error" else None,
             ),
         )
         if item["status"] != "error":
             # 进行中战争的事实用于活动观察和历史快照，但成员战斗摘要只统计
             # 已结束战争；因此仅在结束状态收集需要重算的账号。
-            _archive_current_war(
+            archived = _archive_current_war(
                 db,
                 item,
-                affected_player_tags=(
-                    affected_player_tags if item.get("status") == "war_ended" else None
-                ),
+                affected_player_tags=None,
             )
+            if archived:
+                db.conn.execute(
+                    """UPDATE current_war_cache SET history_sealed_at = ?
+                       WHERE clan_tag = ? AND war_key = ?""",
+                    (item["synced_at"], item["clan_tag"], war_key),
+                )
         if item["status"] == "error":
             failed += 1
         else:
             success += 1
-    if affected_player_tags:
-        from modules.player.member_stats import refresh_member_combat_stats_for_players
-        refresh_member_combat_stats_for_players(db.conn, affected_player_tags, current_time)
     db.conn.commit()
     db.close()
 
@@ -355,6 +389,59 @@ def _minutes_since(value: str | None, now: datetime) -> float | None:
         return max(0.0, (now.astimezone(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds() / 60)
     except (TypeError, ValueError):
         return None
+
+
+def _refresh_cwl_projections(db: Database, teams: list[dict], period: str, timestamp: str) -> tuple[int, int]:
+    """标记原始档案完整性，并只为完整分组重建联赛月度投影。"""
+    from modules.coc_sync.cwl_live import group_war_tags
+    from modules.coc_sync.cwl_projection import group_raw_status, rebuild_league_results
+    from modules.coc_sync.official.mapper import normalize_tag
+
+    complete = projected = 0
+    for team in teams:
+        clan_tag = normalize_tag(team.get("clan_tag"))
+        if not clan_tag:
+            continue
+        group_row = db.conn.execute(
+            "SELECT data_json, raw_status FROM cwl_live_group_cache WHERE period = ? AND clan_tag = ?",
+            (period, clan_tag),
+        ).fetchone()
+        if not group_row or not group_row["data_json"]:
+            continue
+        try:
+            group = json.loads(group_row["data_json"])
+        except (TypeError, json.JSONDecodeError):
+            continue
+        tags = group_war_tags(group)
+        wars: dict[str, dict] = {}
+        if tags:
+            placeholders = ",".join("?" for _ in tags)
+            rows = db.conn.execute(
+                f"SELECT war_tag, data_json FROM cwl_live_war_cache WHERE war_tag IN ({placeholders})",
+                tags,
+            ).fetchall()
+            for row in rows:
+                try:
+                    wars[normalize_tag(row["war_tag"])] = json.loads(row["data_json"] or "{}")
+                except (TypeError, json.JSONDecodeError):
+                    continue
+        status = group_raw_status(group, wars)
+        db.conn.execute(
+            """UPDATE cwl_live_group_cache
+               SET raw_status = ?, raw_complete_at = CASE WHEN ? = 'complete' THEN ? ELSE NULL END
+               WHERE period = ? AND clan_tag = ?""",
+            (status, status, timestamp, period, clan_tag),
+        )
+        if status != "complete":
+            continue
+        complete += 1
+        if group_row["raw_status"] == "complete":
+            continue
+        rebuilt, _skipped = rebuild_league_results(
+            db.conn, group, wars, team, rebuilt_at=timestamp,
+        )
+        projected += rebuilt
+    return complete, projected
 
 
 def _run_cwl_live(force: bool = False, now: datetime | None = None) -> dict:
@@ -406,12 +493,14 @@ def _run_cwl_live(force: bool = False, now: datetime | None = None) -> dict:
                 group = service.fetch_cwl_group(team)
                 if group and group.get("season") == period:
                     status = "ended" if group.get("state") == "ended" else "active"
+                    group_payload = json.dumps(group, ensure_ascii=False, sort_keys=True)
+                    group_hash = hashlib.sha256(group_payload.encode("utf-8")).hexdigest()
                     db.conn.execute(
                         """INSERT INTO cwl_live_group_cache
                            (period, clan_tag, team_index, team_alias, team_name, category,
                             league_level, season, state, status, data_json, error,
-                            updated_at, attempted_at)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+                            updated_at, attempted_at, source, payload_version, payload_hash)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)
                            ON CONFLICT(period, clan_tag) DO UPDATE SET
                                team_index = excluded.team_index,
                                team_alias = excluded.team_alias,
@@ -424,12 +513,16 @@ def _run_cwl_live(force: bool = False, now: datetime | None = None) -> dict:
                                data_json = excluded.data_json,
                                error = NULL,
                                updated_at = excluded.updated_at,
-                               attempted_at = excluded.attempted_at""",
+                               attempted_at = excluded.attempted_at,
+                               source = excluded.source,
+                               payload_version = excluded.payload_version,
+                               payload_hash = excluded.payload_hash""",
                         (
                             period, clan_tag, team["team_index"], team["team_alias"],
                             team.get("team_name"), team["category"], team.get("league_level"),
                             group.get("season"), group.get("state"), status,
-                            json.dumps(group, ensure_ascii=False), group.get("synced_at"), attempted_at,
+                            group_payload, group.get("synced_at"), attempted_at,
+                            "official_coc", int(group.get("payload_version") or 1), group_hash,
                         ),
                     )
                     group_ok += 1
@@ -543,10 +636,13 @@ def _run_cwl_live(force: bool = False, now: datetime | None = None) -> dict:
                     old_payload = None
             before_attacks = cwl_attack_counts(old_payload, own_cwl_tags)
             after_attacks = cwl_attack_counts(war, own_cwl_tags)
+            war_payload = json.dumps(war, ensure_ascii=False, sort_keys=True)
+            war_hash = hashlib.sha256(war_payload.encode("utf-8")).hexdigest()
             db.conn.execute(
                 """INSERT INTO cwl_live_war_cache
-                   (war_tag, season, state, status, data_json, error, updated_at, attempted_at)
-                   VALUES (?, ?, ?, ?, ?, NULL, ?, ?)
+                   (war_tag, season, state, status, data_json, error, updated_at, attempted_at,
+                    source, finalized_at, payload_version, payload_hash)
+                   VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(war_tag) DO UPDATE SET
                        season = excluded.season,
                        state = excluded.state,
@@ -554,10 +650,16 @@ def _run_cwl_live(force: bool = False, now: datetime | None = None) -> dict:
                        data_json = excluded.data_json,
                        error = NULL,
                        updated_at = excluded.updated_at,
-                       attempted_at = excluded.attempted_at""",
+                       attempted_at = excluded.attempted_at,
+                       source = excluded.source,
+                       finalized_at = excluded.finalized_at,
+                       payload_version = excluded.payload_version,
+                       payload_hash = excluded.payload_hash""",
                 (
                     war_tag, period, war.get("state") or "unknown", war.get("status") or "unknown",
-                    json.dumps(war, ensure_ascii=False), war.get("synced_at"), attempted_at,
+                    war_payload, war.get("synced_at"), attempted_at,
+                    "official_coc", war.get("synced_at") if war.get("status") == "war_ended" else None,
+                    int(war.get("payload_version") or 1), war_hash,
                 ),
             )
             for player_tag, attacks in after_attacks.items():
@@ -582,6 +684,8 @@ def _run_cwl_live(force: bool = False, now: datetime | None = None) -> dict:
                 )
         db.conn.commit()
 
+    complete_groups, projected_rows = _refresh_cwl_projections(db, teams, period, attempted_at)
+    db.conn.commit()
     db.close()
     if group_failed == len(teams) and not group_payloads:
         return {"status": "failed", "reason": f"{period} 全部 {len(teams)} 个联赛队伍同步失败"}
@@ -590,7 +694,7 @@ def _run_cwl_live(force: bool = False, now: datetime | None = None) -> dict:
         "status": "success",
         "reason": (
             f"{period} 队伍 {len(teams)}（更新 {group_ok}、等待 {group_waiting}），"
-            f"战争更新 {war_ok}、跳过 {war_skipped}{suffix}"
+            f"战争更新 {war_ok}、跳过 {war_skipped}，完整分组 {complete_groups}、投影 {projected_rows} 行{suffix}"
         ),
     }
 
@@ -910,15 +1014,15 @@ def _run_clan_games_stats(force: bool = False, now: datetime | None = None) -> d
 
 
 def _run_member_combat_stats() -> dict:
-    """每日滑动成员战斗窗口，清除超过90天/3完整月的数据。"""
-    from modules.player.member_stats import refresh_member_combat_stats
+    """补齐历史档案的逐玩家事实；成员摘要在 API 查询时实时派生。"""
+    from modules.player.member_stats import materialize_cached_war_facts
 
     db = Database(config.DB_PATH)
     db.init_schema()
-    count = refresh_member_combat_stats(db.conn)
+    count = materialize_cached_war_facts(db.conn)
     db.conn.commit()
     db.close()
-    return {"status": "success", "reason": f"刷新 {count} 名成员战斗摘要"}
+    return {"status": "success", "reason": f"物化 {count} 场普通战玩家事实"}
 
 
 def _run_cwl_assembly(force: bool = False, now: datetime | None = None) -> dict:
@@ -1018,13 +1122,9 @@ def _run_cwl_assembly(force: bool = False, now: datetime | None = None) -> dict:
                 )
                 if snapshot is not None:
                     if preserve_assembly:
-                        # 只有首领/管理等抬头元数据变化时，换绑新 revision，保留
-                        # 已冻结的集结结果，避免联赛开启后重新计算。
-                        db.conn.execute(
-                            """UPDATE cwl_assembly_cache
-                               SET roster_snapshot_id = ? WHERE period = ?""",
-                            (cursor.lastrowid, period),
-                        )
+                        # 已冻结的集结记录必须继续指向实际核对时的 revision；
+                        # 最新 active revision 仅供尚未冻结的队伍继续检查/展示。
+                        pass
                     else:
                         db.conn.execute("DELETE FROM cwl_assembly_cache WHERE period = ?", (period,))
             snapshot = {
@@ -1169,71 +1269,32 @@ def _run_cwl_assembly(force: bool = False, now: datetime | None = None) -> dict:
     return {"status": "success", "reason": f"检查 {success} 个联赛部落{suffix}"}
 
 
-def _run_war_results() -> dict:
-    """拉取战营部落战战绩，写入 war_results 表。"""
-    from modules.coc_sync.clashking.client import (
-        fetch_war_log, is_cwl_war, aggregate_regular_war_players,
-    )
-
-    clan_tag = "#2QQ"  # 战营主部落
-    wars = fetch_war_log(clan_tag, limit=200)
-    if not wars:
-        return {"status": "failed", "reason": "ClashKing API 未返回任何 war log"}
-
-    regular_wars = [w for w in wars if not is_cwl_war(w)]
-    players = aggregate_regular_war_players(regular_wars, clan_tag)
-    if not players:
-        return {"status": "skipped", "reason": "没有普通部落战玩家数据"}
-
-    from scripts.fetch_war_data import _write_to_db
-
-    n_ok = _write_to_db(players, clan_tag)
-    return {"status": "success", "reason": f"写入 {n_ok} 条战绩"}
-
-
 def _run_cwl(force: bool = False) -> dict:
-    """拉取当月 CWL 联赛战绩，写入 league_results 表。
-
-    仅每月 12 号执行（force=True 跳过日期判断，供调试/补数据）。
-    日期按东八区（Asia/Shanghai）判断，与业务时区一致。
-    """
-    from datetime import timezone as _tz, timedelta as _td
-
-    cst = _tz(_td(hours=8))  # Asia/Shanghai
-    today = datetime.now(cst)
+    """只从已完整的本地 CWL 原始档案重建 league_results。"""
+    today = datetime.now(BUSINESS_TZ)
     if not force and today.day != 12:
         return {"status": "skipped", "reason": f"非12号（今天{today.day}号），跳过"}
-
     period = today.strftime("%Y-%m")
-
-    from scripts.fetch_cwl_data import _load_teams_from_db, _fetch_and_write, _cold_start_from_json
-
-    teams = _load_teams_from_db(period)
-    if teams:
-        ok_teams, n_ok, _n_skip, _source_map = _fetch_and_write(period, teams)
-        if not ok_teams:
-            return {"status": "failed", "reason": f"{period} 全部队伍拉取失败"}
-        if n_ok == 0:
-            return {"status": "skipped", "reason": f"{period} 0 条战绩写入（不在 accounts）"}
-        db = Database(config.DB_PATH)
-        db.init_schema()
-        from modules.player.member_stats import refresh_member_combat_stats
-        refresh_member_combat_stats(db.conn)
-        db.conn.commit()
-        db.close()
-        return {"status": "success", "reason": f"{period} 写入 {n_ok} 条（{len(ok_teams)}/{len(teams)} 队）"}
-
-    # 冷启动：league_teams 无记录，从本地 JSON 导入
-    ok_teams, n_ok, _n_skip = _cold_start_from_json(period)
-    if n_ok == 0:
-        return {"status": "skipped", "reason": f"{period} 无 league_teams 且无本地 JSON"}
     db = Database(config.DB_PATH)
     db.init_schema()
-    from modules.player.member_stats import refresh_member_combat_stats
-    refresh_member_combat_stats(db.conn)
+    teams = [dict(row) for row in db.conn.execute(
+        """SELECT period, team_index, team_alias, team_name, clan_tag,
+                  category, member_count, league_level
+           FROM league_teams WHERE period = ? AND category IN ('combat', 'shell')
+           ORDER BY team_index""",
+        (period,),
+    ).fetchall()]
+    if not teams:
+        db.close()
+        return {"status": "skipped", "reason": f"{period} 无 league_teams 联赛队伍"}
+    complete, written = _refresh_cwl_projections(
+        db, teams, period, today.astimezone(timezone.utc).isoformat(timespec="seconds"),
+    )
     db.conn.commit()
     db.close()
-    return {"status": "success", "reason": f"{period} 冷启动写入 {n_ok} 条"}
+    if not complete:
+        return {"status": "skipped", "reason": f"{period} 尚无完整 CWL 原始档案"}
+    return {"status": "success", "reason": f"{period} 完整分组 {complete}，重建 {written} 条战绩投影"}
 
 
 def _run_war_layout() -> dict:
@@ -1319,11 +1380,6 @@ JOBS = {
         "interval": 360,
         "include_in_all": False,
         "run": _run_clan_games_stats,
-    },
-    "war_results": {
-        "name": "普通部落战战绩",
-        "interval": 1440,
-        "run": _run_war_results,
     },
     "cwl": {
         "name": "CWL联赛战绩",

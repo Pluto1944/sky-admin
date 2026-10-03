@@ -1,5 +1,8 @@
 # 战斗历史数据设计
 
+> 状态：已实现。普通战和 CWL 的事实表、投影与接口边界以
+> `13-war-stats.md`、`12-league-stats.md` 和 `02-database.md` 为准。
+
 ## 1. 页面结构
 
 ```text
@@ -10,20 +13,21 @@
     └── 月份选择 → 参赛部落 → 战斗日 / 联赛总览
 ```
 
-普通战争按部落保留最近 15 场完整详情；CWL 按月份长期保留。成员滚动统计表
-`war_results` / `league_results` 只回答长期表现，不承担逐场详情。
+普通战争按部落保留最近 45 场完整详情；历史下拉菜单只显示其中最近 15 场；CWL 按月份长期保留。成员滚动统计表
+`league_results` 只回答 CWL 长期表现，不承担逐场详情；普通战长期统计直接从完整
+`war_history_cache` 和可重建 `member_war_facts` 派生。
 
 ## 2. 普通部落战归档
 
-`current_wars` 从官方 API 获得标准化战争后，同时覆盖 `current_war_cache` 和
-`war_history_cache`。归档从准备日开始，战斗日和结束状态使用相同 `war_key` 更新，
-减少服务在结束切换期间中断造成的丢失。只有 `war_ended` 出现在历史列表；当前未结束
-战争不占 15 场限额，旧的未结束草稿在发现新战争时清理。
+`current_wars` 从官方 API 获得标准化战争后覆盖 `current_war_cache`。只有完整的
+`war_ended` 普通战才以稳定 `war_key` 归档到 `war_history_cache`，并在同一事务物化
+`member_war_facts`。当前未结束战争不进入历史、不占 45 场限额；请求失败保留上次成功快照，
+不以错误或空数据覆盖历史。
 
 历史列表仅返回摘要，详情按 `(clan_tag, war_key)` 单独读取完整 JSON。所有标签必须属于
 当前启用自有部落；CWL、错误和无战争状态不归档。`scripts/backfill_war_history.py`
 可从 ClashKing 回填，默认 dry-run，生产写入前必须备份数据库。`--apply` 仅在全部
-部落拉取和校验成功后统一写入，并保留实时同步已经建立的准备日或战斗日活动快照。
+部落拉取和校验成功后统一写入。回填只接受双方完整阵容和逐刀攻击数据，不能从旧汇总反推原始档案。
 
 ## 3. 联赛月份回看
 

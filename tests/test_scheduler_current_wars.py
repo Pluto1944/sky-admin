@@ -3,7 +3,6 @@ from datetime import datetime, timezone
 
 import config
 import modules.coc_sync.service as service_module
-import modules.player.member_stats as member_stats_module
 from scripts.scheduler import _archive_current_war, _current_war_refresh_minutes, _run_current_wars
 from shared.db.connection import Database
 
@@ -63,7 +62,7 @@ def _scheduler_war(status="in_war"):
     }
 
 
-def test_current_war_only_refreshes_summary_after_ended_fact_changes(tmp_path, monkeypatch):
+def test_current_war_ignores_nonfinal_snapshots_for_history(tmp_path, monkeypatch):
     db_path = str(tmp_path / "summary-refresh.sqlite3")
     monkeypatch.setattr(config, "DB_PATH", db_path)
     monkeypatch.setattr(config, "CLANS", [
@@ -83,24 +82,17 @@ def test_current_war_only_refreshes_summary_after_ended_fact_changes(tmp_path, m
         def fetch_current_wars(self, _clans):
             return [item]
 
-    calls = []
-
-    def fake_refresh(conn, player_tags, now):
-        calls.append((set(player_tags), now))
-        return len(player_tags)
-
     monkeypatch.setattr(service_module, "CocSyncService", FakeService)
-    monkeypatch.setattr(member_stats_module, "refresh_member_combat_stats_for_players", fake_refresh)
 
     _run_current_wars(force=True, now=datetime(2026, 9, 28, 1, tzinfo=timezone.utc))
-    assert calls == []
 
     item = _scheduler_war("war_ended")
     _run_current_wars(force=True, now=datetime(2026, 9, 28, 1, 2, tzinfo=timezone.utc))
-    assert calls == [({"#P1"}, datetime(2026, 9, 28, 1, 2, tzinfo=timezone.utc))]
 
     _run_current_wars(force=True, now=datetime(2026, 9, 28, 1, 4, tzinfo=timezone.utc))
-    assert len(calls) == 1
+    db = Database(db_path)
+    assert db.conn.execute("SELECT COUNT(*) FROM war_history_cache").fetchone()[0] == 1
+    db.close()
 
 
 def _seed_cache(db, tag, status, attempted_at, failure_count=0, start_time=None):
@@ -282,10 +274,10 @@ def test_scheduler_uses_error_backoff_and_force_override(tmp_path, monkeypatch):
     db.close()
 
 
-def test_archive_current_war_keeps_latest_fifteen_ended_wars(tmp_path):
+def test_archive_current_war_keeps_latest_forty_five_ended_wars(tmp_path):
     db = Database(str(tmp_path / "history.sqlite3"))
     db.init_schema()
-    for day in range(1, 18):
+    for day in range(1, 49):
         item = {
             "clan_tag": "#AAA", "clan_name": "我方", "category": "combat",
             "status": "war_ended", "state": "warEnded", "war_type": "random",
@@ -301,12 +293,12 @@ def test_archive_current_war_keeps_latest_fifteen_ended_wars(tmp_path):
     rows = db.conn.execute(
         "SELECT end_time FROM war_history_cache WHERE clan_tag='#AAA' ORDER BY end_time"
     ).fetchall()
-    assert len(rows) == 15
-    assert rows[0]["end_time"] == "20260904T230000.000Z"
+    assert len(rows) == 45
+    assert rows[0]["end_time"] == "20260905T230000.000Z"
     db.close()
 
 
-def test_historical_backfill_does_not_remove_active_snapshot(tmp_path):
+def test_only_ended_war_is_archived_and_current_war_stays_in_current_cache(tmp_path):
     db = Database(str(tmp_path / "history-active.sqlite3"))
     db.init_schema()
     active = {
@@ -324,12 +316,12 @@ def test_historical_backfill_does_not_remove_active_snapshot(tmp_path):
         "start_time": "20260921T000000.000Z", "end_time": "20260922T000000.000Z",
         "result": "victory", "opponent": {"tag": "#ENDED", "name": "历史对手"},
     }
-    assert _archive_current_war(db, active)
+    assert not _archive_current_war(db, active)
     assert _archive_current_war(db, ended, cleanup_active=False)
     db.conn.commit()
 
     rows = db.conn.execute(
         "SELECT status FROM war_history_cache WHERE clan_tag='#AAA' ORDER BY status"
     ).fetchall()
-    assert [row["status"] for row in rows] == ["in_war", "war_ended"]
+    assert [row["status"] for row in rows] == ["war_ended"]
     db.close()

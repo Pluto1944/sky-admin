@@ -6,10 +6,9 @@ from modules.player.member_stats import (
     cwl_attack_counts,
     materialize_war_member_facts,
     member_summary_map,
-    refresh_member_combat_stats,
-    refresh_member_combat_stats_for_players,
 )
 from modules.player.repository import PlayerRepository
+from scripts.scheduler import _archive_current_war
 
 
 def _war(status="war_ended"):
@@ -44,7 +43,7 @@ def _seed_accounts(db):
 
 def test_cross_clan_war_and_cwl_summary_uses_player_tag(db):
     _seed_accounts(db)
-    materialize_war_member_facts(db.conn, _war())
+    assert _archive_current_war(db, _war())
     second = _war()
     second.update({
         "clan_tag": "#OWN2", "clan_name": "自有二营",
@@ -52,7 +51,7 @@ def test_cross_clan_war_and_cwl_summary_uses_player_tag(db):
         "start_time": "20260925T230000.000Z", "end_time": "20260926T230000.000Z",
         "opponent": {"tag": "#ENEMY2", "name": "对手二"},
     })
-    materialize_war_member_facts(db.conn, second)
+    assert _archive_current_war(db, second)
     db.conn.execute(
         """INSERT INTO league_teams
            (period, team_index, team_alias, clan_tag, category, member_count)
@@ -64,9 +63,6 @@ def test_cross_clan_war_and_cwl_summary_uses_player_tag(db):
             account_name, attacks, offense_3stars)
            VALUES ('2026-09', 0, '壳队', '#CWL1', 'shell', '#P1', '甲', 7, 4)"""
     )
-    refresh_member_combat_stats(db.conn, datetime(2026, 10, 3, tzinfo=timezone.utc))
-    db.conn.commit()
-
     summaries = member_summary_map(db.conn, ["#P1", "#P2"])
     assert summaries["#P1"]["war_recent_15"] == {
         "war_count": 2, "three_stars": 2, "attacks": 2,
@@ -97,21 +93,41 @@ def test_war_fact_changes_distinguish_first_archive_and_new_attack(db):
     assert changed.activity_player_tags == frozenset({"#P1"})
 
 
-def test_selected_member_combat_refresh_only_writes_affected_accounts(db):
+def test_war_facts_calculate_offense_and_defense_by_target_best_stars(db):
     _seed_accounts(db)
-    materialize_war_member_facts(db.conn, _war())
-
-    count = refresh_member_combat_stats_for_players(
-        db.conn, {"#P1"}, datetime(2026, 10, 3, tzinfo=timezone.utc),
-    )
-
-    assert count == 1
-    rows = db.conn.execute(
-        "SELECT player_tag, war_count, war_attacks FROM member_combat_stats_cache ORDER BY player_tag"
-    ).fetchall()
-    assert [(row["player_tag"], row["war_count"], row["war_attacks"]) for row in rows] == [
-        ("#P1", 1, 1),
+    war = _war()
+    war["team_size"] = 2  # 满星为 6；同一目标补刀不能重复累计旧星。
+    war["rows"] = [
+        {
+            "clan_member": {
+                "player_tag": "#P1", "town_hall_level": 18, "position": 1,
+                "attacks": [
+                    {"attacker_tag": "#P1", "defender_tag": "#E1", "target_position": 1, "order": 1, "stars": 2},
+                    {"attacker_tag": "#P1", "defender_tag": "#E1", "target_position": 1, "order": 3, "stars": 3},
+                    {"attacker_tag": "#P1", "defender_tag": "#E2", "target_position": 2, "order": 5, "stars": 3},
+                    {"attacker_tag": "#P1", "defender_tag": "#E2", "target_position": 2, "order": 7, "stars": 3},
+                ],
+            },
+            "opponent_member": {
+                "player_tag": "#E1", "attacks": [
+                    {"attacker_tag": "#E1", "defender_tag": "#P1", "target_position": 1, "order": 2, "stars": 2},
+                    {"attacker_tag": "#E1", "defender_tag": "#P1", "target_position": 1, "order": 4, "stars": 3},
+                    {"attacker_tag": "#E1", "defender_tag": "#P2", "target_position": 2, "order": 6, "stars": 3},
+                ],
+            },
+        },
+        {"clan_member": {"player_tag": "#P2", "town_hall_level": 17, "position": 2, "attacks": []}},
     ]
+
+    materialize_war_member_facts(db.conn, war)
+    row = db.conn.execute(
+        """SELECT offense_observed_attacks, offense_effective_attacks, offense_effective_3stars,
+                  defense_observed_attacks, defense_effective_attacks, defense_effective_3stars,
+                  metric_version
+           FROM member_war_facts WHERE clan_tag = '#OWN1' AND player_tag = '#P1'"""
+    ).fetchone()
+
+    assert tuple(row) == (4, 3, 2, 2, 2, 1, 2)
 
 
 def test_member_api_derives_public_fields_and_hides_raw(db, monkeypatch):

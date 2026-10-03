@@ -10,8 +10,10 @@ from .test_current_war import _war
 
 
 def test_regular_war_has_stable_key_and_lightweight_summary():
+    raw = _war()
+    raw["state"] = "warEnded"
     item = normalize_current_war(
-        _war(), {"tag": "#AAA", "name": "我方", "category": "combat"},
+        raw, {"tag": "#AAA", "name": "我方", "category": "combat"},
         "2026-10-01T01:00:00+00:00",
     )
 
@@ -25,7 +27,7 @@ def test_regular_war_has_stable_key_and_lightweight_summary():
     assert "rows" not in summary
 
 
-def test_cwl_and_empty_states_are_not_archivable():
+def test_cwl_active_and_empty_states_are_not_archivable():
     cwl = _war()
     cwl["type"] = "cwl"
     cwl["attacksPerMember"] = 1
@@ -36,6 +38,10 @@ def test_cwl_and_empty_states_are_not_archivable():
         {"state": "notInWar"}, {"tag": "#AAA", "name": "我方"},
         "2026-10-01T01:00:00+00:00",
     )
+    active = normalize_current_war(
+        _war(), {"tag": "#AAA", "name": "我方"}, "2026-10-01T01:00:00+00:00"
+    )
 
     assert not is_archivable_war(cwl_item)
+    assert not is_archivable_war(active)
     assert not is_archivable_war(empty)

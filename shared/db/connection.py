@@ -128,26 +128,6 @@ CREATE TABLE IF NOT EXISTS wechat_users (
 );
 """
 
-_WAR_RESULTS_DDL = """
-CREATE TABLE IF NOT EXISTS war_results (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    clan_tag        TEXT NOT NULL,
-    player_tag      TEXT NOT NULL,
-    account_name    TEXT,
-    town_hall_level INTEGER,
-    end_time        TEXT NOT NULL,
-    total_stars     INTEGER DEFAULT 0,
-    attacks         INTEGER DEFAULT 0,
-    offense_3stars  INTEGER DEFAULT 0,
-    defense_3stars  INTEGER DEFAULT 0,
-    defense_total   INTEGER DEFAULT 0,
-    fetched_at      TEXT,
-    raw_metrics     TEXT,
-    UNIQUE(clan_tag, player_tag, end_time),
-    FOREIGN KEY(player_tag) REFERENCES accounts(player_tag)
-);
-"""
-
 _FARM_STATS_DDL = """
 CREATE TABLE IF NOT EXISTS farm_stats (
     clan_tag     TEXT PRIMARY KEY,
@@ -169,7 +149,13 @@ CREATE TABLE IF NOT EXISTS current_war_cache (
     error        TEXT,
     updated_at   TEXT NOT NULL,
     attempted_at TEXT,
-    failure_count INTEGER NOT NULL DEFAULT 0
+    failure_count INTEGER NOT NULL DEFAULT 0,
+    war_key TEXT,
+    expected_end_at TEXT,
+    payload_version INTEGER NOT NULL DEFAULT 1,
+    payload_hash TEXT,
+    last_success_at TEXT,
+    history_sealed_at TEXT
 );
 """
 
@@ -186,6 +172,10 @@ CREATE TABLE IF NOT EXISTS war_history_cache (
     preparation_start_time TEXT,
     start_time             TEXT,
     end_time               TEXT,
+    source                 TEXT NOT NULL DEFAULT 'official_currentwar',
+    finalized_at           TEXT,
+    payload_version        INTEGER NOT NULL DEFAULT 1,
+    payload_hash           TEXT,
     data_json              TEXT NOT NULL,
     updated_at             TEXT NOT NULL,
     PRIMARY KEY(clan_tag, war_key)
@@ -207,32 +197,24 @@ CREATE TABLE IF NOT EXISTS member_war_facts (
     actual_attacks   INTEGER NOT NULL DEFAULT 0,
     observed_attacks INTEGER NOT NULL DEFAULT 0,
     three_stars      INTEGER NOT NULL DEFAULT 0,
+    town_hall_level_at_war INTEGER,
+    map_position INTEGER,
+    offense_observed_attacks INTEGER NOT NULL DEFAULT 0,
+    offense_effective_attacks INTEGER NOT NULL DEFAULT 0,
+    offense_effective_3stars INTEGER NOT NULL DEFAULT 0,
+    defense_observed_attacks INTEGER NOT NULL DEFAULT 0,
+    defense_effective_attacks INTEGER NOT NULL DEFAULT 0,
+    defense_effective_3stars INTEGER NOT NULL DEFAULT 0,
+    metric_version INTEGER NOT NULL DEFAULT 1,
     updated_at       TEXT NOT NULL,
     PRIMARY KEY(clan_tag, war_key, player_tag)
 );
 
 CREATE INDEX IF NOT EXISTS idx_member_war_facts_player_end
 ON member_war_facts(player_tag, end_time DESC);
-"""
 
-_MEMBER_COMBAT_STATS_CACHE_DDL = """
-CREATE TABLE IF NOT EXISTS member_combat_stats_cache (
-    player_tag            TEXT PRIMARY KEY,
-    war_window_start      TEXT,
-    war_count             INTEGER NOT NULL DEFAULT 0,
-    war_three_stars       INTEGER NOT NULL DEFAULT 0,
-    war_attacks           INTEGER NOT NULL DEFAULT 0,
-    war_available_attacks INTEGER NOT NULL DEFAULT 0,
-    war_keys_json         TEXT,
-    war_clan_tags_json    TEXT,
-    cwl_periods_json      TEXT,
-    cwl_clan_tags_json    TEXT,
-    cwl_three_stars       INTEGER NOT NULL DEFAULT 0,
-    cwl_attacks           INTEGER NOT NULL DEFAULT 0,
-    status                TEXT NOT NULL DEFAULT 'success',
-    error                 TEXT,
-    updated_at            TEXT NOT NULL
-);
+CREATE INDEX IF NOT EXISTS idx_member_war_facts_clan_end
+ON member_war_facts(clan_tag, end_time DESC);
 """
 
 _CAPITAL_RAID_MEMBER_RESULTS_DDL = """
@@ -300,6 +282,11 @@ CREATE TABLE IF NOT EXISTS cwl_live_group_cache (
     error         TEXT,
     updated_at    TEXT,
     attempted_at  TEXT NOT NULL,
+    raw_status    TEXT NOT NULL DEFAULT 'collecting',
+    raw_complete_at TEXT,
+    source        TEXT,
+    payload_version INTEGER NOT NULL DEFAULT 1,
+    payload_hash  TEXT,
     PRIMARY KEY(period, clan_tag)
 );
 """
@@ -313,7 +300,11 @@ CREATE TABLE IF NOT EXISTS cwl_live_war_cache (
     data_json     TEXT,
     error         TEXT,
     updated_at    TEXT,
-    attempted_at  TEXT NOT NULL
+    attempted_at  TEXT NOT NULL,
+    source        TEXT,
+    finalized_at  TEXT,
+    payload_version INTEGER NOT NULL DEFAULT 1,
+    payload_hash  TEXT
 );
 """
 
@@ -378,12 +369,10 @@ _CHILDREN_DDL = (
     + _LEAGUE_TEAMS_DDL
     + _LEAGUE_RESULTS_DDL
     + _WECHAT_USERS_DDL
-    + _WAR_RESULTS_DDL
     + _FARM_STATS_DDL
     + _CURRENT_WAR_CACHE_DDL
     + _WAR_HISTORY_CACHE_DDL
     + _MEMBER_WAR_FACTS_DDL
-    + _MEMBER_COMBAT_STATS_CACHE_DDL
     + _CAPITAL_RAID_MEMBER_RESULTS_DDL
     + _CLAN_GAMES_MEMBER_SNAPSHOTS_DDL
     + _CLAN_PROFILE_CACHE_DDL
@@ -501,11 +490,6 @@ class Database:
         if "fetched_at" not in lr_cols:
             self.conn.execute("ALTER TABLE league_results ADD COLUMN fetched_at TEXT")
 
-        # war_results 表迁移（部落战战绩功能）
-        wr_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(war_results)")}
-        if not wr_cols:
-            self.conn.execute(_WAR_RESULTS_DDL)
-
         # farm_stats 表迁移（互刷部落缓存）
         fs_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(farm_stats)")}
         if not fs_cols:
@@ -522,21 +506,52 @@ class Database:
                 self.conn.execute(
                     "ALTER TABLE current_war_cache ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0"
                 )
+            for column, definition in (
+                ("war_key", "TEXT"),
+                ("expected_end_at", "TEXT"),
+                ("payload_version", "INTEGER NOT NULL DEFAULT 1"),
+                ("payload_hash", "TEXT"),
+                ("last_success_at", "TEXT"),
+                ("history_sealed_at", "TEXT"),
+            ):
+                if column not in cw_cols:
+                    self.conn.execute(f"ALTER TABLE current_war_cache ADD COLUMN {column} {definition}")
 
-        # 普通部落战逐场历史归档（每个部落保留最近 15 场已结束战争）
+        # 普通部落战逐场历史归档（每个部落保留最近 45 场已结束战争）
         wh_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(war_history_cache)")}
         if not wh_cols:
             self.conn.executescript(_WAR_HISTORY_CACHE_DDL)
+        else:
+            for column, definition in (
+                ("source", "TEXT NOT NULL DEFAULT 'official_currentwar'"),
+                ("finalized_at", "TEXT"),
+                ("payload_version", "INTEGER NOT NULL DEFAULT 1"),
+                ("payload_hash", "TEXT"),
+            ):
+                if column not in wh_cols:
+                    self.conn.execute(f"ALTER TABLE war_history_cache ADD COLUMN {column} {definition}")
 
-        if not {row[1] for row in self.conn.execute("PRAGMA table_info(member_war_facts)")}:
+        fact_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(member_war_facts)")}
+        if not fact_cols:
             self.conn.executescript(_MEMBER_WAR_FACTS_DDL)
-        combat_cache_cols = {
-            row[1] for row in self.conn.execute("PRAGMA table_info(member_combat_stats_cache)")
-        }
-        if not combat_cache_cols:
-            self.conn.execute(_MEMBER_COMBAT_STATS_CACHE_DDL)
-        elif "war_keys_json" not in combat_cache_cols:
-            self.conn.execute("ALTER TABLE member_combat_stats_cache ADD COLUMN war_keys_json TEXT")
+        else:
+            for column, definition in (
+                ("town_hall_level_at_war", "INTEGER"),
+                ("map_position", "INTEGER"),
+                ("offense_observed_attacks", "INTEGER NOT NULL DEFAULT 0"),
+                ("offense_effective_attacks", "INTEGER NOT NULL DEFAULT 0"),
+                ("offense_effective_3stars", "INTEGER NOT NULL DEFAULT 0"),
+                ("defense_observed_attacks", "INTEGER NOT NULL DEFAULT 0"),
+                ("defense_effective_attacks", "INTEGER NOT NULL DEFAULT 0"),
+                ("defense_effective_3stars", "INTEGER NOT NULL DEFAULT 0"),
+                ("metric_version", "INTEGER NOT NULL DEFAULT 1"),
+            ):
+                if column not in fact_cols:
+                    self.conn.execute(f"ALTER TABLE member_war_facts ADD COLUMN {column} {definition}")
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_member_war_facts_clan_end "
+                "ON member_war_facts(clan_tag, end_time DESC)"
+            )
         if not {row[1] for row in self.conn.execute("PRAGMA table_info(capital_raid_member_results)")}:
             self.conn.executescript(_CAPITAL_RAID_MEMBER_RESULTS_DDL)
         if not {row[1] for row in self.conn.execute("PRAGMA table_info(clan_games_member_snapshots)")}:
@@ -553,15 +568,32 @@ class Database:
         }
         if not cwl_group_cols:
             self.conn.execute(_CWL_LIVE_GROUP_CACHE_DDL)
-        elif "attempted_at" not in cwl_group_cols:
-            self.conn.execute("ALTER TABLE cwl_live_group_cache ADD COLUMN attempted_at TEXT")
+        else:
+            for column, definition in (
+                ("attempted_at", "TEXT"),
+                ("raw_status", "TEXT NOT NULL DEFAULT 'collecting'"),
+                ("raw_complete_at", "TEXT"),
+                ("source", "TEXT"),
+                ("payload_version", "INTEGER NOT NULL DEFAULT 1"),
+                ("payload_hash", "TEXT"),
+            ):
+                if column not in cwl_group_cols:
+                    self.conn.execute(f"ALTER TABLE cwl_live_group_cache ADD COLUMN {column} {definition}")
         cwl_war_cols = {
             row[1] for row in self.conn.execute("PRAGMA table_info(cwl_live_war_cache)")
         }
         if not cwl_war_cols:
             self.conn.execute(_CWL_LIVE_WAR_CACHE_DDL)
-        elif "attempted_at" not in cwl_war_cols:
-            self.conn.execute("ALTER TABLE cwl_live_war_cache ADD COLUMN attempted_at TEXT")
+        else:
+            for column, definition in (
+                ("attempted_at", "TEXT"),
+                ("source", "TEXT"),
+                ("finalized_at", "TEXT"),
+                ("payload_version", "INTEGER NOT NULL DEFAULT 1"),
+                ("payload_hash", "TEXT"),
+            ):
+                if column not in cwl_war_cols:
+                    self.conn.execute(f"ALTER TABLE cwl_live_war_cache ADD COLUMN {column} {definition}")
 
         # CWL 正式名单快照与集结检查缓存
         roster_cols = {
@@ -579,6 +611,10 @@ class Database:
         sj_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(sync_jobs)")}
         if not sj_cols:
             self.conn.execute(_SYNC_JOBS_DDL)
+
+        # 普通战旧聚合任务已随旧表物理退役；清理历史运行状态，避免 --list
+        # 显示一个不再存在且无法调度的任务。
+        self.conn.execute("DELETE FROM sync_jobs WHERE job_id = 'war_results'")
 
         self.conn.commit()
         self.conn.execute("PRAGMA foreign_keys = ON")
@@ -639,11 +675,11 @@ class Database:
         for table in (
             "cwl_assembly_cache", "cwl_roster_snapshots",
             "cwl_live_war_cache", "cwl_live_group_cache", "war_history_cache",
-            "member_war_facts", "member_combat_stats_cache",
+            "member_war_facts",
             "capital_raid_member_results", "clan_games_member_snapshots",
             "current_war_cache",
             "clan_profile_cache",
-            "war_results", "league_results", "league_teams",
+            "league_results", "league_teams",
             "registrations", "accounts", "sync_jobs",
         ):
             self.conn.execute(f"DROP TABLE IF EXISTS {table}")

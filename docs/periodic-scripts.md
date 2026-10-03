@@ -51,11 +51,11 @@
 | 脚本 | `scripts/fetch_cwl_data.py --period YYYY-MM` |
 | 建议频率 | 每月 1 次 |
 
-### 4. 普通部落战战绩（`war_results` 表）
+### 4. 普通部落战战绩（历史方案，已退役）
 
 | 项目 | 内容 |
 |---|---|
-| 脚本 | `scripts/fetch_war_data.py --clan-tag "#2QQ"` |
+| 替代 | `current_wars` 自动归档；历史补档使用 `scripts/backfill_war_history.py` |
 | 建议频率 | 每天 1 次 |
 
 </details>
