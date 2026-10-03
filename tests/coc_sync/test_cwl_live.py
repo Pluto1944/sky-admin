@@ -54,6 +54,7 @@ def test_dashboard_builds_rounds_standings_town_halls_and_member_stats():
     assert own["losses"] == 1
     assert own["attack_stars"] == 5
     assert own["league_stars"] == 15
+    assert [item["attacks"] for item in own["rounds"]] == [1, 1]
 
     offense = next(row for row in dashboard["overview"]["offense"]["rows"] if row["player_tag"] == "#A1")
     assert offense["total_stars"] == 5

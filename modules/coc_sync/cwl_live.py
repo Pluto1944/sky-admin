@@ -444,6 +444,7 @@ def _standings(group: dict, wars_by_tag: dict[str, dict]) -> list[dict]:
                     "status": war.get("status"),
                     "result": result,
                     "team_size": war.get("team_size", 0),
+                    "attacks": side.get("attacks", 0),
                     "stars": side.get("stars", 0),
                     "destruction_percentage": side.get("destruction_percentage", 0),
                     "opponent_name": other.get("name"),

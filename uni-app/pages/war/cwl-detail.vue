@@ -218,7 +218,7 @@ export default {
     defensePosition(member) { const attack = this.memberDefense(member); return attack && attack.attacker_position ? attack.attacker_position : '-' },
     formatAttack(attack, emptyText) { if (!attack) return emptyText || '-'; return `${'★'.repeat(Number(attack.stars || 0))}${'☆'.repeat(Math.max(0, 3 - Number(attack.stars || 0)))} ${Number(attack.destruction_percentage || 0).toFixed(0)}%` },
     attackClass(attack, defense) { if (!attack) return 'attack-empty'; const stars = Number(attack.stars || 0); if (defense) return stars === 3 ? 'attack-bad' : stars === 2 ? 'attack-mid' : 'attack-good'; return stars === 3 ? 'attack-good' : stars === 2 ? 'attack-mid' : 'attack-bad' },
-    standingRoundText(item) { if (!item || item.status === 'not_started') return '-'; return `${item.team_size || '-'}× ${item.stars || 0}★ ${this.formatNumber(item.destruction_percentage)}%` },
+    standingRoundText(item) { if (!item || item.status === 'not_started') return '-'; return `${item.attacks || 0}刀 · ${item.stars || 0}★ · ${this.formatNumber(item.destruction_percentage)}%` },
     offenseRoundText(item) { if (item.status === 'not_participated') return '未参战'; if (item.status === 'not_attacked') return '未出刀'; return `${item.stars}★ ${this.formatNumber(item.destruction_percentage)}%` },
     defenseRoundText(item) { if (item.status === 'not_participated') return '未参战'; if (item.status === 'unattacked') return '未被打'; return `${item.stars}★ ${this.formatNumber(item.destruction_percentage)}%` },
     attackCellClass(item) { if (item.status !== 'attacked') return 'attack-empty'; return item.stars === 3 ? 'attack-good' : item.stars === 2 ? 'attack-mid' : 'attack-bad' },
