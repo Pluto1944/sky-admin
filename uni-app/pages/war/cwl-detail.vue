@@ -90,8 +90,8 @@
           <view class="section-title" @tap="toggleSection('standings')"><text>联赛对局</text><text>{{ openSections.standings ? '收起' : '展开' }}</text></view>
           <scroll-view v-if="openSections.standings" scroll-x class="wide-table-scroll">
             <view :style="{ width: standingsTableWidth + 'rpx' }" class="overview-table">
-              <view class="tr tr-head" :style="{ width: standingsTableWidth + 'rpx' }"><view class="td rank-col">排名</view><view class="td player-col">部落名称</view><view class="td total-col">总计</view><view v-for="index in overviewRoundCount" :key="index" class="td round-col">第{{ index }}场</view></view>
-              <view v-for="row in standingsRows" :key="row.clan_tag" class="tr" :style="{ width: standingsTableWidth + 'rpx' }"><view class="td rank-col">{{ row.rank }}</view><view class="td player-col name-cell">{{ row.clan_name }}</view><view class="td total-col">{{ row.league_stars }}⭐</view><view v-for="item in row.rounds" :key="item.round" class="td round-col" :class="resultClass(item.result)">{{ standingRoundText(item) }}</view></view>
+              <view class="tr tr-head" :style="{ width: standingsTableWidth + 'rpx' }"><view class="td rank-col">排名</view><view class="td player-col">部落名称</view><view class="td total-col">总计</view><view v-for="round in overviewRoundNumbers" :key="round" class="td round-col">第{{ round }}场</view></view>
+              <view v-for="row in standingsRows" :key="row.clan_tag" class="tr" :style="{ width: standingsTableWidth + 'rpx' }"><view class="td rank-col">{{ row.rank }}</view><view class="td player-col name-cell">{{ row.clan_name }}</view><view class="td total-col">{{ row.league_stars }}⭐</view><view v-for="item in row.rounds" :key="item.round" class="td round-col" :class="standingResultClass(item)">{{ standingRoundText(item) }}</view></view>
             </view>
           </scroll-view>
         </view>
@@ -100,7 +100,7 @@
           <view class="section-title" @tap="toggleSection('offense')"><text>成员进攻统计</text><text>{{ openSections.offense ? '收起' : '展开' }}</text></view>
           <scroll-view v-if="openSections.offense" scroll-x class="wide-table-scroll">
             <view :style="{ width: offenseTableWidth + 'rpx' }" class="overview-table">
-              <view class="tr tr-head" :style="{ width: offenseTableWidth + 'rpx' }"><view class="td rank-col">排名</view><view class="td player-col">名称</view><view class="td th-col">大本</view><view class="td member-total-col">总计</view><view class="td count-col">出刀</view><view class="td diff-col">对位差</view><view v-for="index in overviewRoundCount" :key="index" class="td member-round-col">第{{ index }}场</view></view>
+              <view class="tr tr-head" :style="{ width: offenseTableWidth + 'rpx' }"><view class="td rank-col">排名</view><view class="td player-col">名称</view><view class="td th-col">大本</view><view class="td member-total-col">总计</view><view class="td count-col">出刀</view><view class="td diff-col">对位差</view><view v-for="round in overviewRoundNumbers" :key="round" class="td member-round-col">第{{ round }}场</view></view>
               <view v-for="row in offenseRows" :key="row.player_tag" class="tr" :style="{ width: offenseTableWidth + 'rpx' }"><view class="td rank-col">{{ row.rank }}</view><view class="td player-col name-cell">{{ row.name }}</view><view class="td th-col">{{ row.town_hall_level }}</view><view class="td member-total-col">{{ row.total_stars }}★ {{ formatNumber(row.total_destruction) }}%</view><view class="td count-col">{{ row.attacks }}/{{ row.appearances }}</view><view class="td diff-col">{{ signedNumber(row.matchup_difference) }}</view><view v-for="item in row.rounds" :key="item.round" class="td member-round-col" :class="attackCellClass(item)">{{ offenseRoundText(item) }}</view></view>
             </view>
           </scroll-view>
@@ -110,7 +110,7 @@
           <view class="section-title" @tap="toggleSection('defense')"><text>成员防守统计</text><text>{{ openSections.defense ? '收起' : '展开' }}</text></view>
           <scroll-view v-if="openSections.defense" scroll-x class="wide-table-scroll">
             <view :style="{ width: defenseTableWidth + 'rpx' }" class="overview-table">
-              <view class="tr tr-head" :style="{ width: defenseTableWidth + 'rpx' }"><view class="td rank-col">排名</view><view class="td pos-col">序号</view><view class="td player-col">名称</view><view class="td th-col">大本</view><view class="td member-total-col">防守成果</view><view class="td defense-count-col">防守成功</view><view v-for="index in overviewRoundCount" :key="index" class="td member-round-col">第{{ index }}场</view></view>
+              <view class="tr tr-head" :style="{ width: defenseTableWidth + 'rpx' }"><view class="td rank-col">排名</view><view class="td pos-col">序号</view><view class="td player-col">名称</view><view class="td th-col">大本</view><view class="td member-total-col">防守成果</view><view class="td defense-count-col">防守成功</view><view v-for="round in overviewRoundNumbers" :key="round" class="td member-round-col">第{{ round }}场</view></view>
               <view v-for="row in defenseRows" :key="row.player_tag" class="tr" :style="{ width: defenseTableWidth + 'rpx' }"><view class="td rank-col">{{ row.rank }}</view><view class="td pos-col">{{ row.last_position }}</view><view class="td player-col name-cell">{{ row.name }}</view><view class="td th-col">{{ row.town_hall_level }}</view><view class="td member-total-col">{{ row.saved_stars }}★ {{ formatNumber(row.saved_destruction) }}%</view><view class="td defense-count-col">{{ row.successful_defenses }}/{{ row.appearances }}</view><view v-for="item in row.rounds" :key="item.round" class="td member-round-col" :class="defenseCellClass(item)">{{ defenseRoundText(item) }}</view></view>
             </view>
           </scroll-view>
@@ -155,6 +155,7 @@ export default {
     offenseRows() { return this.detail ? this.detail.overview.offense.rows || [] : [] },
     defenseRows() { return this.detail ? this.detail.overview.defense.rows || [] : [] },
     overviewRoundCount() { return this.detail ? this.detail.overview.standings.round_count || 0 : 0 },
+    overviewRoundNumbers() { return Array.from({ length: this.overviewRoundCount }, (value, index) => index + 1) },
     townHallTableWidth() { return 540 + this.townHallLevels.length * 72 },
     standingsTableWidth() { return 410 + this.overviewRoundCount * 170 },
     offenseTableWidth() { return 650 + this.overviewRoundCount * 130 },
@@ -171,7 +172,10 @@ export default {
   onShow() {
     uni.setStorageSync('war_active_top_tab', 'league')
     this.stopTimer()
-    if (this.isCurrentPeriod) this.refreshTimer = setInterval(() => { this.fetchDetail() }, CACHE_REFRESH_INTERVAL_MS)
+    if (this.isCurrentPeriod) {
+      if (this.detail) this.fetchDetail()
+      this.refreshTimer = setInterval(() => { this.fetchDetail() }, CACHE_REFRESH_INTERVAL_MS)
+    }
   },
   onHide() { this.stopTimer() },
   onUnload() { this.stopTimer() },
@@ -190,10 +194,11 @@ export default {
       this.loadError = ''
       try {
         const res = await getCwlLiveDetail(this.clanTag, this.period, this.selectedRoundNumber || this.requestedRound)
-        this.detail = res
+        this.detail = Object.assign({}, res)
         this.period = res.period || this.period
         const firstRound = (res.rounds || [])[0]
         if (!this.selectedRoundNumber) this.selectedRoundNumber = this.requestedRound || res.requested_round || res.current_round || (firstRound && firstRound.round)
+        this.$nextTick(() => { this.$forceUpdate() })
       } catch (e) { this.loadError = e.message || '联赛详情加载失败' }
       finally { this.loading = false }
     },
@@ -214,7 +219,6 @@ export default {
       return ({ victory: '胜利', defeat: '失败', tied: '平局', pending: '尚未开战' })[item.result] || '-'
     },
     summaryResultText(summary) {
-      if (summary && summary.status === 'active') return `第${summary.current_round || '-'}场 ${({ leading: '领先', losing: '落后', tied: '平' })[summary.current_result] || '进行中'}`
       if (!summary) return '-'
       return `${summary.wins || 0}胜 ${summary.losses || 0}负${summary.ties ? ' ' + summary.ties + '平' : ''}`
     },
@@ -230,10 +234,16 @@ export default {
     standingRoundText(item) {
       if (!item || item.status === 'not_started') return '-'
       if (item.status === 'preparation') return '准备中'
-      const result = item.status === 'in_war'
-        ? ({ leading: '领先', losing: '落后', tied: '平' })[item.result]
-        : ({ victory: '胜', defeat: '负', tied: '平' })[item.result]
-      return `${result || '-'} · ${item.attacks || 0}刀 · ${item.stars || 0}★ · ${this.formatNumber(item.destruction_percentage)}%`
+      return `${item.attacks || 0}× ${item.stars || 0}★ ${this.formatNumber(item.destruction_percentage)}%`
+    },
+    standingResultClass(item) {
+      if (!item || ['not_started', 'preparation'].indexOf(item.status) >= 0) return 'result-pending'
+      if (item.status === 'in_war') {
+        if (item.result === 'leading') return 'result-live-win'
+        if (item.result === 'losing') return 'result-live-loss'
+        return 'result-live-tied'
+      }
+      return this.resultClass(item.result)
     },
     offenseRoundText(item) { if (item.status === 'not_participated') return '未参战'; if (item.status === 'not_attacked') return '未出刀'; return `${item.stars}★ ${this.formatNumber(item.destruction_percentage)}%` },
     defenseRoundText(item) { if (item.status === 'not_participated') return '未参战'; if (item.status === 'unattacked') return '未被打'; return `${item.stars}★ ${this.formatNumber(item.destruction_percentage)}%` },
@@ -257,4 +267,6 @@ export default {
 .empty-box { padding: 140rpx 30rpx; color: #66708a; font-size: 27rpx; text-align: center; }.match-card { margin: 20rpx 24rpx; padding: 20rpx; border: 1rpx solid #2a2a4a; border-radius: 14rpx; background: #18182d; }.match-heading { display: flex; align-items: center; color: #fff; font-size: 27rpx; font-weight: 600; }.result-label { margin-left: auto; font-size: 22rpx; }.result-win { color: #00b894; }.result-loss { color: #e17055; }.result-tied { color: #fdcb6e; }.match-row { margin-top: 20rpx; display: flex; align-items: center; }.match-side { flex: 1; display: flex; flex-direction: column; }.enemy-side { align-items: flex-end; }.match-name { max-width: 260rpx; overflow: hidden; color: #f0f0f5; font-size: 26rpx; text-overflow: ellipsis; white-space: nowrap; }.match-tag { margin-top: 4rpx; color: #66708a; font-size: 19rpx; }.versus { margin: 0 14rpx; color: #4a90d9; font-size: 22rpx; }.score-row { margin-top: 18rpx; display: flex; align-items: center; justify-content: space-between; color: #c9cfda; font-size: 21rpx; }.score-divider { color: #4a90d9; }.time-info { margin-top: 16rpx; padding-top: 12rpx; display: flex; justify-content: space-between; border-top: 1rpx solid #252540; color: #66708a; font-size: 20rpx; }
 .table-note { display: block; margin: 16rpx 24rpx 10rpx; color: #66708a; font-size: 21rpx; }.wide-table-scroll { width: 100%; }.battle-table { width: 1276rpx; border-top: 1rpx solid #343452; border-bottom: 1rpx solid #343452; background: #15152a; }.tr { min-height: 68rpx; display: flex; flex-direction: row; align-items: stretch; box-sizing: border-box; border-bottom: 1rpx solid #2a2a44; }.tr-head { min-height: 76rpx; color: #dfe5f0; background: #242440; font-weight: 600; }.even { background: #19192f; }.td { flex-shrink: 0; min-height: 68rpx; padding: 5rpx; display: flex; align-items: center; justify-content: center; box-sizing: border-box; border-right: 1rpx solid #30304a; color: #c9cfda; font-size: 20rpx; text-align: center; white-space: nowrap; overflow: hidden; }.tr-head .td { min-height: 76rpx; }.battle-seq { width: 56rpx; }.battle-name { width: 170rpx; }.battle-th { width: 54rpx; }.battle-attack { width: 120rpx; }.battle-pos { width: 58rpx; }.enemy-cell { background: rgba(74,45,45,.13); }.seq-cell { color: #74b9ff; font-weight: 600; }.name-cell { padding: 0 10rpx; justify-content: flex-start; text-overflow: ellipsis; }.th-cell { color: #74b9ff; font-weight: 600; }.attack-good { color: #00b894; }.attack-mid { color: #fdcb6e; }.attack-bad { color: #e17055; }.attack-empty { color: #596178; }
 .overview-pane { padding-top: 16rpx; }.overview-section { margin: 0 20rpx 16rpx; overflow: hidden; border: 1rpx solid #2a2a4a; border-radius: 10rpx; background: #15152a; }.section-title { min-height: 72rpx; padding: 0 18rpx; display: flex; align-items: center; justify-content: space-between; color: #d8dce8; font-size: 26rpx; background: #1b1b32; }.section-title text:last-child { color: #5fa8ff; font-size: 21rpx; }.overview-table { background: #15152a; }.ov-level { width: 70rpx; }.ov-clan { width: 210rpx; }.ov-tag { width: 170rpx; }.ov-total { width: 90rpx; }.ov-th { width: 72rpx; }.rank-col { width: 80rpx; }.player-col { width: 220rpx; }.total-col { width: 110rpx; }.round-col { width: 170rpx; }.th-col { width: 70rpx; }.member-total-col { width: 140rpx; }.count-col { width: 70rpx; }.diff-col { width: 70rpx; }.member-round-col { width: 130rpx; }.pos-col { width: 60rpx; }.defense-count-col { width: 110rpx; }.bottom-space { height: 80rpx; }
+.overview-table .round-col.result-win { color: #00b894; font-weight: 600; }.overview-table .round-col.result-loss { color: #ff7675; font-weight: 600; }.overview-table .round-col.result-tied { color: #fdcb6e; font-weight: 600; }.overview-table .round-col.result-pending { color: #66708a; font-weight: 400; }
+.overview-table .round-col.result-live-win { color: rgba(0,184,148,.62); font-weight: 500; }.overview-table .round-col.result-live-loss { color: rgba(255,118,117,.62); font-weight: 500; }.overview-table .round-col.result-live-tied { color: rgba(253,203,110,.62); font-weight: 500; }
 </style>
