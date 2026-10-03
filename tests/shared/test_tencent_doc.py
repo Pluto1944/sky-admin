@@ -70,6 +70,7 @@ def test_auth_error_refreshes_access_token_and_retries(monkeypatch):
 
 
 def test_missing_access_token_refreshes_before_request(monkeypatch):
+    monkeypatch.delenv("TENCENT_DOC_ACCESS_TOKEN", raising=False)
     requests = []
     responses = iter(
         [
