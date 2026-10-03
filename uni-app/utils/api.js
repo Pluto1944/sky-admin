@@ -59,6 +59,11 @@ function request(url, method = 'GET', data = {}, needAuth = false) {
   })
 }
 
+/** 获取公开的服务健康状态及已部署版本。 */
+export function getServerInfo() {
+  return request('/api/ping')
+}
+
 /**
  * 微信登录
  * @param {string} code - wx.login() 返回的 code

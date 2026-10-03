@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from shared.config.env_loader import load_env
+from shared.release import read_release_version
 from .routes import router
 
 # 加载 .env 到 os.environ（必须在 create_app 之前）
@@ -21,7 +22,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Sky Admin API",
         description="COC 联赛管理后台 API",
-        version="0.1.0",
+        version=read_release_version(),
         docs_url=None if is_prod else "/docs",
         redoc_url=None if is_prod else "/redoc",
         openapi_url=None if is_prod else "/openapi.json",

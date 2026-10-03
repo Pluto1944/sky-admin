@@ -30,6 +30,7 @@ from modules.coc_sync.war_history import war_history_summary
 from .deps import get_repo, get_db
 from .auth import create_token, require_user
 from shared.db.connection import Database
+from shared.release import read_release_version
 from config import CLANS, CLAN_CATEGORY_LABELS, DB_PATH, LEAGUE_COMBAT, get_farm_clans
 
 router = APIRouter(prefix="/api")
@@ -37,12 +38,13 @@ router = APIRouter(prefix="/api")
 
 @router.get("/ping")
 def ping():
-    """健康检查接口。返回服务状态和时间戳。"""
+    """健康检查接口。返回服务状态、发布版本和时间戳。"""
     from datetime import datetime, timezone
 
     return {
         "status": "ok",
         "service": "sky-admin-api",
+        "version": read_release_version(),
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
 

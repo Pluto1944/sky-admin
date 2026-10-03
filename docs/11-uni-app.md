@@ -19,6 +19,12 @@
 - **部署状态**: ✅ 正式域名后端已启用
 - **架构状态**: ✅ 原生 TabBar 多页架构（4 个主页：部落/战斗/账号/设置）
 
+### 发布版本显示
+
+- Git annotated Tag 是唯一的发布版本身份，例如 `v1.1.1`；小程序版本号去掉前缀，为 `1.1.1`。
+- 发版前运行 `venv/bin/python scripts/prepare_release_version.py vX.Y.Z`，它同步根目录 `VERSION`、`manifest.json`、包元数据及 `config/release.js`；这些文件必须与最终 Tag 一致后才能构建。
+- 设置页“关于”显示小程序内置版本，并请求公开的 `/api/ping` 显示服务版本。请求失败不阻塞查看；两个版本不一致表示前后端尚未完成同一版本部署。
+
 ---
 
 ## 文件结构

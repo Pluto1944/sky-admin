@@ -38,6 +38,7 @@ Git Tag：v主版本.次版本.修订版本，例如 v1.0.3
 规则：
 
 - 正式 Tag 使用 annotated tag，不使用临时或含糊名称；
+- Git Tag 是唯一的发布版本身份。根目录 `VERSION`、小程序 `manifest.json` / `package.json` / `config/release.js` 和后端 `/api/ping` 只是它在各运行环境的同步副本，必须完全一致；
 - 已推送的版本 Tag 视为不可变，不覆盖、不强制移动；
 - 发布后发现问题时创建新的修订版本，不复用原版本号；
 - Tag 必须指向已经提交并完成验证的 commit，未提交文件永远不会进入 Tag。
@@ -63,7 +64,21 @@ git log --oneline origin/feat/wechat..feat/wechat
 - 若仍有未跟踪或未提交文件，必须逐项确认它们不属于本次版本，并在发布交接中说明；
 - 不得为了得到“干净状态”覆盖或删除他人的工作区改动。
 
-### 3.2 文档同步
+### 3.2 版本元数据准备
+
+选定尚未存在的新 Tag 后，先同步版本副本：
+
+```bash
+venv/bin/python scripts/prepare_release_version.py vX.Y.Z
+git diff -- VERSION uni-app/manifest.json uni-app/package.json \
+  uni-app/package-lock.json uni-app/config/release.js
+```
+
+脚本会将微信 `versionName` 写为不含 `v` 的语义化版本，并按
+`主版本*10000 + 次版本*100 + 修订版本` 生成单调递增的 `versionCode`。随后把
+这些变更与实现、文档一起提交；最终创建的 annotated Tag 必须与 `VERSION` 相同。
+
+### 3.3 文档同步
 
 行为发生变化时，同一个业务提交必须更新对应正式文档。临时设计稿不能替代当前行为文档；尚未实施的方案不得写成已上线能力。
 
@@ -75,7 +90,7 @@ git log --oneline origin/feat/wechat..feat/wechat
 - 调度任务：`docs/15-scheduler.md`；
 - 具体业务模块对应的专题文档。
 
-### 3.3 验证要求
+### 3.4 验证要求
 
 根据改动范围执行测试，并只记录实际成功的结果。
 

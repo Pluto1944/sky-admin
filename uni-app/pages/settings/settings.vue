@@ -127,7 +127,8 @@
 
 <script>
 import TopBar from '@/components/TopBar.vue'
-import { wechatLogin, getMyInfo, bindAccount } from '@/utils/api.js'
+import { wechatLogin, getMyInfo, bindAccount, getServerInfo } from '@/utils/api.js'
+import { APP_VERSION } from '@/config/release.js'
 
 export default {
   components: { TopBar },
@@ -288,10 +289,17 @@ export default {
         })
     },
 
-    showAbout() {
+    async showAbout() {
+      let serverVersion = '获取失败'
+      try {
+        const serverInfo = await getServerInfo()
+        serverVersion = serverInfo.version || '未知'
+      } catch (err) {
+        // “关于”信息应保持可查看，服务暂不可达只影响版本核对。
+      }
       uni.showModal({
         title: '苍穹联赛助手',
-        content: '版本 1.0.0\n\nCOC 部落冲突联赛管理工具\n提供成员管理、联赛战绩查看等功能',
+        content: `小程序版本：${APP_VERSION}\n服务版本：${serverVersion}\n\nCOC 部落冲突联赛管理工具\n提供成员管理、联赛战绩查看等功能`,
         showCancel: false,
         confirmText: '知道了'
       })

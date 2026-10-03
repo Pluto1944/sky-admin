@@ -61,13 +61,15 @@ sudo systemctl start sky-admin
 GET /api/ping
 ```
 
-无需认证。返回服务状态和时间戳。
+无需认证。返回服务状态、已部署的 Git 发布版本和时间戳。`version` 读取根目录
+`VERSION`，必须与本次发布 Tag 一致；它可用于小程序“关于”页核对前后端是否同步。
 
 **响应示例**：
 ```json
 {
   "status": "ok",
   "service": "sky-admin-api",
+  "version": "v1.1.1",
   "timestamp": "2026-08-08T08:00:00+00:00"
 }
 ```
