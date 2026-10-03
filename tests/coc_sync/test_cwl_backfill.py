@@ -189,6 +189,50 @@ def test_stored_cwl_archive_rejects_multiple_seasons(monkeypatch, db):
         )
 
 
+def test_stored_cwl_archive_can_select_documented_season(monkeypatch, db):
+    history = _history()
+    wars = {war["tag"]: war for items in history.values() for war in items}
+    base = {
+        "clans": [{"tag": tag} for tag in history],
+        "rounds": [
+            {"warTags": [wars["#W1"], wars["#W2"]]},
+            {"warTags": [wars["#W3"], wars["#W4"]]},
+            {"warTags": [wars["#W5"], wars["#W6"]]},
+        ],
+    }
+    monkeypatch.setattr(
+        "scripts.backfill_cwl_live.fetch_historical_cwl_groups",
+        lambda _tag, _period: [
+            {**base, "season": "2026-06"},
+            {**base, "season": "2026-06-16"},
+        ],
+    )
+    db.conn.execute(
+        "INSERT INTO accounts (player_tag, account_name) VALUES (?, ?)",
+        ("#AAA1", "AAA成员"),
+    )
+    db.conn.execute(
+        """INSERT INTO league_results
+           (period, team_index, team_alias, clan_tag, category, player_tag,
+            account_name, total_stars, attacks)
+           VALUES ('2026-06', 0, '测试队', '#AAA', 'combat', '#AAA1', 'AAA成员', 1, 1)"""
+    )
+    db.conn.commit()
+
+    group, _wars, summary, checked = _build_from_stored_groups(
+        db,
+        "2026-06",
+        {**_team(), "period": "2026-06"},
+        "2026-06-30T01:00:00+00:00",
+        "2026-06",
+    )
+
+    assert checked == 1
+    assert summary["archive_season"] == "2026-06"
+    assert summary["archive_season_explicit"] is True
+    assert group["period"] == "2026-06"
+
+
 def test_run_can_prefer_archive_and_finish_dry_run(monkeypatch, capsys):
     class FakeDatabase:
         def __init__(self, _path):
@@ -214,7 +258,7 @@ def test_run_can_prefer_archive_and_finish_dry_run(monkeypatch, capsys):
     monkeypatch.setattr("scripts.backfill_cwl_live._load_teams", lambda _db, _period: [_team()])
     monkeypatch.setattr(
         "scripts.backfill_cwl_live._build_from_stored_groups",
-        lambda _db, _period, _team_value, _timestamp: ({}, {}, summary, 1),
+        lambda _db, _period, _team_value, _timestamp, _season: ({}, {}, summary, 1),
     )
 
     assert run("2026-09", prefer_archive=True) == 0
@@ -222,6 +266,11 @@ def test_run_can_prefer_archive_and_finish_dry_run(monkeypatch, capsys):
     assert "season=2026-09-02" in output
     assert "核对历史 1 人" in output
     assert "DRY-RUN 通过：1/1" in output
+
+
+def test_run_rejects_archive_season_from_other_month(capsys):
+    assert run("2026-06", archive_season="2026-07") == 2
+    assert "必须属于 period" in capsys.readouterr().err
 
 
 def test_fetch_historical_cwl_groups_accepts_month_and_dated_seasons(monkeypatch):

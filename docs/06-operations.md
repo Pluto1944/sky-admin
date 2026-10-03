@@ -52,8 +52,20 @@ venv/bin/python scripts/backfill_cwl_live.py --period YYYY-MM
 
 历史月份优先使用 ClashKing 专用 CWL 赛季档案时增加 `--prefer-archive`。脚本仍会把逐场重建结果
 与现有星数、刀数逐玩家核对，默认 dry-run，只有追加 `--apply` 才写入。若同一部落在同一个自然月
-存在多套赛季档案，当前单分组缓存模型会拒绝回填；应保留漏刀字段为未知，等待多赛季数据模型
-单独设计，禁止只取其中一套。
+存在多套赛季档案，默认拒绝回填；必须由业务负责人明确指定统计哪套赛季，并先把例外写入正式文档，
+程序不得自行选择。
+
+已确认例外：2026-06 同月进行了月初和月中两次联赛，月度统计只采用月初赛季 `2026-06`，排除
+月中赛季 `2026-06-16`。该月使用以下受控命令补档；显式选择失败时脚本不会回退到可能混合两套
+赛季的战争日志：
+
+```bash
+venv/bin/python scripts/backfill_cwl_live.py --period 2026-06 --archive-season 2026-06
+venv/bin/python scripts/backfill_cwl_live.py --period 2026-06 --archive-season 2026-06 --apply
+```
+
+2026-10-04 已完成生产补档：11 个分组、308 场已结束战争、241 条成员成绩；战争开战时间范围为
+2026-06-02 至 2026-06-08，结束时间截至 2026-06-09，未包含月中赛季。
 
 dry-run 必须覆盖全部当月队伍、分组和逐场战争，并与现有投影比对。确认无误后才添加 `--apply`。
 该脚本会写入完整分组/逐场档案并重建投影；已有同月原始缓存时拒绝覆盖。
@@ -80,7 +92,7 @@ venv/bin/python scripts/backfill_war_history.py --limit 100 --keep 45 --apply
 |---|---|
 | 单个 COC 部落请求失败 | 保留该部落最后成功快照，记录 error/attempted_at；其他部落继续 |
 | CWL 分组未完整 | 标记 `collecting` 或 `incomplete`，不写 `league_results` |
-| 历史 CWL 缺档 | 用 `backfill_cwl_live.py --prefer-archive` dry-run 后显式回填，不能导入第三方汇总数字；同月多赛季拒绝写入 |
+| 历史 CWL 缺档 | 用 `backfill_cwl_live.py --prefer-archive` dry-run 后显式回填，不能导入第三方汇总数字；同月多赛季默认拒绝，只有正式记录的业务例外可指定赛季 |
 | SQLite 完整性异常 | 停止写入，使用最新有 manifest 的 COS 快照恢复并核验 |
 | 小程序接口异常 | 先检查 `sky-admin.service`、本机 `/api/ping`、Nginx 日志，再检查域名和证书 |
 

@@ -114,6 +114,17 @@ venv/bin/python scripts/backfill_cwl_live.py --period 2026-08 --prefer-archive
 venv/bin/python scripts/backfill_cwl_live.py --period 2026-08 --prefer-archive --apply
 ```
 
+若同一自然月存在多套赛季档案，脚本默认拒绝选择。只有业务口径已经写入正式文档时，才可用
+`--archive-season` 精确选择一套档案；显式选择失败时不会回退到可能混合多套赛季的战争日志。
+2026-06 的已确认例外只统计月初赛季，命令如下：
+
+```bash
+venv/bin/python scripts/backfill_cwl_live.py --period 2026-06 --archive-season 2026-06
+venv/bin/python scripts/backfill_cwl_live.py --period 2026-06 --archive-season 2026-06 --apply
+```
+
+月中赛季 `2026-06-16` 明确排除。以后出现同月多赛季时不得照搬此参数，必须重新确认业务口径。
+
 如果同一 `clan_tag` 在一个自然月匹配到多套联赛赛季档案，当前缓存主键无法无损保存多个分组。
 脚本必须拒绝写入，该月的 `appearances` / `missed_attacks` 继续保留 `NULL`，不能挑选其中一套，
 也不能把未知解释为零。

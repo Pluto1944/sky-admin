@@ -7,6 +7,8 @@
     python scripts/backfill_cwl_live.py --period 2026-09
     python scripts/backfill_cwl_live.py --period 2026-09 --apply
     python scripts/backfill_cwl_live.py --period 2026-08 --prefer-archive
+    python scripts/backfill_cwl_live.py --period 2026-06 --archive-season 2026-06
+    python scripts/backfill_cwl_live.py --period 2026-06 --archive-season 2026-06 --apply
 """
 from __future__ import annotations
 
@@ -103,15 +105,62 @@ def _validate_history_totals(
     return len(historical), mismatches
 
 
+def _validate_selected_history_subset(
+    db: Database,
+    period: str,
+    clan_tag: str,
+    dashboard: dict,
+) -> tuple[int, list[str]]:
+    """Verify an explicitly selected season is contained in an old aggregate.
+
+    A historical month may previously have combined several CWL seasons.  In
+    that case equality is impossible, but the selected season must never have
+    more stars or attacks than the old monthly aggregate for the same player.
+    """
+    historical = {
+        normalize_tag(row["player_tag"]): (
+            int(row["total_stars"] or 0),
+            int(row["attacks"] or 0),
+        )
+        for row in db.conn.execute(
+            """SELECT player_tag, total_stars, attacks
+               FROM league_results WHERE period = ? AND clan_tag = ?""",
+            (period, clan_tag),
+        ).fetchall()
+    }
+    mismatches = []
+    checked = 0
+    for item in dashboard.get("overview", {}).get("offense", {}).get("rows", []):
+        tag = normalize_tag(item.get("player_tag"))
+        previous = historical.get(tag)
+        if previous is None:
+            continue
+        checked += 1
+        selected = (int(item.get("total_stars") or 0), int(item.get("attacks") or 0))
+        if selected[0] > previous[0] or selected[1] > previous[1]:
+            mismatches.append(f"{tag}: 选定赛季星/刀 {selected} 超过历史月汇总 {previous}")
+    return checked, mismatches
+
+
 def _build_from_stored_groups(
     db: Database,
     period: str,
     team: dict,
     timestamp: str,
+    archive_season: str | None = None,
 ) -> tuple[dict, dict[str, dict], dict, int]:
     """Build and verify a bundle from ClashKing's dedicated CWL archive."""
     stored_groups = fetch_historical_cwl_groups(team["clan_tag"], period)
-    if len(stored_groups) > 1:
+    if archive_season:
+        stored_groups = [
+            group for group in stored_groups
+            if str(group.get("season") or "") == archive_season
+        ]
+        if len(stored_groups) != 1:
+            raise CwlBackfillError(
+                f"未找到唯一的指定赛季档案：{archive_season}（匹配 {len(stored_groups)} 套）"
+            )
+    elif len(stored_groups) > 1:
         seasons = ", ".join(str(group.get("season") or "-") for group in stored_groups)
         raise MultipleCwlSeasonsError(
             f"同一部落同月存在 {len(stored_groups)} 套 CWL 赛季档案：{seasons}"
@@ -138,9 +187,14 @@ def _build_from_stored_groups(
                 timestamp,
             )
             dashboard = build_cwl_dashboard(group, wars)
-            checked, mismatches = _validate_history_totals(
-                db, period, normalize_tag(team["clan_tag"]), dashboard
-            )
+            if archive_season:
+                checked, mismatches = _validate_selected_history_subset(
+                    db, period, normalize_tag(team["clan_tag"]), dashboard
+                )
+            else:
+                checked, mismatches = _validate_history_totals(
+                    db, period, normalize_tag(team["clan_tag"]), dashboard
+                )
             if mismatches:
                 preview = "；".join(mismatches[:5])
                 raise CwlBackfillError(
@@ -152,6 +206,7 @@ def _build_from_stored_groups(
             summary["history_rows_checked"] = checked
             summary["dashboard_status"] = dashboard["status"]
             summary["archive_season"] = stored.get("season")
+            summary["archive_season_explicit"] = bool(archive_season)
             return group, wars, summary, checked
         except Exception as exc:  # noqa: BLE001 - try every matching archive season
             errors.append(str(exc))
@@ -257,10 +312,22 @@ def _write_cache(
     return len(bundles), len(unique_wars)
 
 
-def run(period: str, apply: bool = False, prefer_archive: bool = False) -> int:
+def run(
+    period: str,
+    apply: bool = False,
+    prefer_archive: bool = False,
+    archive_season: str | None = None,
+) -> int:
     if not _valid_period(period):
         print("period 必须为 YYYY-MM", file=sys.stderr)
         return 2
+    if archive_season and not (
+        archive_season == period or archive_season.startswith(f"{period}-")
+    ):
+        print("archive-season 必须属于 period 指定月份", file=sys.stderr)
+        return 2
+    if archive_season:
+        prefer_archive = True
 
     db = Database(config.DB_PATH)
     db.init_schema()
@@ -284,7 +351,7 @@ def run(period: str, apply: bool = False, prefer_archive: bool = False) -> int:
             if prefer_archive:
                 try:
                     group, wars, summary, _checked = _build_from_stored_groups(
-                        db, period, team, timestamp
+                        db, period, team, timestamp, archive_season
                     )
                     print(
                         f"  [archive] season={summary.get('archive_season')}",
@@ -293,6 +360,8 @@ def run(period: str, apply: bool = False, prefer_archive: bool = False) -> int:
                 except MultipleCwlSeasonsError:
                     raise
                 except Exception as archive_error:  # noqa: BLE001 - verified fallback
+                    if archive_season:
+                        raise
                     print(f"  [fallback] 专用 CWL 档案不可用：{archive_error}", flush=True)
                     group, wars, summary = _build_from_war_logs(
                         db, period, team, timestamp, fetched
@@ -355,8 +424,12 @@ def main() -> int:
         action="store_true",
         help="优先使用完整 CWL 赛季档案；不可用时再回退战争日志",
     )
+    parser.add_argument(
+        "--archive-season",
+        help="显式选择一个已确认的历史赛季（如 2026-06）；禁止自动选择同月多赛季",
+    )
     args = parser.parse_args()
-    return run(args.period, args.apply, args.prefer_archive)
+    return run(args.period, args.apply, args.prefer_archive, args.archive_season)
 
 
 if __name__ == "__main__":
