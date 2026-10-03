@@ -24,4 +24,4 @@ def test_read_release_version_reads_declared_file(tmp_path: Path):
 
 
 def test_ping_reports_declared_release_version():
-    assert routes.ping()["version"] == "v1.1.1"
+    assert routes.ping()["version"] == read_release_version()

@@ -2,8 +2,8 @@
   "name": "苍穹联赛助手",
   "appid": "wx6a46dda85a013a34",
   "description": "COC 苍穹联赛管理小程序",
-  "versionName": "1.1.1",
-  "versionCode": "10101",
+  "versionName": "1.2.0",
+  "versionCode": "10200",
   "transformPx": false,
   "mp-weixin": {
     "appid": "wx6a46dda85a013a34",
