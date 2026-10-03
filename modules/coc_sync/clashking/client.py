@@ -129,6 +129,39 @@ def filter_cwl_wars(clan_tag: str, period: str) -> list[dict]:
     return cwl_wars
 
 
+def fetch_historical_cwl_groups(clan_tag: str, period: str) -> list[dict]:
+    """Return stored CWL groups whose season belongs to ``period``.
+
+    ClashKing's generic war log can occasionally omit one historical war even
+    though its dedicated CWL archive still retains the complete group.  Season
+    identifiers may be either ``YYYY-MM`` or include the group's start day,
+    such as ``YYYY-MM-DD``; both belong to the requested calendar month.
+    """
+    normalized = _normalize_tag(clan_tag)
+    encoded = f"%23{normalized}"
+    seasons = _curl_get(f"{API_BASE}/v2/cwl/{encoded}/seasons?limit=24")
+    items = seasons.get("items", []) if isinstance(seasons, dict) else []
+    season_ids = sorted({
+        str(item.get("season") or "")
+        for item in items
+        if isinstance(item, dict)
+        and (
+            str(item.get("season") or "") == period
+            or str(item.get("season") or "").startswith(f"{period}-")
+        )
+    }, key=lambda value: (value != period, value))
+
+    groups = []
+    for season in season_ids:
+        group = _curl_get(f"{API_BASE}/cwl/{encoded}/{season}", timeout=60)
+        if not isinstance(group, dict):
+            continue
+        if not group.get("clans") or not group.get("rounds"):
+            continue
+        groups.append(group)
+    return groups
+
+
 def aggregate_players(cwl_wars: list[dict], clan_tag: str) -> list[dict]:
     """从 CWL 战斗列表中汇总指定部落的玩家战绩。
 

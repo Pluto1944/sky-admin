@@ -6,6 +6,7 @@
 用法：
     python scripts/backfill_cwl_live.py --period 2026-09
     python scripts/backfill_cwl_live.py --period 2026-09 --apply
+    python scripts/backfill_cwl_live.py --period 2026-08 --prefer-archive
 """
 from __future__ import annotations
 
@@ -22,7 +23,10 @@ from shared.config.env_loader import load_env  # noqa: E402
 load_env()
 
 import config  # noqa: E402
-from modules.coc_sync.clashking.client import filter_cwl_wars  # noqa: E402
+from modules.coc_sync.clashking.client import (  # noqa: E402
+    fetch_historical_cwl_groups,
+    filter_cwl_wars,
+)
 from modules.coc_sync.cwl_backfill import (  # noqa: E402
     CwlBackfillError,
     build_historical_cwl_cache,
@@ -32,6 +36,10 @@ from modules.coc_sync.cwl_live import build_cwl_dashboard  # noqa: E402
 from modules.coc_sync.cwl_projection import group_raw_status, rebuild_league_results  # noqa: E402
 from modules.coc_sync.official.mapper import normalize_tag  # noqa: E402
 from shared.db.connection import Database  # noqa: E402
+
+
+class MultipleCwlSeasonsError(CwlBackfillError):
+    """The monthly single-group cache cannot represent several CWL seasons."""
 
 
 def _valid_period(value: str) -> bool:
@@ -93,6 +101,90 @@ def _validate_history_totals(
         if actual != expected:
             mismatches.append(f"{tag}: 星/刀 {actual} != 历史 {expected}")
     return len(historical), mismatches
+
+
+def _build_from_stored_groups(
+    db: Database,
+    period: str,
+    team: dict,
+    timestamp: str,
+) -> tuple[dict, dict[str, dict], dict, int]:
+    """Build and verify a bundle from ClashKing's dedicated CWL archive."""
+    stored_groups = fetch_historical_cwl_groups(team["clan_tag"], period)
+    if len(stored_groups) > 1:
+        seasons = ", ".join(str(group.get("season") or "-") for group in stored_groups)
+        raise MultipleCwlSeasonsError(
+            f"同一部落同月存在 {len(stored_groups)} 套 CWL 赛季档案：{seasons}"
+        )
+    errors = []
+    for stored in stored_groups:
+        try:
+            group_tags = {
+                normalize_tag(clan.get("tag"))
+                for clan in stored.get("clans") or []
+                if normalize_tag(clan.get("tag"))
+            }
+            raw_wars = [
+                war
+                for round_item in stored.get("rounds") or []
+                for war in (round_item.get("warTags") or [])
+                if isinstance(war, dict)
+            ]
+            if not group_tags or not raw_wars:
+                raise CwlBackfillError("专用 CWL 档案缺少部落或逐场数据")
+            group, wars, summary = build_historical_cwl_cache(
+                team,
+                {tag: raw_wars for tag in group_tags},
+                timestamp,
+            )
+            dashboard = build_cwl_dashboard(group, wars)
+            checked, mismatches = _validate_history_totals(
+                db, period, normalize_tag(team["clan_tag"]), dashboard
+            )
+            if mismatches:
+                preview = "；".join(mismatches[:5])
+                raise CwlBackfillError(
+                    f"与 league_results 不一致 {len(mismatches)} 条：{preview}"
+                )
+            group["source"] = "clashking_cwl_archive_backfill"
+            for war in wars.values():
+                war["source"] = "clashking_cwl_archive_backfill"
+            summary["history_rows_checked"] = checked
+            summary["dashboard_status"] = dashboard["status"]
+            summary["archive_season"] = stored.get("season")
+            return group, wars, summary, checked
+        except Exception as exc:  # noqa: BLE001 - try every matching archive season
+            errors.append(str(exc))
+    detail = "；".join(errors) if errors else "未找到匹配月份的专用 CWL 档案"
+    raise CwlBackfillError(detail)
+
+
+def _build_from_war_logs(
+    db: Database,
+    period: str,
+    team: dict,
+    timestamp: str,
+    fetched: dict[str, list[dict]],
+) -> tuple[dict, dict[str, dict], dict]:
+    """Build and verify a bundle from per-clan historical war logs."""
+    selected = normalize_tag(team["clan_tag"])
+    own_wars = _fetch_cached(fetched, selected, period)
+    group_tags = infer_group_tags(selected, own_wars)
+    print(f"  [group] {len(group_tags)} 队：{' '.join(group_tags)}")
+    for tag in group_tags:
+        _fetch_cached(fetched, tag, period)
+    relevant = {tag: fetched[tag] for tag in group_tags}
+    group, wars, summary = build_historical_cwl_cache(team, relevant, timestamp)
+    dashboard = build_cwl_dashboard(group, wars)
+    checked, mismatches = _validate_history_totals(db, period, selected, dashboard)
+    if mismatches:
+        preview = "；".join(mismatches[:5])
+        raise CwlBackfillError(
+            f"与 league_results 不一致 {len(mismatches)} 条：{preview}"
+        )
+    summary["history_rows_checked"] = checked
+    summary["dashboard_status"] = dashboard["status"]
+    return group, wars, summary
 
 
 def _write_cache(
@@ -165,7 +257,7 @@ def _write_cache(
     return len(bundles), len(unique_wars)
 
 
-def run(period: str, apply: bool = False) -> int:
+def run(period: str, apply: bool = False, prefer_archive: bool = False) -> int:
     if not _valid_period(period):
         print("period 必须为 YYYY-MM", file=sys.stderr)
         return 2
@@ -189,27 +281,41 @@ def run(period: str, apply: bool = False) -> int:
         selected = normalize_tag(team.get("clan_tag"))
         print(f"\n[{team['team_index']}] {team['team_alias']} {team.get('team_name') or ''} {selected}")
         try:
-            own_wars = _fetch_cached(fetched, selected, period)
-            group_tags = infer_group_tags(selected, own_wars)
-            print(f"  [group] {len(group_tags)} 队：{' '.join(group_tags)}")
-            for tag in group_tags:
-                _fetch_cached(fetched, tag, period)
-            relevant = {tag: fetched[tag] for tag in group_tags}
-            group, wars, summary = build_historical_cwl_cache(team, relevant, timestamp)
-            dashboard = build_cwl_dashboard(group, wars)
-            checked, mismatches = _validate_history_totals(db, period, selected, dashboard)
-            if mismatches:
-                preview = "；".join(mismatches[:5])
-                raise CwlBackfillError(
-                    f"与 league_results 不一致 {len(mismatches)} 条：{preview}"
-                )
-            summary["history_rows_checked"] = checked
-            summary["dashboard_status"] = dashboard["status"]
+            if prefer_archive:
+                try:
+                    group, wars, summary, _checked = _build_from_stored_groups(
+                        db, period, team, timestamp
+                    )
+                    print(
+                        f"  [archive] season={summary.get('archive_season')}",
+                        flush=True,
+                    )
+                except MultipleCwlSeasonsError:
+                    raise
+                except Exception as archive_error:  # noqa: BLE001 - verified fallback
+                    print(f"  [fallback] 专用 CWL 档案不可用：{archive_error}", flush=True)
+                    group, wars, summary = _build_from_war_logs(
+                        db, period, team, timestamp, fetched
+                    )
+            else:
+                try:
+                    group, wars, summary = _build_from_war_logs(
+                        db, period, team, timestamp, fetched
+                    )
+                except Exception as history_error:  # noqa: BLE001 - verified fallback
+                    print(f"  [fallback] 战争日志不完整：{history_error}", flush=True)
+                    group, wars, summary, _checked = _build_from_stored_groups(
+                        db, period, team, timestamp
+                    )
+                    print(
+                        f"  [archive] season={summary.get('archive_season')}",
+                        flush=True,
+                    )
             summaries.append(summary)
             bundles.append((group, wars))
             print(
                 f"  [ok] {summary['group_clans']}队 {summary['rounds']}轮 "
-                f"{summary['wars']}场，核对历史 {checked} 人",
+                f"{summary['wars']}场，核对历史 {summary['history_rows_checked']} 人",
                 flush=True,
             )
         except Exception as exc:  # noqa: BLE001 - 汇总所有队伍错误后统一拒绝写入
@@ -244,8 +350,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="回填历史 CWL 实时看板缓存")
     parser.add_argument("--period", required=True, help="CWL 实际月份 YYYY-MM")
     parser.add_argument("--apply", action="store_true", help="验证通过后写入数据库；默认 dry-run")
+    parser.add_argument(
+        "--prefer-archive",
+        action="store_true",
+        help="优先使用完整 CWL 赛季档案；不可用时再回退战争日志",
+    )
     args = parser.parse_args()
-    return run(args.period, args.apply)
+    return run(args.period, args.apply, args.prefer_archive)
 
 
 if __name__ == "__main__":

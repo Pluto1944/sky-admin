@@ -68,8 +68,22 @@ cwl_live_group_cache + cwl_live_war_cache + league_teams
 - `scripts/fetch_cwl_data.py --period YYYY-MM` 只从本地完整档案重建，绝不访问第三方聚合 API。
 - `scripts/backfill_cwl_live.py --period YYYY-MM` 默认 dry-run。它只把可验证的完整历史分组和
   逐场档案写入本地，然后重建投影；已有同月原始缓存时拒绝覆盖。
+- 历史战争日志缺少单场时，可增加 `--prefer-archive` 优先读取 ClashKing 专用 CWL 赛季档案；
+  写入前仍必须逐玩家核对既有星数和刀数。若同一部落同一自然月存在多套赛季档案，当前
+  `(period, clan_tag)` 单分组缓存无法无损表达，脚本拒绝回填，`appearances` 与
+  `missed_attacks` 保持 `NULL`，不得选取单个赛季或写成零。
 
 历史补档来源可以是 ClashKing，但绝不能绕过分组/逐场档案直接写入 `league_results`。
+
+### 2026-10-04 历史漏刀补算记录
+
+生产库已完成 2026-01～05、2026-07～09 的完整逐场回填与投影重建，共补齐 1,720 条成员成绩、
+11,916 次上阵、11,336 次出刀和 580 次漏刀。各月均通过“出刀数 + 漏刀数 = 上阵次数”、
+SQLite 完整性和外键检查；写入前后均创建并校验 COS 恢复快照。
+
+2026-06 保留未补状态：部分部落在同一自然月存在 `2026-06` 与 `2026-06-16` 两套赛季档案，
+而当前 `(period, clan_tag)` 主键只能表达一个分组。旧投影中的 `appearances` 与
+`missed_attacks` 继续为 `NULL`；在多赛季模型完成前不得部分回填或解释为零。
 
 ## 月份和安全边界
 

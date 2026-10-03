@@ -1,11 +1,17 @@
 import pytest
 
+from modules.coc_sync.clashking import client as clashking_client
 from modules.coc_sync.cwl_backfill import (
     CwlBackfillError,
     build_historical_cwl_cache,
     infer_group_tags,
 )
-from scripts.backfill_cwl_live import _write_cache
+from scripts.backfill_cwl_live import (
+    MultipleCwlSeasonsError,
+    _build_from_stored_groups,
+    _write_cache,
+    run,
+)
 
 
 def _side(tag, name):
@@ -125,3 +131,118 @@ def test_backfill_writes_complete_raw_archive_and_projection(db):
         "SELECT period, team_index, player_tag, attacks FROM league_results"
     ).fetchone()
     assert tuple(projection) == ("2026-09", 0, "#AAA1", 0)
+
+
+def test_stored_cwl_archive_fallback_builds_and_validates(monkeypatch, db):
+    history = _history()
+    wars = {war["tag"]: war for items in history.values() for war in items}
+    stored = {
+        "season": "2026-09-02",
+        "clans": [{"tag": tag} for tag in history],
+        "rounds": [
+            {"warTags": [wars["#W1"], wars["#W2"]]},
+            {"warTags": [wars["#W3"], wars["#W4"]]},
+            {"warTags": [wars["#W5"], wars["#W6"]]},
+        ],
+    }
+    db.conn.execute(
+        "INSERT INTO accounts (player_tag, account_name) VALUES (?, ?)",
+        ("#AAA1", "AAA成员"),
+    )
+    db.conn.execute(
+        """INSERT INTO league_results
+           (period, team_index, team_alias, clan_tag, category, player_tag,
+            account_name, total_stars, attacks)
+           VALUES ('2026-09', 0, '测试队', '#AAA', 'combat', '#AAA1', 'AAA成员', 0, 0)"""
+    )
+    db.conn.commit()
+    monkeypatch.setattr(
+        "scripts.backfill_cwl_live.fetch_historical_cwl_groups",
+        lambda _tag, _period: [stored],
+    )
+
+    group, normalized_wars, summary, checked = _build_from_stored_groups(
+        db, "2026-09", _team(), "2026-09-30T01:00:00+00:00"
+    )
+
+    assert checked == 1
+    assert summary["archive_season"] == "2026-09-02"
+    assert group["source"] == "clashking_cwl_archive_backfill"
+    assert len(normalized_wars) == 6
+    assert {war["source"] for war in normalized_wars.values()} == {
+        "clashking_cwl_archive_backfill"
+    }
+
+
+def test_stored_cwl_archive_rejects_multiple_seasons(monkeypatch, db):
+    monkeypatch.setattr(
+        "scripts.backfill_cwl_live.fetch_historical_cwl_groups",
+        lambda _tag, _period: [
+            {"season": "2026-06", "clans": [{}], "rounds": [{}]},
+            {"season": "2026-06-16", "clans": [{}], "rounds": [{}]},
+        ],
+    )
+
+    with pytest.raises(MultipleCwlSeasonsError, match="2 套 CWL 赛季档案"):
+        _build_from_stored_groups(
+            db, "2026-06", _team(), "2026-06-30T01:00:00+00:00"
+        )
+
+
+def test_run_can_prefer_archive_and_finish_dry_run(monkeypatch, capsys):
+    class FakeDatabase:
+        def __init__(self, _path):
+            self.conn = None
+
+        def init_schema(self):
+            return None
+
+        def close(self):
+            return None
+
+    summary = {
+        "clan_tag": "#AAA",
+        "group_clans": 4,
+        "rounds": 3,
+        "wars": 6,
+        "member_count": 1,
+        "history_rows_checked": 1,
+        "dashboard_status": "ended",
+        "archive_season": "2026-09-02",
+    }
+    monkeypatch.setattr("scripts.backfill_cwl_live.Database", FakeDatabase)
+    monkeypatch.setattr("scripts.backfill_cwl_live._load_teams", lambda _db, _period: [_team()])
+    monkeypatch.setattr(
+        "scripts.backfill_cwl_live._build_from_stored_groups",
+        lambda _db, _period, _team_value, _timestamp: ({}, {}, summary, 1),
+    )
+
+    assert run("2026-09", prefer_archive=True) == 0
+    output = capsys.readouterr().out
+    assert "season=2026-09-02" in output
+    assert "核对历史 1 人" in output
+    assert "DRY-RUN 通过：1/1" in output
+
+
+def test_fetch_historical_cwl_groups_accepts_month_and_dated_seasons(monkeypatch):
+    requested = []
+
+    def fake_get(url, timeout=30):
+        requested.append((url, timeout))
+        if "/seasons?" in url:
+            return {
+                "items": [
+                    {"season": "2026-08-02"},
+                    {"season": "2026-07"},
+                    {"season": "2026-08"},
+                ]
+            }
+        return {"season": url.rsplit("/", 1)[-1], "clans": [{}], "rounds": [{}]}
+
+    monkeypatch.setattr(clashking_client, "_curl_get", fake_get)
+
+    groups = clashking_client.fetch_historical_cwl_groups("#AAA", "2026-08")
+
+    assert [group["season"] for group in groups] == ["2026-08", "2026-08-02"]
+    assert requested[0][0].endswith("/v2/cwl/%23AAA/seasons?limit=24")
+    assert [timeout for _url, timeout in requested[1:]] == [60, 60]

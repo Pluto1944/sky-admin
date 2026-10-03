@@ -105,6 +105,19 @@ venv/bin/python scripts/backfill_cwl_live.py --period 2026-09 --apply
 脚本不会覆盖目标月份已有的 `cwl_live_group_cache` 或 `cwl_live_war_cache`。
 它是一次性运维修复工具，不替代 `scheduler.py` 的月初实时同步。
 
+战争日志偶尔会缺少单场，但 ClashKing 的专用 CWL 赛季档案仍可能完整保存整个分组。历史月份
+可传入 `--prefer-archive`，优先读取专用赛季档案，并用现有 `league_results` 的星数与刀数逐玩家
+交叉核对；专用档案不可用时才回退战争日志。dry-run 与正式写入必须分别执行：
+
+```bash
+venv/bin/python scripts/backfill_cwl_live.py --period 2026-08 --prefer-archive
+venv/bin/python scripts/backfill_cwl_live.py --period 2026-08 --prefer-archive --apply
+```
+
+如果同一 `clan_tag` 在一个自然月匹配到多套联赛赛季档案，当前缓存主键无法无损保存多个分组。
+脚本必须拒绝写入，该月的 `appearances` / `missed_attacks` 继续保留 `NULL`，不能挑选其中一套，
+也不能把未知解释为零。
+
 ### 最近普通部落战回填
 
 先对所有启用自有部落执行只读校验：
