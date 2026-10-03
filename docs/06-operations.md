@@ -15,7 +15,8 @@ curl --fail https://api.skycoc.cc/api/ping
 不要手工启动额外 uvicorn 或 scheduler。重启后检查 `/api/ping`、目标业务接口与
 `PRAGMA integrity_check`。
 
-COS 每天本机时间 03:15 备份。高风险 SQLite 迁移、批量回填或物理删表前，额外执行：
+COS 每天本机时间 03:15 创建一致恢复快照；03:35 将 `data/backups/` 的历史 SQLite 备份归档到
+COS 并保留最新两份本地热备。高风险 SQLite 迁移、批量回填或物理删表前，额外执行：
 
 ```bash
 venv/bin/python scripts/backup_to_cos.py --dry-run

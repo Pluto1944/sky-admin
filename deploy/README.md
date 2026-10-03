@@ -461,6 +461,8 @@ sudo tail -f /var/log/sky-scheduler-error.log
 | 调度器错误 | `/var/log/sky-scheduler-error.log` | 调度器错误日志 |
 | COS 备份日志 | `/var/log/sky-admin-cos-backup.log` | 每日恢复备份标准输出 |
 | COS 备份错误 | `/var/log/sky-admin-cos-backup-error.log` | 每日恢复备份错误输出 |
+| COS 归档日志 | `/var/log/sky-admin-cos-archive.log` | 本地历史 SQLite 备份归档输出 |
+| COS 归档错误 | `/var/log/sky-admin-cos-archive-error.log` | 本地历史 SQLite 备份归档错误输出 |
 | Nginx 访问日志 | `/var/log/nginx/sky-admin-access.log` | 请求记录 |
 | Nginx 错误日志 | `/var/log/nginx/sky-admin-error.log` | Nginx 错误 |
 | SSL 证书 | `/etc/letsencrypt/live/api.skycoc.cc/` | HTTPS 证书 |
@@ -474,9 +476,12 @@ sudo install -d -m 0755 /etc/systemd/system/sky-coc-cosfs.service.d
 sudo install -m 0644 deploy/sky-coc-cosfs-backup.conf /etc/systemd/system/sky-coc-cosfs.service.d/backup.conf
 sudo install -m 0644 deploy/sky-admin-cos-backup.service /etc/systemd/system/
 sudo install -m 0644 deploy/sky-admin-cos-backup.timer /etc/systemd/system/
+sudo install -m 0644 deploy/sky-admin-cos-archive.service /etc/systemd/system/
+sudo install -m 0644 deploy/sky-admin-cos-archive.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl restart sky-coc-cosfs.service
 sudo systemctl enable --now sky-admin-cos-backup.timer
+sudo systemctl enable --now sky-admin-cos-archive.timer
 ```
 
 计时器每天本机时间 03:15 执行；若主机当时关闭，`Persistent=true` 会在下次启动后补跑一次。
@@ -486,6 +491,17 @@ sudo systemctl enable --now sky-admin-cos-backup.timer
 
 挂载 drop-in 把 COSFS 的 `ensure_diskfree` 从 10GB 调整到 1GB。它仍为本地根盘保留空间，
 同时避免小于 10GB 空闲时所有上传都被 COSFS 拒绝；主机根盘应继续保有至少 1GB 空闲空间。
+
+### 7.2 存储分层与本地备份归档
+
+本地 ext4 是热层：活动 SQLite、Git worktree/镜像、运行目录、虚拟环境和近期回滚副本必须留在本地，
+不得通过 COS FUSE 挂载直接运行。COS 是温/冷层：每日一致快照、Git bundle、恢复资料和不可变历史
+备份。构建产物、索引和缓存属于可重建层，应按需重建或清理，不能占用 COS 作为在线工作目录。
+
+`sky-admin-cos-archive.timer` 每天 03:35 在恢复快照之后运行，仅归档
+`data/backups/` 内已静态存在的 SQLite 文件。它逐个执行完整性检查和远端 SHA-256 校验，以最终
+`manifest.json` 作为完成标记；成功后保留最新两份本地热备，清理更旧副本。它不上传 `.env`、
+活动数据库、运行时数据或任意用户目录。
 
 首次安装后立即验证一次：
 

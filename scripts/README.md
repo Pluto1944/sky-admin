@@ -82,6 +82,7 @@ python scripts/fetch_cwl_data.py --period 2026-07
 | `backfill_war_history.py` | 从 ClashKing 重建各自有部落最近 45 场普通战争完整详情；默认 dry-run，`--apply` 才写库 |
 | `retire_normal_war_legacy.py` | 校验新版普通战事实后，备份并删除旧投影表；默认 dry-run，`--yes` 才执行 |
 | `backup_to_cos.py` | 通过 SQLite Online Backup API 创建一致快照，上传到已挂载的 COS；`.env` 永不进入备份 |
+| `archive_local_backups_to_cos.py` | 将 `data/backups` 的历史 SQLite 备份校验后归档 COS；默认 dry-run，显式清理时保留最新两份本地副本 |
 
 ---
 
@@ -142,6 +143,23 @@ venv/bin/python scripts/backup_to_cos.py --dry-run
 脚本只接受活动的 `fuse.cosfs` 挂载，避免 COS 挂载失效时误写本机目录。`.env` 与所有
 凭证均明确排除；恢复时需从安全的独立位置重新提供 `.env`。远端保留和清理由 COS 生命周期
 策略负责，脚本不会删除任何已上传的备份目录。
+
+---
+
+## `archive_local_backups_to_cos.py` — 本地历史备份归档
+
+`sky-admin-cos-archive.timer` 每天本机时间 03:35 执行，在 03:15 的恢复快照完成后，归档
+`data/backups/` 中的静态 SQLite 备份到
+`/sky_coc/archive/sky-admin/local-db-backups/<UTC 时间戳>/`。每个文件先执行
+`PRAGMA integrity_check`，上传后校验 SHA-256，最后写入 `manifest.json`；只有全部成功后才删除
+较旧的本地副本，并始终保留按修改时间最新的两份。
+
+它不会处理活动 `league.db`、`.env`、运行目录、任意用户目录或 `recovery-quarantine`。手工验证：
+
+```bash
+venv/bin/python scripts/archive_local_backups_to_cos.py
+venv/bin/python scripts/archive_local_backups_to_cos.py --apply --prune-local --keep-local 2
+```
 
 ---
 

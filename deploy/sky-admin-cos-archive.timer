@@ -1,0 +1,10 @@
+[Unit]
+Description=Archive local Sky Admin database backups after the daily COS snapshot
+
+[Timer]
+OnCalendar=*-*-* 03:35:00
+Persistent=true
+Unit=sky-admin-cos-archive.service
+
+[Install]
+WantedBy=timers.target
