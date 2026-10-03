@@ -6,6 +6,7 @@
 
 | 文档 | 内容 |
 |------|------|
+| [`RELEASE_NOTES.md`](./RELEASE_NOTES.md) | 各正式版本相对上一 Tag 的功能、数据与运维变化 |
 | [`docs/01-architecture.md`](./docs/01-architecture.md) | 系统架构、模块划分、技术选型 |
 | [`docs/02-database.md`](./docs/02-database.md) | 表定义、ER 图、数据流转 |
 | [`docs/03-sorting.md`](./docs/03-sorting.md) | 排序全流程、TEAMS 体系、基准重建+贪心填充 |

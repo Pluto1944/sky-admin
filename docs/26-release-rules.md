@@ -78,7 +78,20 @@ git diff -- VERSION uni-app/manifest.json uni-app/package.json \
 `主版本*10000 + 次版本*100 + 修订版本` 生成单调递增的 `versionCode`。随后把
 这些变更与实现、文档一起提交；最终创建的 annotated Tag 必须与 `VERSION` 相同。
 
-### 3.3 文档同步
+### 3.3 发布说明
+
+根目录 [`RELEASE_NOTES.md`](../RELEASE_NOTES.md) 是 Git 内的正式版本差异记录。每次发版必须
+比较上一正式 Tag，并在创建新 Tag 前更新、提交发布说明：
+
+```bash
+git log --oneline <上一Tag>..HEAD
+git diff --stat <上一Tag>..HEAD
+```
+
+发布说明按“最新版本在前”维护，至少区分用户可见变化、后端与数据变化、工程或运维变化。
+不逐条复制 commit 标题，不记录尚未实现的计划，也不以聊天记录或微信版本介绍替代此文件。
+
+### 3.4 文档同步
 
 行为发生变化时，同一个业务提交必须更新对应正式文档。临时设计稿不能替代当前行为文档；尚未实施的方案不得写成已上线能力。
 
@@ -90,7 +103,7 @@ git diff -- VERSION uni-app/manifest.json uni-app/package.json \
 - 调度任务：`docs/15-scheduler.md`；
 - 具体业务模块对应的专题文档。
 
-### 3.4 验证要求
+### 3.5 验证要求
 
 根据改动范围执行测试，并只记录实际成功的结果。
 
@@ -292,6 +305,7 @@ done
 ## 8. 发布验收清单
 
 - [ ] 发布范围已经冻结；
+- [ ] `RELEASE_NOTES.md` 已列出相对上一正式 Tag 的变化；
 - [ ] 实现与正式文档一致；
 - [ ] 相关测试成功；
 - [ ] 微信小程序生产构建成功；
