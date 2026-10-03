@@ -7,7 +7,7 @@
     <view v-if="loading" class="clan-stats-state"><text>加载中...</text></view>
     <view v-else-if="!stats.length" class="clan-stats-state"><text class="clan-stats-empty-icon">📊</text><text>暂无战营数据</text></view>
     <view v-else class="clan-stats-table-wrap">
-      <view v-if="updatedAt" class="clan-stats-update">数据更新于 {{ updatedAt }}<text v-if="tab === 'war' && coverage"> · 已收录 {{ coverage.available }}/{{ coverage.target }} 场</text></view>
+      <view v-if="updatedAt" class="clan-stats-update">数据更新于 {{ updatedAt }}<text v-if="tab === 'war' && coverage"> · 已收录 {{ coverage.available }}/{{ coverage.target }} 场</text><text> · 轻触数据看详情</text></view>
       <view class="clan-stats-tr clan-stats-head">
         <text class="clan-stats-td cs-name">昵称</text><text class="clan-stats-td cs-th">本</text>
         <text v-for="column in columns" :key="column.key" class="clan-stats-td cs-data clan-stats-head-cell" @tap="onSort(column.key)">
@@ -17,7 +17,12 @@
       <scroll-view scroll-y class="clan-stats-body">
         <view v-for="(item, index) in sortedStats" :key="item.player_tag" class="clan-stats-tr" :class="{ 'clan-stats-even': index % 2 === 1 }">
           <text class="clan-stats-td cs-name clan-stats-name">{{ item.account_name }}</text><text class="clan-stats-td cs-th clan-stats-th">{{ item.town_hall_level || '-' }}</text>
-          <text v-for="column in columns" :key="column.key" class="clan-stats-td cs-data clan-stats-data" :style="{ color: getColor(item[column.key], column.key) }">{{ formatRate(item[column.key], item[column.key + '_sample']) }}</text>
+          <view v-for="column in columns" :key="column.key" class="clan-stats-td cs-data clan-stats-data" @tap="showSample(item, column)">
+            <text class="clan-stats-rate" :style="{ color: getColor(item[column.key], column.key) }">{{ formatRate(item[column.key]) }}</text>
+            <view v-if="item[column.key] != null" class="clan-stats-sample-bar" :aria-label="sampleDescription(item, column)">
+              <view v-for="level in 3" :key="level" class="clan-stats-sample-segment" :style="sampleSegmentStyle(item[column.key + '_sample'], column.key, level, item[column.key])" />
+            </view>
+          </view>
         </view>
       </scroll-view>
     </view>
@@ -62,8 +67,35 @@ export default {
     },
     formatTime(value) { if (!value) return ''; const date = new Date(value.replace('+00:00', 'Z')); if (isNaN(date.getTime())) return value; return `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}` },
     onSort(key) { if (this.sortKey === key) this.sortOrder = this.sortOrder === 'desc' ? 'asc' : 'desc'; else { this.sortKey = key; this.sortOrder = 'desc' } },
-    formatRate(value, sample) { if (value == null) return '无'; const rate = (value * 100).toFixed(0) + '%'; return sample ? `${rate} ${sample.three_stars}/${sample.attacks}` : rate },
-    getColor(value, key) { if (value == null) return '#666'; if (key && key.startsWith('defense')) return value <= 0.571 ? '#00b894' : value <= 0.857 ? '#fdcb6e' : '#e17055'; return value > 0.857 ? '#00b894' : value > 0.571 ? '#fdcb6e' : '#e17055' }
+    formatRate(value) { return value == null ? '无' : (value * 100).toFixed(0) + '%' },
+    getColor(value, key) { if (value == null) return '#666'; if (key && key.startsWith('defense')) return value <= 0.571 ? '#00b894' : value <= 0.857 ? '#fdcb6e' : '#e17055'; return value > 0.857 ? '#00b894' : value > 0.571 ? '#fdcb6e' : '#e17055' },
+    sampleLevel(sample, key) {
+      const attacks = Number(sample && sample.attacks) || 0
+      if (!attacks) return 0
+      const window = key.split('_').pop()
+      const thresholds = {
+        5: [2, 5], 15: [5, 15], 45: [15, 35],
+        '1m': [2, 5], '3m': [6, 15], '6m': [12, 30]
+      }[window] || [3, 10]
+      return attacks <= thresholds[0] ? 1 : attacks <= thresholds[1] ? 2 : 3
+    },
+    sampleSegmentStyle(sample, key, level, value) {
+      const active = level <= this.sampleLevel(sample, key)
+      return { backgroundColor: this.getColor(value, key), opacity: active ? 1 : 0.18 }
+    },
+    sampleDescription(item, column) {
+      const sample = item[column.key + '_sample'] || {}
+      const stars = Number(sample.three_stars) || 0
+      const attacks = Number(sample.attacks) || 0
+      const rate = this.formatRate(item[column.key])
+      return column.key.startsWith('defense')
+        ? `${column.line1}${column.line2}：${rate}，被三星 ${stars} 次，有效被进攻 ${attacks} 刀`
+        : `${column.line1}${column.line2}：${rate}，三星 ${stars} 次，有效进攻 ${attacks} 刀`
+    },
+    showSample(item, column) {
+      if (item[column.key] == null) return
+      uni.showModal({ title: `${column.line1}${column.line2}`, content: this.sampleDescription(item, column), showCancel: false, confirmText: '知道了' })
+    }
   }
 }
 </script>
@@ -78,11 +110,13 @@ export default {
 .clan-stats-update { flex-shrink: 0; padding: 16rpx 0 4rpx; color: #556078; font-size: 24rpx; text-align: center; }
 .clan-stats-table-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .clan-stats-body { flex: 1; height: 0; }
-.clan-stats-tr { display: flex; align-items: center; height: 72rpx; border-bottom: 1rpx solid #1a1a2e; }
+.clan-stats-tr { display: flex; align-items: center; height: 64rpx; border-bottom: 1rpx solid #1a1a2e; }
 .clan-stats-head { height: 88rpx; flex-shrink: 0; background: #1a1a2e; border-bottom: 2rpx solid #2a2a4a; }
 .clan-stats-even { background: rgba(26, 26, 46, 0.4); }
-.clan-stats-td { flex-shrink: 0; text-align: center; font-size: 24rpx; border-right: 1rpx solid #1a1a2e; line-height: 72rpx; }
-.cs-name { width: 120rpx; padding-left: 12rpx; text-align: left; }.cs-th { width: 50rpx; }.cs-data { width: 96rpx; line-height: 1.3; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.clan-stats-td { flex-shrink: 0; text-align: center; font-size: 24rpx; border-right: 1rpx solid #1a1a2e; line-height: 64rpx; }
+.cs-name { width: 120rpx; padding-left: 12rpx; text-align: left; }.cs-th { width: 50rpx; }.cs-data { width: 96rpx; line-height: 1.2; display: flex; flex-direction: column; align-items: center; justify-content: center; }
 .clan-stats-head-cell { color: #8890a0; font-weight: 600; font-size: 20rpx; }.clan-stats-arrow { color: #4a90d9; font-size: 16rpx; }
-.clan-stats-name { color: #e0e0e0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }.clan-stats-th { color: #4a90d9; font-weight: 600; }.clan-stats-data { font-weight: 500; }
+.clan-stats-name { color: #e0e0e0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }.clan-stats-th { color: #4a90d9; font-weight: 600; }.clan-stats-data { font-weight: 600; }.clan-stats-rate { line-height: 28rpx; }
+.clan-stats-sample-bar { display: flex; width: 36rpx; gap: 3rpx; margin-top: 3rpx; }
+.clan-stats-sample-segment { flex: 1; height: 5rpx; border-radius: 4rpx; }
 </style>
