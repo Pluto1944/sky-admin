@@ -136,7 +136,7 @@ export default {
       this.clockTimer = null; this.refreshTimer = null
     },
     statusLabel(status) { return ({ in_war: '战斗日', preparation: '准备日', war_ended: '已结束' })[status] || status },
-    resultLabel(result) { return ({ leading: '当前领先', losing: '当前落后', tied: '当前平局', victory: '胜利', defeat: '失败', pending: '尚未开战' })[result] || '-' },
+    resultLabel(result) { return ({ leading: '领先', losing: '落后', tied: '平', victory: '胜利', defeat: '失败', pending: '尚未开战' })[result] || '-' },
     resultClass(result) {
       if (['leading', 'victory'].indexOf(result) >= 0) return 'result-win'
       if (['losing', 'defeat'].indexOf(result) >= 0) return 'result-loss'

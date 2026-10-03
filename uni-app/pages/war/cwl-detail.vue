@@ -21,7 +21,7 @@
         <view class="team-meta">
           <text>{{ detail.team.team_alias }}</text><text>{{ detail.team.league_level || '未定级' }}</text>
           <text v-if="detail.summary.rank">当前第{{ detail.summary.rank }}名</text>
-          <text>{{ detail.summary.wins || 0 }}胜 {{ detail.summary.losses || 0 }}负</text>
+          <text>{{ summaryResultText(detail.summary) }}</text>
         </view>
         <text v-if="detail.error" class="cache-warning">{{ detail.error }}（已保留最近成功数据）</text>
         <text v-if="detail.updated_at" class="updated-at">数据更新于 {{ formatTime(detail.updated_at) }}</text>
@@ -45,7 +45,7 @@
         <view v-else-if="selectedRound && !selectedRound.clan" class="empty-box">第{{ selectedRound.round }}场{{ selectedRound.status === 'bye' ? '轮空' : '数据暂不可用' }}</view>
         <view v-else-if="selectedRound" class="round-content">
           <view class="match-card">
-            <view class="match-heading"><text>联赛第{{ selectedRound.round }}场 · {{ roundStatusLabel(selectedRound.status) }}</text><text class="result-label" :class="resultClass(selectedRound.result)">{{ resultLabel(selectedRound.result) }}</text></view>
+            <view class="match-heading"><text>联赛第{{ selectedRound.round }}场 · {{ roundStatusLabel(selectedRound.status) }}</text><text class="result-label" :class="resultClass(selectedRound.result)">{{ roundResultLabel(selectedRound) }}</text></view>
             <view class="match-row">
               <view class="match-side"><text class="match-name">{{ selectedRound.clan.name }}</text><text class="match-tag">{{ selectedRound.clan.tag }}</text></view>
               <text class="versus">VS</text>
@@ -208,7 +208,16 @@ export default {
     },
     toggleSection(key) { this.$set(this.openSections, key, !this.openSections[key]) },
     roundStatusLabel(status) { return ({ in_war: '战斗日', preparation: '准备日', war_ended: '已结束', not_started: '未开始', unavailable: '待同步', bye: '轮空' })[status] || status },
-    resultLabel(result) { return ({ leading: '当前领先', losing: '当前落后', tied: '平局', victory: '胜利', defeat: '失败', pending: '尚未开战' })[result] || '-' },
+    roundResultLabel(item) {
+      if (!item) return '-'
+      if (item.status === 'in_war') return ({ leading: '领先', losing: '落后', tied: '平' })[item.result] || '进行中'
+      return ({ victory: '胜利', defeat: '失败', tied: '平局', pending: '尚未开战' })[item.result] || '-'
+    },
+    summaryResultText(summary) {
+      if (summary && summary.status === 'active') return `第${summary.current_round || '-'}场 ${({ leading: '领先', losing: '落后', tied: '平' })[summary.current_result] || '进行中'}`
+      if (!summary) return '-'
+      return `${summary.wins || 0}胜 ${summary.losses || 0}负${summary.ties ? ' ' + summary.ties + '平' : ''}`
+    },
     resultClass(result) { if (['leading', 'victory'].indexOf(result) >= 0) return 'result-win'; if (['losing', 'defeat'].indexOf(result) >= 0) return 'result-loss'; return 'result-tied' },
     memberName(member) { return member ? member.name : '-' },
     memberTh(member) { return member && member.town_hall_level ? member.town_hall_level : '-' },
@@ -218,7 +227,14 @@ export default {
     defensePosition(member) { const attack = this.memberDefense(member); return attack && attack.attacker_position ? attack.attacker_position : '-' },
     formatAttack(attack, emptyText) { if (!attack) return emptyText || '-'; return `${'★'.repeat(Number(attack.stars || 0))}${'☆'.repeat(Math.max(0, 3 - Number(attack.stars || 0)))} ${Number(attack.destruction_percentage || 0).toFixed(0)}%` },
     attackClass(attack, defense) { if (!attack) return 'attack-empty'; const stars = Number(attack.stars || 0); if (defense) return stars === 3 ? 'attack-bad' : stars === 2 ? 'attack-mid' : 'attack-good'; return stars === 3 ? 'attack-good' : stars === 2 ? 'attack-mid' : 'attack-bad' },
-    standingRoundText(item) { if (!item || item.status === 'not_started') return '-'; return `${item.attacks || 0}刀 · ${item.stars || 0}★ · ${this.formatNumber(item.destruction_percentage)}%` },
+    standingRoundText(item) {
+      if (!item || item.status === 'not_started') return '-'
+      if (item.status === 'preparation') return '准备中'
+      const result = item.status === 'in_war'
+        ? ({ leading: '领先', losing: '落后', tied: '平' })[item.result]
+        : ({ victory: '胜', defeat: '负', tied: '平' })[item.result]
+      return `${result || '-'} · ${item.attacks || 0}刀 · ${item.stars || 0}★ · ${this.formatNumber(item.destruction_percentage)}%`
+    },
     offenseRoundText(item) { if (item.status === 'not_participated') return '未参战'; if (item.status === 'not_attacked') return '未出刀'; return `${item.stars}★ ${this.formatNumber(item.destruction_percentage)}%` },
     defenseRoundText(item) { if (item.status === 'not_participated') return '未参战'; if (item.status === 'unattacked') return '未被打'; return `${item.stars}★ ${this.formatNumber(item.destruction_percentage)}%` },
     attackCellClass(item) { if (item.status !== 'attacked') return 'attack-empty'; return item.stars === 3 ? 'attack-good' : item.stars === 2 ? 'attack-mid' : 'attack-bad' },

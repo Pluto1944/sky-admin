@@ -433,9 +433,10 @@ def _standings(group: dict, wars_by_tag: dict[str, dict]) -> list[dict]:
                 if started:
                     entry["attack_stars"] += side.get("stars", 0)
                     entry["total_destruction"] += side.get("destruction_percentage", 0)
-                    if result in {"victory", "leading"}:
+                if war.get("state") == "warEnded":
+                    if result == "victory":
                         entry["wins"] += 1
-                    elif result in {"defeat", "losing"}:
+                    elif result == "defeat":
                         entry["losses"] += 1
                     else:
                         entry["ties"] += 1
@@ -452,8 +453,11 @@ def _standings(group: dict, wars_by_tag: dict[str, dict]) -> list[dict]:
 
     for entry in entries.values():
         entry["league_stars"] = entry["attack_stars"] + entry["wins"] * WIN_BONUS_STARS
-        played = entry["wins"] + entry["losses"] + entry["ties"]
-        entry["average_destruction"] = round(entry["total_destruction"] / played, 2) if played else 0.0
+        started = sum(
+            item.get("status") in {"in_war", "war_ended"}
+            for item in entry["rounds"]
+        )
+        entry["average_destruction"] = round(entry["total_destruction"] / started, 2) if started else 0.0
 
     ordered = sorted(
         entries.values(),
@@ -644,6 +648,7 @@ def build_cwl_dashboard(group: dict, wars_by_tag: dict[str, dict]) -> dict:
         "season": group.get("season"),
         "status": status,
         "current_round": current_round,
+        "current_result": active.get("result") if active else None,
         "rank": own_standing.get("rank") if own_standing else None,
         "wins": own_standing.get("wins", 0) if own_standing else 0,
         "losses": own_standing.get("losses", 0) if own_standing else 0,

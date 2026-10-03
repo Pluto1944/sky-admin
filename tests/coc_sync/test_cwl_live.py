@@ -51,10 +51,19 @@ def test_dashboard_builds_rounds_standings_town_halls_and_member_stats():
 
     own = next(row for row in dashboard["overview"]["standings"]["rows"] if row["clan_tag"] == "#AAA")
     assert own["wins"] == 1
-    assert own["losses"] == 1
+    assert own["losses"] == 0
+    assert own["ties"] == 0
     assert own["attack_stars"] == 5
     assert own["league_stars"] == 15
+    assert own["average_destruction"] == 47.5
     assert [item["attacks"] for item in own["rounds"]] == [1, 1]
+    assert [item["result"] for item in own["rounds"]] == ["losing", "victory"]
+    assert dashboard["summary"]["current_result"] == "losing"
+
+    opponent = next(row for row in dashboard["overview"]["standings"]["rows"] if row["clan_tag"] == "#BBB")
+    assert opponent["wins"] == 0
+    assert opponent["losses"] == 1
+    assert opponent["league_stars"] == 6
 
     offense = next(row for row in dashboard["overview"]["offense"]["rows"] if row["player_tag"] == "#A1")
     assert offense["total_stars"] == 5

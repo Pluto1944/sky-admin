@@ -56,6 +56,9 @@ def test_cwl_live_summary_and_detail_read_cache(db):
     assert len(summary["clans"]) == 1
     assert summary["clans"][0]["clan_tag"] == "#AAA"
     assert summary["clans"][0]["current_round"] == 1
+    assert summary["clans"][0]["current_result"] == "losing"
+    assert summary["clans"][0]["wins"] == 1
+    assert summary["clans"][0]["losses"] == 0
 
     detail = routes.cwl_live_detail("#aaa", "2026-09", 2, db)
     assert detail["team"]["clan_tag"] == "#AAA"

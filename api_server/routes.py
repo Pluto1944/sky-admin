@@ -554,6 +554,7 @@ def _pending_cwl_summary(team: dict, cache: dict | None = None) -> dict:
         "season": (cache or {}).get("season"),
         "status": (cache or {}).get("status") or "waiting",
         "current_round": None,
+        "current_result": None,
         "rank": None,
         "wins": 0,
         "losses": 0,

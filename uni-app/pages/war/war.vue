@@ -168,7 +168,7 @@
               </view>
               <view class="league-metrics">
                 <text>第{{ clan.current_round || '-' }}场</text>
-                <text>{{ clan.wins || 0 }}胜 {{ clan.losses || 0 }}负{{ clan.ties ? ' ' + clan.ties + '平' : '' }}</text>
+                <text>{{ leagueResultSummary(clan) }}</text>
                 <text>{{ clan.attack_stars || 0 }}⭐</text>
                 <text>{{ formatPercent(clan.average_destruction) }}</text>
               </view>
@@ -571,7 +571,12 @@ export default {
       return ({ in_war: '战斗日', preparation: '准备日', war_ended: '已结束', not_in_war: '无战争', cwl: '联赛中', sync_pending: '待同步', error: '同步失败' })[status] || status
     },
     resultLabel(result) {
-      return ({ leading: '当前领先', losing: '当前落后', tied: '当前平局', victory: '胜利', defeat: '失败', pending: '尚未开战' })[result] || '-'
+      return ({ leading: '领先', losing: '落后', tied: '平', victory: '胜利', defeat: '失败', pending: '尚未开战' })[result] || '-'
+    },
+    leagueResultSummary(clan) {
+      if (clan && clan.status === 'active') return ({ leading: '领先', losing: '落后', tied: '平' })[clan.current_result] || '进行中'
+      if (!clan) return '-'
+      return `${clan.wins || 0}胜 ${clan.losses || 0}负${clan.ties ? ' ' + clan.ties + '平' : ''}`
     },
     resultClass(result) {
       if (['leading', 'victory'].indexOf(result) >= 0) return 'result-win'
