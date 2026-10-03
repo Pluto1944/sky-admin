@@ -122,6 +122,17 @@ bash -n <脚本路径>
 - 公开 API：检查本机与公网接口；
 - 小程序表格：使用微信开发者工具和至少一台真机检查横向滚动、分页、固定列和底部 TabBar。
 
+发布元数据还应做一次一致性核对：
+
+```bash
+source .frontend-env/activate
+node -e "const fs=require('fs'); const m=JSON.parse(fs.readFileSync('uni-app/manifest.json')); const p=JSON.parse(fs.readFileSync('uni-app/package.json')); console.log({ versionName:m.versionName, versionCode:m.versionCode, package:p.version })"
+cat VERSION
+```
+
+其中 `VERSION` 必须是 `vX.Y.Z`，`versionName` 与包版本必须为相同的 `X.Y.Z`，不得把
+带 `v` 的 Git Tag 直接填入微信开发者工具。
+
 ## 4. 提交规则
 
 提交按单一业务目的组织，只暂存本次相关文件：
@@ -180,6 +191,12 @@ git ls-remote --tags origin \
 
 四个位置最终应指向预期发布提交。若 Tag 已先推送，也必须随后推送其所属发布分支并完成同样核对。
 
+### 5.3 已创建但未推送的错误 Tag
+
+本地、远端都不存在同名 Tag 的前提下，才可以删除本地错误 Tag 后重新创建；删除前必须先用
+`git ls-remote --tags origin 'refs/tags/vX.Y.Z' 'refs/tags/vX.Y.Z^{}'` 确认远端为空。
+一旦 Tag 已推送，绝不移动或重用版本号，必须创建新的修订版本。
+
 ## 6. 微信小程序发布
 
 ### 6.1 上传前检查
@@ -219,6 +236,19 @@ git ls-remote --tags origin \
 
 上传成功、审核通过和正式发布是三个不同状态，交接记录中必须明确当前处于哪一步。
 
+推荐使用以下状态，避免将“已提交审核”误写为“已发布”：
+
+| 状态 | 含义 | 是否对普通用户生效 |
+| --- | --- | --- |
+| 未上传 | 只有本地构建产物 | 否 |
+| 体验版 | 已上传，可由受邀体验者扫码 | 否 |
+| 审核中 | 已在公众平台提交审核 | 否 |
+| 审核通过待发布 | 审核通过，尚未确认发布 | 否 |
+| 已发布 | 已在公众平台发布 | 是 |
+
+自动化边界：构建、Git 推送、后端部署和接口验收可在服务器执行；开发者工具上传、体验版扫码、
+审核提交、正式发布与普通用户入口复测必须由具备微信权限的人员完成。
+
 ## 7. 后端上线
 
 后端代码或 schema 有变化时，Tag 推送后仍需独立部署。
@@ -238,10 +268,21 @@ systemctl is-active sky-admin.service sky-scheduler.service
 systemctl status --no-pager sky-admin.service sky-scheduler.service
 ```
 
+`systemctl is-active` 刚返回 `active` 时，uvicorn worker 仍可能处于数秒启动窗口。健康检查应允许
+短暂重试，不能因首次连接拒绝就认定部署失败：
+
+```bash
+for attempt in 1 2 3 4 5; do
+  curl -fsS --connect-timeout 3 http://127.0.0.1:8000/api/ping && break
+  sleep 2
+done
+```
+
 上线后至少验证：
 
 - `http://127.0.0.1:8000/api/ping`；
 - `https://api.skycoc.cc/api/ping`；
+- 两个健康响应的 `version` 均等于刚推送的 `vX.Y.Z`；
 - 本次改动涉及的实际业务接口；
 - 相关 `sync_jobs` 的最近状态和运行时间；
 - 服务日志中无持续异常。
@@ -281,7 +322,7 @@ systemctl status --no-pager sky-admin.service sky-scheduler.service
 发布 commit：<完整哈希>
 发布分支：feat/wechat
 后端状态：未部署 / 已部署并验证
-小程序状态：未上传 / 体验版 / 审核中 / 已发布
+小程序状态：未上传 / 体验版 / 审核中 / 审核通过待发布 / 已发布
 验证结果：测试、构建、接口、真机
 已知问题：无，或列出外部依赖/暂缓项
 ```
