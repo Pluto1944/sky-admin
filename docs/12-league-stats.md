@@ -60,6 +60,10 @@ cwl_live_group_cache + cwl_live_war_cache + league_teams
 扣分或升降级公式。具体次数/比例、月份窗口、权重和豁免规则尚未确定，以 `docs/03-sorting.md`
 的待讨论设计为准。旧月份在重新投影前为 `NULL`，不能解释为零。
 联赛详情页使用上月、前 3 月、前 6 月的滚动聚合；成员主页只显示近 3 个完整月的进攻摘要。
+`GET /api/clan/league-stats` 在每个滚动百分比字段之外同时返回对应的 `*_sample`：进攻样本包含
+`offense_3stars` 对应的 `three_stars` 和实际 `attacks`，防守样本包含 `defense_3stars` 对应的
+`three_stars` 和 `defense_total` 对应的 `attacks`。小程序第二行刀数和轻触详情必须读取这些样本，
+不得在只有百分比时伪造为 `0刀`。
 
 ## 任务和补档
 

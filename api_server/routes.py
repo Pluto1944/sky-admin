@@ -1071,6 +1071,16 @@ def league_stats(
                 st.get("6m", {}).get("defense_total", 0),
             ),
         }
+        for window_key in windows:
+            sample = st.get(window_key, {})
+            item[f"offense_{window_key}_sample"] = {
+                "three_stars": sample.get("offense_3stars", 0),
+                "attacks": sample.get("attacks", 0),
+            }
+            item[f"defense_{window_key}_sample"] = {
+                "three_stars": sample.get("defense_3stars", 0),
+                "attacks": sample.get("defense_total", 0),
+            }
         result.append(item)
 
     # 数据更新时间：取相关月份 league_results 最近一次同步时间
