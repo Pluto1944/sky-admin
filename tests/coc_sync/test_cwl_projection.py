@@ -19,7 +19,7 @@ def _war(status="war_ended"):
             "tag": "#OWN", "members": [
                 {"player_tag": "#P1", "name": "甲", "attacks": [
                     {"defender_tag": "#E1", "stars": 3},
-                    {"defender_tag": "#E2", "stars": 2},
+                    {"defender_tag": "#E2", "stars": 1},
                 ]},
                 {"player_tag": "#P2", "name": "乙", "attacks": []},
             ],
@@ -54,12 +54,14 @@ def test_raw_group_requires_every_final_war_before_projection():
 def test_projection_aggregates_offense_and_defense_from_raw_wars(db):
     rows = build_league_result_rows(_group(), {"#WAR1": _war()}, _team())
     assert rows == [
-        {"player_tag": "#P1", "account_name": "甲", "total_stars": 5, "attacks": 2,
+        {"player_tag": "#P1", "account_name": "甲", "total_stars": 4, "attacks": 2,
          "appearances": 1, "missed_attacks": 0,
-         "offense_3stars": 1, "defense_3stars": 1, "defense_total": 2},
+         "offense_1stars": 1, "offense_3stars": 1,
+         "defense_3stars": 1, "defense_total": 2},
         {"player_tag": "#P2", "account_name": "乙", "total_stars": 0, "attacks": 0,
          "appearances": 1, "missed_attacks": 1,
-         "offense_3stars": 0, "defense_3stars": 1, "defense_total": 1},
+         "offense_1stars": 0, "offense_3stars": 0,
+         "defense_3stars": 1, "defense_total": 1},
     ]
     db.conn.executemany(
         "INSERT INTO accounts (player_tag, account_name) VALUES (?, ?)",
@@ -71,10 +73,10 @@ def test_projection_aggregates_offense_and_defense_from_raw_wars(db):
     assert (written, skipped) == (2, 0)
     actual = db.conn.execute(
         """SELECT player_tag, total_stars, attacks, appearances, missed_attacks,
-                  offense_3stars, defense_3stars, defense_total
+                  offense_1stars, offense_3stars, defense_3stars, defense_total
            FROM league_results ORDER BY player_tag"""
     ).fetchall()
     assert [tuple(row) for row in actual] == [
-        ("#P1", 5, 2, 1, 0, 1, 1, 2),
-        ("#P2", 0, 0, 1, 1, 0, 1, 1),
+        ("#P1", 4, 2, 1, 0, 1, 1, 1, 2),
+        ("#P2", 0, 0, 1, 1, 0, 0, 1, 1),
     ]

@@ -308,12 +308,16 @@ def member_summary_map(conn: sqlite3.Connection, player_tags: list[str]) -> dict
 
     periods = previous_complete_periods(now, 3)
     cwl_by_player: dict[str, dict[str, Any]] = defaultdict(
-        lambda: {"three_stars": 0, "attacks": 0, "periods": set(), "updated_at": None}
+        lambda: {
+            "one_stars": 0, "three_stars": 0, "attacks": 0,
+            "periods": set(), "updated_at": None,
+        }
     )
     if periods:
         period_placeholders = ",".join("?" for _ in periods)
         cwl_rows = conn.execute(
-            f"""SELECT lr.player_tag, lr.period, lr.offense_3stars, lr.attacks, lr.fetched_at
+            f"""SELECT lr.player_tag, lr.period, lr.offense_1stars,
+                       lr.offense_3stars, lr.attacks, lr.fetched_at
                 FROM league_results lr
                 WHERE lr.player_tag IN ({placeholders}) AND lr.period IN ({period_placeholders})
                   AND EXISTS (
@@ -324,6 +328,7 @@ def member_summary_map(conn: sqlite3.Connection, player_tags: list[str]) -> dict
         ).fetchall()
         for row in cwl_rows:
             entry = cwl_by_player[row["player_tag"]]
+            entry["one_stars"] += _int(row["offense_1stars"])
             entry["three_stars"] += _int(row["offense_3stars"])
             entry["attacks"] += _int(row["attacks"])
             entry["periods"].add(row["period"])
@@ -347,7 +352,9 @@ def member_summary_map(conn: sqlite3.Connection, player_tags: list[str]) -> dict
             },
             "cwl_recent_3m": {
                 "periods": sorted(cwl["periods"], reverse=True),
+                "one_stars": cwl["one_stars"],
                 "three_stars": cwl["three_stars"], "attacks": cwl["attacks"],
+                "one_star_rate": _rate(cwl["one_stars"], cwl["attacks"]),
                 "three_star_rate": _rate(cwl["three_stars"], cwl["attacks"]),
             },
             "combat_updated_at": updated,

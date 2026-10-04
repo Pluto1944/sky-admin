@@ -106,6 +106,7 @@ CREATE TABLE IF NOT EXISTS league_results (
     attacks         INTEGER,
     appearances     INTEGER,
     missed_attacks  INTEGER,
+    offense_1stars  INTEGER,
     offense_3stars  INTEGER DEFAULT 0,
     defense_3stars  INTEGER DEFAULT 0,
     defense_total   INTEGER DEFAULT 0,
@@ -495,6 +496,8 @@ class Database:
             self.conn.execute("ALTER TABLE league_results ADD COLUMN appearances INTEGER")
         if "missed_attacks" not in lr_cols:
             self.conn.execute("ALTER TABLE league_results ADD COLUMN missed_attacks INTEGER")
+        if "offense_1stars" not in lr_cols:
+            self.conn.execute("ALTER TABLE league_results ADD COLUMN offense_1stars INTEGER")
 
         # farm_stats 表迁移（互刷部落缓存）
         fs_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(farm_stats)")}

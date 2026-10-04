@@ -136,11 +136,11 @@ def test_cwl_live_cache_tables_are_created(db):
     assert {"war_tag", "state", "data_json", "updated_at", "attempted_at"} <= war_columns
 
 
-def test_league_results_tracks_appearances_and_missed_attacks(db):
+def test_league_results_tracks_reliability_facts(db):
     columns = {
         row[1] for row in db.conn.execute("PRAGMA table_info(league_results)")
     }
-    assert {"appearances", "missed_attacks"} <= columns
+    assert {"appearances", "missed_attacks", "offense_1stars"} <= columns
 
 
 def test_league_results_migration_preserves_old_rows_as_unknown(tmp_path):
@@ -180,9 +180,9 @@ def test_league_results_migration_preserves_old_rows_as_unknown(tmp_path):
     migrated = Database(path)
     migrated.init_schema()
     row = migrated.conn.execute(
-        "SELECT attacks, appearances, missed_attacks FROM league_results"
+        "SELECT attacks, appearances, missed_attacks, offense_1stars FROM league_results"
     ).fetchone()
-    assert tuple(row) == (5, None, None)
+    assert tuple(row) == (5, None, None, None)
     migrated.close()
 
 

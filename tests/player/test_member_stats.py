@@ -60,8 +60,8 @@ def test_cross_clan_war_and_cwl_summary_uses_player_tag(db):
     db.conn.execute(
         """INSERT INTO league_results
            (period, team_index, team_alias, clan_tag, category, player_tag,
-            account_name, attacks, offense_3stars)
-           VALUES ('2026-09', 0, '壳队', '#CWL1', 'shell', '#P1', '甲', 7, 4)"""
+            account_name, attacks, offense_1stars, offense_3stars)
+           VALUES ('2026-09', 0, '壳队', '#CWL1', 'shell', '#P1', '甲', 7, 2, 4)"""
     )
     summaries = member_summary_map(db.conn, ["#P1", "#P2"])
     assert summaries["#P1"]["war_recent_15"] == {
@@ -71,6 +71,8 @@ def test_cross_clan_war_and_cwl_summary_uses_player_tag(db):
     assert summaries["#P2"]["war_recent_15"]["war_count"] == 2
     assert summaries["#P2"]["war_recent_15"]["attacks"] == 0
     assert summaries["#P1"]["cwl_recent_3m"]["attacks"] == 7
+    assert summaries["#P1"]["cwl_recent_3m"]["one_stars"] == 2
+    assert summaries["#P1"]["cwl_recent_3m"]["one_star_rate"] == 28.6
     assert summaries["#P1"]["cwl_recent_3m"]["three_star_rate"] == 57.1
 
 

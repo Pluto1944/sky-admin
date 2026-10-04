@@ -72,6 +72,7 @@ def build_league_result_rows(
                 "attacks": 0,
                 "appearances": 0,
                 "missed_attacks": 0,
+                "offense_1stars": 0,
                 "offense_3stars": 0,
                 "defense_3stars": 0,
                 "defense_total": 0,
@@ -82,6 +83,9 @@ def build_league_result_rows(
                 row["missed_attacks"] += 1
             row["total_stars"] += sum(_int(attack.get("stars")) for attack in attacks)
             row["attacks"] += len(attacks)
+            row["offense_1stars"] += sum(
+                1 for attack in attacks if _int(attack.get("stars")) == 1
+            )
             row["offense_3stars"] += sum(
                 1 for attack in attacks if _int(attack.get("stars")) == 3
             )
@@ -124,17 +128,17 @@ def rebuild_league_results(
             """INSERT INTO league_results
                (period, team_index, team_alias, team_name, clan_tag, category,
                 player_tag, account_name, total_stars, attacks, appearances,
-                missed_attacks, offense_3stars, defense_3stars, defense_total,
-                fetched_at, raw_metrics)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                missed_attacks, offense_1stars, offense_3stars, defense_3stars,
+                defense_total, fetched_at, raw_metrics)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 period, team_index, team.get("team_alias") or str(team_index),
                 team.get("team_name"), normalize_tag(team.get("clan_tag")),
                 team.get("category") or "combat", row["player_tag"], row["account_name"],
                 row["total_stars"], row["attacks"], row["appearances"],
-                row["missed_attacks"], row["offense_3stars"],
+                row["missed_attacks"], row["offense_1stars"], row["offense_3stars"],
                 row["defense_3stars"], row["defense_total"], timestamp,
-                '{"source":"cwl_raw_projection","version":2}',
+                '{"source":"cwl_raw_projection","version":3}',
             ),
         )
         written += 1

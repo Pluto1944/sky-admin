@@ -255,8 +255,10 @@ ClashPerk 等第三方最近活动接口暂不接入。第一版只使用本系�
   },
   "cwl_recent_3m": {
     "periods": ["2026-09", "2026-08", "2026-07"],
+    "one_stars": 2,
     "three_stars": 6,
     "attacks": 14,
+    "one_star_rate": 14.3,
     "three_star_rate": 42.9
   },
   "capital_recent_4w": {
