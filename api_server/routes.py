@@ -23,6 +23,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException
 
 from modules.player.repository import PlayerRepository
+from modules.player.farm_management import canonical_tag, farm_management_by_clan
 from modules.coc_sync.current_war import current_war_summary
 from modules.coc_sync.cwl_live import build_cwl_attack_reminder, build_cwl_dashboard, group_war_tags
 from modules.coc_sync.official.mapper import normalize_tag
@@ -1177,39 +1178,64 @@ def war_stats(
 
 @router.get("/clan/farm-config")
 def farm_config(db: Database = Depends(get_db)):
-    """获取所有互刷部落的实时配置和去速本配置。
+    """获取所有互刷部落的配置及清退辅助名单。
 
-    从 farm_stats 缓存表读取（由定时脚本 sync_farm_stats.py 刷新），毫秒级响应。
+    战争配置从 farm_stats 缓存读取；填坑号和不活跃名单只读本地事实表。
+    请求路径不访问腾讯文档或 COC。
     返回每个 farm 类别部落的：
     - 部落实时配置（从部落成员统计各 TH 分布）
     - 部落去速本后实时配置（从部落战数据用阶段归类法统计）
     - updated_at 数据更新时间
     """
     conn = db.conn
+    configured_clans = get_farm_clans()
     rows = conn.execute(
         "SELECT clan_tag, clan_name, category, member_count, stats_json, updated_at "
         "FROM farm_stats"
     ).fetchall()
-
-    if not rows:
-        return {"clans": [], "updated_at": None}
-
-    # 按配置中的互刷部落顺序排列（一营 → 八营）
-    tag_order = {c["tag"]: i for i, c in enumerate(get_farm_clans())}
-    rows = sorted(rows, key=lambda r: tag_order.get(r["clan_tag"], 999))
-
-    import json
+    rows_by_tag = {canonical_tag(row["clan_tag"]): row for row in rows}
+    management = farm_management_by_clan(
+        conn, [clan["tag"] for clan in configured_clans]
+    )
     clans = []
-    for row in rows:
-        try:
-            stats = json.loads(row["stats_json"])
-        except (json.JSONDecodeError, TypeError):
+    for clan in configured_clans:
+        clan_tag = normalize_tag(clan["tag"])
+        row = rows_by_tag.get(canonical_tag(clan_tag))
+        if row:
+            try:
+                stats = json.loads(row["stats_json"])
+            except (json.JSONDecodeError, TypeError):
+                stats = {}
+        else:
             stats = {}
+        stats.setdefault("clan_tag", clan_tag)
+        stats.setdefault("clan_name", clan.get("name") or clan_tag)
+        stats.setdefault("category", "farm")
+        stats.setdefault("member_count", int(row["member_count"] or 0) if row else 0)
+        stats.setdefault("realtime", {"avg_th": 0, "distribution": {}})
+        stats.setdefault(
+            "despeed", {"has_war": False, "avg_th": 0, "distribution": {}}
+        )
+        stats.setdefault("replace_candidates", [])
+        lists = management.get(clan_tag, {"fill_accounts": [], "inactive_members": []})
+        stats["fill_accounts"] = lists["fill_accounts"]
+        stats["inactive_members"] = lists["inactive_members"]
         clans.append(stats)
 
+    fill_updated = conn.execute(
+        "SELECT MAX(updated_at) FROM farm_fill_accounts WHERE status = 'active'"
+    ).fetchone()[0]
+    member_updated = conn.execute(
+        "SELECT MAX(last_synced_at) FROM accounts WHERE COALESCE(membership_status, 'member') = 'member'"
+    ).fetchone()[0]
     return {
         "clans": clans,
-        "updated_at": rows[0]["updated_at"] if rows else None,
+        "updated_at": max(
+            (row["updated_at"] for row in rows if row["updated_at"]), default=None
+        ),
+        "member_updated_at": max(
+            (value for value in (fill_updated, member_updated) if value), default=None
+        ),
     }
 
 

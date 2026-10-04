@@ -19,6 +19,7 @@
 | 普通战原始历史 | `war_history_cache` | `(clan_tag, war_key)` | 每部落最多 45 场已结束普通战完整档案 |
 | 普通战事实投影 | `member_war_facts` | `(clan_tag, war_key, player_tag)` | 可重建的逐玩家进攻/防守查询事实 |
 | 互刷统计 | `farm_stats` | `clan_tag` | 互刷部落配置与去速本统计缓存 |
+| 互刷填坑号 | `farm_fill_accounts` | `account_number` | 一次性导入的长期保护身份；`player_tag` 可重复且无 accounts 外键 |
 | 账号外部身份 | `wechat_users` | `openid` | 微信登录和账号绑定 |
 | 都城贡献 | `capital_raid_member_results` | `(clan_tag, start_time, player_tag)` | 突袭周末成员事实 |
 | 竞赛贡献 | `clan_games_member_snapshots` | `(period, player_tag)` | 月末成就快照和差值 |
@@ -54,6 +55,8 @@
 - `registrations.period` / `league_teams.period` 是即将参赛月；`league_results.period` 是实际发生月；
   普通战使用单场 `end_time`，不得混用。
 - `team_index` 是月内从 0 开始的稳定队伍身份；`team_alias` 不是唯一键。
+- `farm_fill_accounts` 以填坑账号编号保留全部登记；当前部落归属始终通过 `player_tag` 关联
+  `accounts.clan_tag`，不能用导入快照覆盖 COC 权威归属。
 - 不在 API 请求路径访问 COC、ClashKing 或腾讯文档；先由任务或显式回填落本地。
 - SQLite schema 或批量写入前必须创建并验证一致性备份；生产备份使用 `scripts/backup_to_cos.py`。
 
@@ -64,6 +67,7 @@
 | `member_war_facts` | 从 `war_history_cache` 的最终完整 JSON 物化 |
 | `league_results` | 从完整 `cwl_live_group_cache` + `cwl_live_war_cache` 运行 `scripts/fetch_cwl_data.py --period YYYY-MM` |
 | `farm_stats` / 部落资料缓存 | 对应调度任务重新抓取 |
+| `farm_fill_accounts` | 不可由 COC 重建；从一致性备份恢复，或由已确认来源显式重新导入 |
 | `cwl_assembly_cache` 未冻结记录 | 由月初检查窗口重新核对；冻结结果不可用重算值替换 |
 
 恢复 COS SQLite 快照后须运行 `PRAGMA integrity_check`、重启 `sky-admin.service` 与

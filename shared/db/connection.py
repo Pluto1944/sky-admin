@@ -142,6 +142,28 @@ CREATE TABLE IF NOT EXISTS farm_stats (
 );
 """
 
+_FARM_FILL_ACCOUNTS_DDL = """
+CREATE TABLE IF NOT EXISTS farm_fill_accounts (
+    account_number           TEXT PRIMARY KEY,
+    player_tag               TEXT NOT NULL,
+    account_name_snapshot    TEXT,
+    town_hall_level_snapshot INTEGER,
+    source_clan_text         TEXT,
+    source_clan_tag          TEXT,
+    source_checked_text      TEXT,
+    status                   TEXT NOT NULL DEFAULT 'active',
+    source_doc_id            TEXT NOT NULL,
+    source_sheet_id          TEXT NOT NULL,
+    source_sheet_title       TEXT,
+    imported_at              TEXT NOT NULL,
+    updated_at               TEXT NOT NULL,
+    note                     TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_farm_fill_accounts_player_tag
+ON farm_fill_accounts(player_tag);
+"""
+
 _CURRENT_WAR_CACHE_DDL = """
 CREATE TABLE IF NOT EXISTS current_war_cache (
     clan_tag     TEXT PRIMARY KEY,
@@ -373,6 +395,7 @@ _CHILDREN_DDL = (
     + _LEAGUE_RESULTS_DDL
     + _WECHAT_USERS_DDL
     + _FARM_STATS_DDL
+    + _FARM_FILL_ACCOUNTS_DDL
     + _CURRENT_WAR_CACHE_DDL
     + _WAR_HISTORY_CACHE_DDL
     + _MEMBER_WAR_FACTS_DDL
@@ -503,6 +526,13 @@ class Database:
         fs_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(farm_stats)")}
         if not fs_cols:
             self.conn.execute(_FARM_STATS_DDL)
+
+        # 互刷填坑号长期身份表；无 accounts 外键，允许尚未进入联盟的已登记账号。
+        fill_cols = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(farm_fill_accounts)")
+        }
+        if not fill_cols:
+            self.conn.executescript(_FARM_FILL_ACCOUNTS_DDL)
 
         # current_war_cache 表迁移（全部自有部落当前战争缓存）
         cw_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(current_war_cache)")}
@@ -687,6 +717,7 @@ class Database:
             "member_war_facts",
             "capital_raid_member_results", "clan_games_member_snapshots",
             "current_war_cache",
+            "farm_fill_accounts",
             "clan_profile_cache",
             "league_results", "league_teams",
             "registrations", "accounts", "sync_jobs",

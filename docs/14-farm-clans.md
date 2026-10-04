@@ -131,6 +131,17 @@ topButtons: [
 
 成员级速本数据与部落级实时/去速本汇总由同一次 `sync_farm_stats.py` 统一获取和计算，写入同一条 `farm_stats.stats_json`。部落 Tab 读取 `realtime`/`despeed`，成员 Tab 读取 `replace_candidates`，两者必须使用同一场战争数据，并通过 `despeed_source`、`despeed_war_time` 标明来源和时间。当前阶段只使用 `currentwar` 的 `preparation`/`inWar` 数据；无有效部落战时 `replace_candidates` 为空，不将全部成员误判为速本。
 
+成员 Tab 同时承担清退辅助。填坑号长期身份独立存于 `farm_fill_accounts`，首次从指定腾讯文档
+Sheet 显式导入后不再定时访问在线表格；当前部落归属只认 `accounts.clan_tag`。一个玩家 Tag 可以
+对应多个填坑账号编号，因此表以 `account_number` 为主键、对 `player_tag` 建普通索引，API 按玩家
+合并账号编号。最不活跃名单只使用当前部落成员，排除填坑号和首领，按最近数据活动时间从旧到新
+取最多 5 人；没有活动记录时回退到开始观察时间。该名单是相对排序和清退参考，不等同官方登录时间。
+
+成员 Tab 的三段名单统一使用低亮度暗色数据表：去速本候选保留单行五列表格；填坑号增加“成员 / 身份”
+表头，不活跃名单增加“成员 / 活动情况”表头，两者保留双行详情。三张表共用边框、圆角、表头背景、
+分隔线和文字层级；填坑号只在独立名单中展示，不在速本候选姓名旁重复显示“勿踢”标签；不活跃时间
+使用普通文字色，不使用黄色告警色。
+
 ### 4.1 `GET /api/clan/farm-config`
 
 获取所有互刷部落的实时配置和去速本配置。**从 `farm_stats` 缓存表读取（毫秒级响应）**，数据由定时脚本 `scripts/sync_farm_stats.py` 定期刷新。
@@ -172,6 +183,8 @@ topButtons: [
 
 - `realtime`：部落实时配置（从部落成员数据统计），distribution 包含 18-10 及 `below_10`
 - `despeed`：去速本后配置（从部落战数据统计），仅统计本方成员
+- `fill_accounts`：当前处于该互刷部落的填坑号；身份来自本地长期表，归属来自 COC 成员同步
+- `inactive_members`：排除填坑号和首领后的相对最不活跃 5 人
   - `has_war: false` 时表示当前无部落战（状态不是 `inWar` 或 `preparation`）
   - 前端表格列示 18-11 本，将 10、below_10 合并显示为 `other` 列
 - `updated_at`：数据最后刷新时间，前端展示"数据更新于 MM-DD HH:mm"
@@ -389,6 +402,30 @@ CREATE TABLE IF NOT EXISTS farm_stats (
     updated_at   TEXT
 );
 ```
+
+填坑号长期登记另建表，不设置到 `accounts` 的外键，保证尚未进入联盟或暂时离开的填坑号仍能保留：
+
+```sql
+CREATE TABLE IF NOT EXISTS farm_fill_accounts (
+    account_number TEXT PRIMARY KEY,
+    player_tag TEXT NOT NULL,
+    account_name_snapshot TEXT,
+    town_hall_level_snapshot INTEGER,
+    source_clan_text TEXT,
+    source_clan_tag TEXT,
+    source_checked_text TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    source_doc_id TEXT NOT NULL,
+    source_sheet_id TEXT NOT NULL,
+    source_sheet_title TEXT,
+    imported_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    note TEXT
+);
+```
+
+首次导入使用 `scripts/import_farm_fill_accounts.py`，默认 dry-run，必须提供预期行数和唯一玩家数
+复核来源后才追加 `--apply`。该脚本不进入调度器；后续身份变更通过显式管理操作完成。
 
 ### 7.4 依赖
 

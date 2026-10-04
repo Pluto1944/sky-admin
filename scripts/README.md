@@ -80,6 +80,7 @@ python scripts/fetch_cwl_data.py --period 2026-07
 | `fetch_cwl_data.sh` | `fetch_cwl_data.py` 的便捷包装 |
 | `backfill_cwl_live.py` | 从 ClashKing 历史战争日志重建指定月份的联赛看板缓存；默认 dry-run，`--apply` 才写库 |
 | `backfill_war_history.py` | 从 ClashKing 重建各自有部落最近 45 场普通战争完整详情；默认 dry-run，`--apply` 才写库 |
+| `import_farm_fill_accounts.py` | 一次性从指定腾讯文档 Sheet 导入互刷填坑号；默认 dry-run，不进入周期调度 |
 | `retire_normal_war_legacy.py` | 校验新版普通战事实后，备份并删除旧投影表；默认 dry-run，`--yes` 才执行 |
 | `backup_to_cos.py` | 通过 SQLite Online Backup API 创建一致快照，上传到已挂载的 COS；`.env` 永不进入备份 |
 | `archive_local_backups_to_cos.py` | 将 `data/backups` 的历史 SQLite 备份校验后归档 COS；默认 dry-run，显式清理时保留最新两份本地副本 |

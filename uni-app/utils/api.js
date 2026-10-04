@@ -133,8 +133,8 @@ export function getWarStats(clanTag) {
 }
 
 /**
- * 获取互刷部落配置（实时 + 去速本后）
- * @returns {Promise} { clans: [{ clan_tag, clan_name, category, member_count, realtime, despeed }] }
+ * 获取互刷部落配置及清退辅助名单。
+ * @returns {Promise} { clans: [{ clan_tag, realtime, despeed, replace_candidates, fill_accounts, inactive_members }] }
  */
 export function getFarmConfig() {
   return request('/api/clan/farm-config')
