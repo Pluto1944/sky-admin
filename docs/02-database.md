@@ -22,9 +22,12 @@
 | 互刷填坑号 | `farm_fill_accounts` | `account_number` | 一次性导入的长期保护身份；`player_tag` 可重复且无 accounts 外键 |
 | 账号外部身份 | `wechat_users` | `openid` | 微信登录和账号绑定 |
 | 都城贡献 | `capital_raid_member_results` | `(clan_tag, start_time, player_tag)` | 突袭周末成员事实 |
+| 都城状态 | `capital_raid_status_cache` | `clan_tag` | 最近一次突袭周末的开启、进行、结束或未开启状态 |
 | 竞赛贡献 | `clan_games_member_snapshots` | `(period, player_tag)` | 月末成就快照和差值 |
 | 部落资料 | `clan_profile_cache` | `clan_tag` | 自有部落官方资料缓存 |
 | 调度状态 | `sync_jobs` | `job_id` | 周期任务的状态、时间和失败信息 |
+
+`capital_raid_status_cache` 与都城成员贡献事实分离：它每个自有部落只保留一行最近周末状态，服务概览卡片的开启提醒，不保存成员明细。同步失败只更新错误与尝试时间，已有同周状态不会被空结果覆盖。
 
 ## 普通部落战
 

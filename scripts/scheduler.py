@@ -11,6 +11,7 @@
     cwl         CWL 联赛战绩（每天触发，day==12 才真正拉取）
     player_details 玩家详情（每天，赛季进攻与活动估算）
     member_combat_stats 成员战斗摘要窗口清理（每天）
+    capital_raid_status 都城突袭开启状态（每10分钟检查，已开启部落自动停拉）
     capital_member_stats 都城成员贡献（每6小时检查业务窗口）
     clan_games_stats 竞赛贡献（每6小时检查业务窗口）
     war_layout  公众号阵型群发（每天北京时间 09:00）
@@ -830,6 +831,147 @@ def _capital_window_open(local_now: datetime) -> bool:
     )
 
 
+def _run_capital_raid_status(force: bool = False, now: datetime | None = None) -> dict:
+    """同步自有部落当前突袭周末是否已经开启。"""
+    from modules.coc_sync.capital_status import (
+        raid_weekend_window,
+        summarize_capital_raid_status,
+    )
+    from modules.coc_sync.official.mapper import normalize_tag
+    from modules.coc_sync.service import CocSyncService
+
+    clans = [clan for clan in config.CLANS if clan.get("enabled", True)]
+    if not clans:
+        return {"status": "skipped", "reason": "没有配置已启用部落"}
+
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    attempted_at = current.isoformat(timespec="seconds")
+    weekend_start, weekend_end = raid_weekend_window(current)
+    weekend_start_iso = weekend_start.isoformat(timespec="seconds")
+    weekend_end_iso = weekend_end.isoformat(timespec="seconds")
+    active = current < weekend_end
+
+    db = Database(config.DB_PATH)
+    db.init_schema()
+    cached_by_tag = {
+        row["clan_tag"]: dict(row)
+        for row in db.conn.execute("SELECT * FROM capital_raid_status_cache").fetchall()
+    }
+
+    due = []
+    locally_finalized = 0
+    for clan in clans:
+        clan_tag = normalize_tag(clan.get("tag"))
+        cached = cached_by_tag.get(clan_tag)
+        same_weekend = bool(cached and cached.get("weekend_start") == weekend_start_iso)
+        if not force and same_weekend:
+            status = cached.get("status")
+            if active and status == "ongoing" and not cached.get("error"):
+                continue
+            if not active and status in {"ended", "missed"} and not cached.get("error"):
+                continue
+            if not active and status == "ongoing":
+                db.conn.execute(
+                    """UPDATE capital_raid_status_cache
+                       SET status = 'ended', error = NULL, updated_at = ?, attempted_at = ?,
+                           failure_count = 0
+                       WHERE clan_tag = ?""",
+                    (attempted_at, attempted_at, clan_tag),
+                )
+                locally_finalized += 1
+                continue
+            age = _minutes_since(cached.get("attempted_at"), current)
+            refresh_minutes = 10 if active else 60
+            if age is not None and age < refresh_minutes:
+                continue
+        due.append((clan, clan_tag, cached))
+
+    service = CocSyncService()
+    success = 0
+    failed = 0
+    for clan, clan_tag, previous in due:
+        try:
+            seasons = service.fetch_capital_raid_seasons(clan_tag, limit=2)
+            status = summarize_capital_raid_status(seasons, current)
+        except Exception as exc:  # noqa: BLE001 - 单部落失败隔离
+            failure_count = int((previous or {}).get("failure_count") or 0) + 1
+            if previous and previous.get("weekend_start") == weekend_start_iso:
+                db.conn.execute(
+                    """UPDATE capital_raid_status_cache
+                       SET clan_name = ?, error = ?, attempted_at = ?, failure_count = ?
+                       WHERE clan_tag = ?""",
+                    (
+                        clan.get("name") or clan_tag,
+                        str(exc), attempted_at, failure_count, clan_tag,
+                    ),
+                )
+            else:
+                db.conn.execute(
+                    """INSERT INTO capital_raid_status_cache
+                       (clan_tag, clan_name, status, raid_state, weekend_start,
+                        weekend_end, error, updated_at, attempted_at, failure_count)
+                       VALUES (?, ?, 'sync_pending', NULL, ?, ?, ?, NULL, ?, ?)
+                       ON CONFLICT(clan_tag) DO UPDATE SET
+                           clan_name = excluded.clan_name,
+                           status = excluded.status,
+                           raid_state = NULL,
+                           weekend_start = excluded.weekend_start,
+                           weekend_end = excluded.weekend_end,
+                           error = excluded.error,
+                           updated_at = NULL,
+                           attempted_at = excluded.attempted_at,
+                           failure_count = excluded.failure_count""",
+                    (
+                        clan_tag, clan.get("name") or clan_tag,
+                        weekend_start_iso, weekend_end_iso, str(exc),
+                        attempted_at, failure_count,
+                    ),
+                )
+            failed += 1
+            print(f"[warn] 都城状态 {clan_tag} 同步失败：{exc}", file=sys.stderr)
+            continue
+
+        db.conn.execute(
+            """INSERT INTO capital_raid_status_cache
+               (clan_tag, clan_name, status, raid_state, weekend_start,
+                weekend_end, error, updated_at, attempted_at, failure_count)
+               VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, 0)
+               ON CONFLICT(clan_tag) DO UPDATE SET
+                   clan_name = excluded.clan_name,
+                   status = excluded.status,
+                   raid_state = excluded.raid_state,
+                   weekend_start = excluded.weekend_start,
+                   weekend_end = excluded.weekend_end,
+                   error = NULL,
+                   updated_at = excluded.updated_at,
+                   attempted_at = excluded.attempted_at,
+                   failure_count = 0""",
+            (
+                clan_tag, clan.get("name") or clan_tag,
+                status["status"], status["raid_state"],
+                status["weekend_start"], status["weekend_end"],
+                attempted_at, attempted_at,
+            ),
+        )
+        success += 1
+
+    db.conn.commit()
+    db.close()
+    if not due and not locally_finalized:
+        return {"status": "skipped", "reason": f"{len(clans)} 个部落状态无需刷新"}
+    if not success and failed and not locally_finalized:
+        return {"status": "failed", "reason": f"全部 {failed} 个部落都城状态同步失败"}
+    details = [f"同步 {success} 个部落"]
+    if locally_finalized:
+        details.append(f"结束 {locally_finalized} 个部落")
+    if failed:
+        details.append(f"失败 {failed}")
+    skipped = len(clans) - len(due) - locally_finalized
+    if skipped:
+        details.append(f"跳过 {skipped}")
+    return {"status": "success", "reason": "，".join(details)}
+
+
 def _run_capital_member_stats(force: bool = False, now: datetime | None = None) -> dict:
     """每周二抓取最近已结束突袭周末；失败时周三仍可按 6 小时间隔重试。"""
     from modules.coc_sync.official.mapper import normalize_tag
@@ -1369,6 +1511,11 @@ JOBS = {
         "interval": 1440,
         "run": _run_member_combat_stats,
     },
+    "capital_raid_status": {
+        "name": "都城突袭状态",
+        "interval": 10,
+        "run": _run_capital_raid_status,
+    },
     "capital_member_stats": {
         "name": "都城成员贡献",
         "interval": 360,
@@ -1456,7 +1603,7 @@ def run_one(db: Database, job_id: str, force: bool = False) -> dict:
         run_fn = job["run"]
         if job_id in {
             "current_wars", "cwl", "cwl_live", "cwl_assembly",
-            "capital_member_stats", "clan_games_stats",
+            "capital_raid_status", "capital_member_stats", "clan_games_stats",
         }:
             result = run_fn(force=force)
         else:

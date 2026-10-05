@@ -137,6 +137,38 @@ def _safe_number(value) -> int:
         return 0
 
 
+def _clan_operating_status(db: Database) -> tuple[dict[str, dict], dict[str, dict]]:
+    war_status = {
+        normalize_tag(row["clan_tag"]): {
+            "status": row["status"],
+            "updated_at": row["updated_at"],
+            "attempted_at": row["attempted_at"],
+            "error": row["error"],
+        }
+        for row in db.conn.execute(
+            """SELECT clan_tag, status, updated_at, attempted_at, error
+               FROM current_war_cache"""
+        ).fetchall()
+    }
+    capital_status = {
+        normalize_tag(row["clan_tag"]): {
+            "status": row["status"],
+            "raid_state": row["raid_state"],
+            "weekend_start": row["weekend_start"],
+            "weekend_end": row["weekend_end"],
+            "updated_at": row["updated_at"],
+            "attempted_at": row["attempted_at"],
+            "error": row["error"],
+        }
+        for row in db.conn.execute(
+            """SELECT clan_tag, status, raid_state, weekend_start, weekend_end,
+                      updated_at, attempted_at, error
+               FROM capital_raid_status_cache"""
+        ).fetchall()
+    }
+    return war_status, capital_status
+
+
 def _clan_overview_items(db: Database) -> list[dict]:
     """从本地 accounts 快照聚合自有部落概览。
 
@@ -154,6 +186,8 @@ def _clan_overview_items(db: Database) -> list[dict]:
         tag = normalize_tag(row["clan_tag"])
         if tag:
             grouped[tag].append(row)
+
+    war_status_by_tag, capital_status_by_tag = _clan_operating_status(db)
 
     result = []
     for order, configured in enumerate(_enabled_clans()):
@@ -216,6 +250,15 @@ def _clan_overview_items(db: Database) -> list[dict]:
                 for role in ("leader", "coLeader", "admin", "member")
                 if roles[role]
             },
+            "war_status": war_status_by_tag.get(tag, {
+                "status": "sync_pending", "updated_at": None,
+                "attempted_at": None, "error": None,
+            }),
+            "capital_status": capital_status_by_tag.get(tag, {
+                "status": "sync_pending", "raid_state": None,
+                "weekend_start": None, "weekend_end": None,
+                "updated_at": None, "attempted_at": None, "error": None,
+            }),
             "updated_at": max(synced_at) if synced_at else None,
         })
     return result
@@ -229,6 +272,7 @@ def clan_overview(db: Database = Depends(get_db)):
         "clan_tag", "clan_name", "category", "category_label", "config_order",
         "member_count", "capacity", "leader_name", "average_town_hall", "average_trophies",
         "total_donations", "updated_at",
+        "war_status", "capital_status",
     )
     clans = [{key: item[key] for key in summary_fields} for item in details]
     updated = [item["updated_at"] for item in clans if item["updated_at"]]

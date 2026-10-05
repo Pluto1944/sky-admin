@@ -1,7 +1,7 @@
 <template>
   <view class="clan-page">
     <TopBar title="部落" :buttons="topButtons" @onSection="switchSection" />
-    <ClanOverview v-if="activeSection === 'overview'" class="clan-section" @open-detail="openDetail" />
+    <ClanOverview v-if="activeSection === 'overview'" ref="overview" class="clan-section" @open-detail="openDetail" />
     <ClanMembers v-else-if="activeSection === 'members'" class="clan-section" :initial-clan-tag="memberClanTag" />
     <ClanStats v-else-if="activeSection === 'stats'" class="clan-section" />
     <ClanFarm v-else-if="activeSection === 'farm'" class="clan-section" />
@@ -53,6 +53,11 @@ export default {
       this.selectedClanTag = clanTag
     }
     this.activeSection = section
+  },
+  onShow() {
+    this.$nextTick(() => {
+      if (this.activeSection === 'overview' && this.$refs.overview) this.$refs.overview.refresh()
+    })
   },
   onShareAppMessage() { return { title: this.shareTitle(), path: this.sharePath() } },
   onShareTimeline() { return { title: this.shareTitle(), query: this.shareQuery() } },

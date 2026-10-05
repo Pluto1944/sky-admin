@@ -117,7 +117,8 @@ def test_member_activity_and_contribution_tables_are_created(db):
     } <= account_columns
     for table in (
         "member_war_facts",
-        "capital_raid_member_results", "clan_games_member_snapshots",
+        "capital_raid_member_results", "capital_raid_status_cache",
+        "clan_games_member_snapshots",
     ):
         assert db.conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name = ?", (table,)

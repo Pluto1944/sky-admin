@@ -71,8 +71,47 @@ def test_clan_overview_preserves_config_order_and_aggregates_current_members(db,
         "average_trophies": 4500,
         "total_donations": 200,
         "updated_at": "2026-09-30T02:00:00+00:00",
+        "war_status": {
+            "status": "sync_pending", "updated_at": None,
+            "attempted_at": None, "error": None,
+        },
+        "capital_status": {
+            "status": "sync_pending", "raid_state": None,
+            "weekend_start": None, "weekend_end": None,
+            "updated_at": None, "attempted_at": None, "error": None,
+        },
     }
     assert response["updated_at"] == "2026-09-30T02:00:00+00:00"
+
+
+def test_clan_overview_includes_cached_war_and_capital_status(db, monkeypatch):
+    monkeypatch.setattr(routes, "CLANS", [
+        {"tag": "#AAA", "name": "一队", "category": "combat", "enabled": True},
+    ])
+    db.conn.execute(
+        """INSERT INTO current_war_cache
+           (clan_tag, clan_name, category, status, data_json, error, updated_at,
+            attempted_at)
+           VALUES ('#AAA', '一队', 'combat', 'preparation', '{}', NULL, ?, ?)""",
+        ("2026-10-02T08:00:00+00:00", "2026-10-02T08:00:00+00:00"),
+    )
+    db.conn.execute(
+        """INSERT INTO capital_raid_status_cache
+           (clan_tag, clan_name, status, raid_state, weekend_start, weekend_end,
+            error, updated_at, attempted_at)
+           VALUES ('#AAA', '一队', 'not_started', NULL, ?, ?, NULL, ?, ?)""",
+        (
+            "2026-10-02T07:00:00+00:00", "2026-10-05T07:00:00+00:00",
+            "2026-10-02T08:00:00+00:00", "2026-10-02T08:00:00+00:00",
+        ),
+    )
+    db.conn.commit()
+
+    clan = routes.clan_overview(db)["clans"][0]
+
+    assert clan["war_status"]["status"] == "preparation"
+    assert clan["capital_status"]["status"] == "not_started"
+    assert clan["capital_status"]["weekend_end"] == "2026-10-05T07:00:00+00:00"
 
 
 def test_clan_overview_detail_returns_distributions_and_rejects_external_clan(db, monkeypatch):

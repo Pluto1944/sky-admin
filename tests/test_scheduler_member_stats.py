@@ -128,5 +128,6 @@ def test_clan_games_force_before_event_creates_previous_month_baseline(tmp_path,
 def test_member_jobs_are_registered_with_bounded_intervals():
     assert JOBS["player_details"]["interval"] == 1440
     assert JOBS["member_combat_stats"]["interval"] == 1440
+    assert JOBS["capital_raid_status"]["interval"] == 10
     assert JOBS["capital_member_stats"]["interval"] == 360
     assert JOBS["clan_games_stats"]["interval"] == 360

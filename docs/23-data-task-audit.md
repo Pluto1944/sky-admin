@@ -10,6 +10,7 @@
 | 领域 | 原始事实 | 可重建投影 / 缓存 | 结论 |
 |---|---|---|---|
 | 普通战 | `current_war_cache`（当前）、`war_history_cache`（已结束完整档案） | `member_war_facts` | 三者粒度不同，不能合并；历史每部落保留 45 场 |
+| 都城突袭 | 官方周末赛季响应 | `capital_raid_status_cache`（开启状态）、`capital_raid_member_results`（成员事实） | 状态提醒和结束后贡献统计用途不同，不能互相替代 |
 | CWL 战斗 | `cwl_live_group_cache`（赛程目录）、`cwl_live_war_cache`（逐场详情） | `league_results` | 分组和单场是一对多；成绩表保留为快速月度投影 |
 | CWL 运营 | `registrations`、`league_teams`、`cwl_roster_snapshots`、`cwl_assembly_cache` | 无 | 分别表示报名、编排、公示和到位审计，不能互代 |
 | 成员贡献 | 都城、竞赛各自事实表 | 页面聚合 | 时间粒度/来源不同，不应做泛型 JSON 表 |
@@ -53,6 +54,7 @@ API 不扫描历史 JSON：部落战页按 `(clan_tag, end_time)` 索引查询�
 | `cwl_live` | 当前月 CWL 分组/单场原始档案 | 写未完成的 `league_results` |
 | `cwl` | 从完整本地档案重建 `league_results` | 外部聚合 API 直写成绩 |
 | `member_combat_stats` | 升级后旧战争的事实物化 | 写旧成员摘要缓存 |
+| `capital_raid_status` | 最近周末各部落开启状态 | 写成员贡献事实；已开启后继续高频拉取 |
 | `cwl_assembly` | 集结检查与冻结 | 修改已冻结的 `roster_snapshot_id` |
 
 调度间共享数据时，以事实层为边界；不允许一个任务以便捷为由跳过完整性检查或直接改另一领域的表。

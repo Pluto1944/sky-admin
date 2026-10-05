@@ -31,6 +31,16 @@
             <view class="clan-overview-metric"><text class="clan-overview-label">赛季捐兵</text><text class="clan-overview-value">{{ clan.total_donations || 0 }}</text></view>
             <view class="clan-overview-metric"><text class="clan-overview-label">首领</text><text class="clan-overview-value clan-overview-ellipsis">{{ clan.leader_name || '-' }}</text></view>
           </view>
+          <view class="clan-overview-operating-status">
+            <view class="clan-overview-status-item">
+              <text class="clan-overview-status-label">部落战</text>
+              <text :class="['clan-overview-status-value', statusTone('war', clan.war_status)]">{{ statusLabel('war', clan.war_status) }}</text>
+            </view>
+            <view class="clan-overview-status-item">
+              <text class="clan-overview-status-label">都城</text>
+              <text :class="['clan-overview-status-value', statusTone('capital', clan.capital_status)]">{{ statusLabel('capital', clan.capital_status) }}</text>
+            </view>
+          </view>
           <view class="clan-overview-sync">
             <text>{{ clan.updated_at ? '同步于 ' + formatTime(clan.updated_at) : '等待首次同步' }}</text>
             <text class="clan-overview-detail-hint">查看详情</text>
@@ -50,12 +60,13 @@ let overviewCache = null
 export default {
   name: 'ClanOverview',
   data() {
-    return { loading: true, error: '', clans: [], updatedAt: '' }
+    return { loading: true, refreshing: false, error: '', clans: [], updatedAt: '' }
   },
   created() {
     if (overviewCache) {
       this.applyResponse(overviewCache)
       this.loading = false
+      this.fetchData(false)
     } else {
       this.fetchData()
     }
@@ -65,8 +76,13 @@ export default {
       this.clans = res.clans || []
       this.updatedAt = res.updated_at || ''
     },
-    async fetchData() {
-      this.loading = true
+    refresh() {
+      this.fetchData(false)
+    },
+    async fetchData(showLoading = true) {
+      if (this.refreshing) return
+      this.refreshing = true
+      if (showLoading && !this.clans.length) this.loading = true
       this.error = ''
       try {
         const res = await getClanOverview()
@@ -76,6 +92,7 @@ export default {
         this.error = e.message || '加载失败'
       } finally {
         this.loading = false
+        this.refreshing = false
       }
     },
     formatTime(value) {
@@ -87,6 +104,32 @@ export default {
       const hour = String(date.getHours()).padStart(2, '0')
       const minute = String(date.getMinutes()).padStart(2, '0')
       return `${month}-${day} ${hour}:${minute}`
+    },
+    statusMeta(type, value) {
+      if (!value || value.error) return { label: '状态未知', highlighted: false }
+      const status = value.status || 'sync_pending'
+      const maps = {
+        war: {
+          preparation: { label: '准备日', highlighted: true },
+          in_war: { label: '战斗日', highlighted: true },
+          cwl: { label: '联赛中', highlighted: true },
+          war_ended: { label: '已结束', highlighted: false },
+          not_in_war: { label: '无战争', highlighted: false }
+        },
+        capital: {
+          not_started: { label: '未开启', highlighted: false },
+          ongoing: { label: '突袭中', highlighted: true },
+          ended: { label: '未到时间', highlighted: true },
+          missed: { label: '未到时间', highlighted: true }
+        }
+      }
+      return (maps[type] && maps[type][status]) || { label: '状态未知', highlighted: false }
+    },
+    statusLabel(type, value) {
+      return this.statusMeta(type, value).label
+    },
+    statusTone(type, value) {
+      return this.statusMeta(type, value).highlighted ? 'is-highlighted' : 'is-muted'
     }
   }
 }
@@ -114,6 +157,13 @@ export default {
 .clan-overview-label { color: #66708a; font-size: 21rpx; }
 .clan-overview-value { width: 100%; margin-top: 8rpx; color: #969daf; font-size: 27rpx; text-align: center; }
 .clan-overview-ellipsis { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.clan-overview-operating-status { display: flex; padding-top: 14rpx; }
+.clan-overview-status-item { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 12rpx; }
+.clan-overview-status-item + .clan-overview-status-item { border-left: 1rpx solid #2a2a4a; }
+.clan-overview-status-label { color: #66708a; font-size: 21rpx; }
+.clan-overview-status-value { font-size: 23rpx; font-weight: 500; }
+.clan-overview-status-value.is-highlighted { color: #5fa8ff; }
+.clan-overview-status-value.is-muted { color: #7f8799; }
 .clan-overview-sync { display: flex; justify-content: space-between; padding-top: 16rpx; color: #5d6478; font-size: 21rpx; }
 .clan-overview-detail-hint { color: #5fa8ff; }
 .clan-overview-bottom { height: 32rpx; }

@@ -14,7 +14,8 @@
 | `coc_sync` | 6 小时 | `accounts`、部落资料 | COC 身份和当前归属权威同步 |
 | `player_details` | 每天 | 账号详情/活动观察 | 只更新账号领域允许的字段 |
 | `member_combat_stats` | 每天 | `member_war_facts` | 仅补齐旧档案的新版事实 |
-| `capital_member_stats` | 每 6 小时检查业务窗口 | 都城成员事实 | 周末窗口内运行 |
+| `capital_raid_status` | 每 10 分钟检查 | `capital_raid_status_cache` | 只重试尚未开启/失败部落，已开启后停拉；结束后收口最终状态 |
+| `capital_member_stats` | 每 6 小时检查业务窗口 | 都城成员事实 | 周二至周三结果窗口内运行 |
 | `clan_games_stats` | 每 6 小时检查业务窗口 | 竞赛快照 | 月末窗口内运行 |
 | `cwl` | 每天，规则允许日期 | `league_results` | 只从本地完整 CWL 原始档案重建投影 |
 | `war_layout` | 北京时间固定时刻 | 独立运行库、公众号草稿 | 默认仅草稿；群发硬开关不可绕过 |
@@ -46,6 +47,7 @@
 source scripts/load_env.sh
 venv/bin/python scripts/scheduler.py --list
 venv/bin/python scripts/scheduler.py --once current_wars
+venv/bin/python scripts/scheduler.py --once capital_raid_status --force
 systemctl status sky-scheduler.service
 ```
 

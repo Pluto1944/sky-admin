@@ -261,6 +261,21 @@ CREATE INDEX IF NOT EXISTS idx_capital_member_start
 ON capital_raid_member_results(player_tag, start_time DESC);
 """
 
+_CAPITAL_RAID_STATUS_CACHE_DDL = """
+CREATE TABLE IF NOT EXISTS capital_raid_status_cache (
+    clan_tag       TEXT PRIMARY KEY,
+    clan_name      TEXT NOT NULL,
+    status         TEXT NOT NULL,
+    raid_state     TEXT,
+    weekend_start  TEXT NOT NULL,
+    weekend_end    TEXT NOT NULL,
+    error          TEXT,
+    updated_at     TEXT,
+    attempted_at   TEXT NOT NULL,
+    failure_count  INTEGER NOT NULL DEFAULT 0
+);
+"""
+
 _CLAN_GAMES_MEMBER_SNAPSHOTS_DDL = """
 CREATE TABLE IF NOT EXISTS clan_games_member_snapshots (
     period           TEXT NOT NULL,
@@ -400,6 +415,7 @@ _CHILDREN_DDL = (
     + _WAR_HISTORY_CACHE_DDL
     + _MEMBER_WAR_FACTS_DDL
     + _CAPITAL_RAID_MEMBER_RESULTS_DDL
+    + _CAPITAL_RAID_STATUS_CACHE_DDL
     + _CLAN_GAMES_MEMBER_SNAPSHOTS_DDL
     + _CLAN_PROFILE_CACHE_DDL
     + _CWL_LIVE_GROUP_CACHE_DDL
@@ -593,6 +609,8 @@ class Database:
             )
         if not {row[1] for row in self.conn.execute("PRAGMA table_info(capital_raid_member_results)")}:
             self.conn.executescript(_CAPITAL_RAID_MEMBER_RESULTS_DDL)
+        if not {row[1] for row in self.conn.execute("PRAGMA table_info(capital_raid_status_cache)")}:
+            self.conn.execute(_CAPITAL_RAID_STATUS_CACHE_DDL)
         if not {row[1] for row in self.conn.execute("PRAGMA table_info(clan_games_member_snapshots)")}:
             self.conn.executescript(_CLAN_GAMES_MEMBER_SNAPSHOTS_DDL)
 
@@ -715,7 +733,8 @@ class Database:
             "cwl_assembly_cache", "cwl_roster_snapshots",
             "cwl_live_war_cache", "cwl_live_group_cache", "war_history_cache",
             "member_war_facts",
-            "capital_raid_member_results", "clan_games_member_snapshots",
+            "capital_raid_member_results", "capital_raid_status_cache",
+            "clan_games_member_snapshots",
             "current_war_cache",
             "farm_fill_accounts",
             "clan_profile_cache",

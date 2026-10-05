@@ -138,9 +138,9 @@ GET /api/clan/overview
 GET /api/clan/overview/{clan_tag}
 ```
 
-无需认证。汇总接口按 `config/settings.yaml` 中已启用部落的顺序返回卡片，包含类别、成员数、平均大本、人均奖杯、首领、当前赛季捐兵和最后同步时间。单部落详情额外返回大本分布、职位分布、捐出/收到/人均捐兵，以及 `profile`、`profile_status`、`profile_updated_at`。
+无需认证。汇总接口按 `config/settings.yaml` 中已启用部落的顺序返回卡片，包含类别、成员数、平均大本、人均奖杯、首领、当前赛季捐兵、最后同步时间，以及本地缓存的 `war_status` 和 `capital_status`。单部落详情额外返回大本分布、职位分布、捐出/收到/人均捐兵，以及 `profile`、`profile_status`、`profile_updated_at`。
 
-两个接口只读本地缓存，不在 HTTP 请求中调用 COC API。成员聚合来自 `accounts` 中 `membership_status = 'member'` 的当前快照，捐兵数从 `coc_raw` 读取；官方资料来自 `clan_profile_cache`，包含徽章、等级、加入方式、战争胜平负/连胜、战争与都城联赛、三类积分、地区、开战频率、加入门槛、官方标签和描述。资料同步失败但有旧缓存时 `profile_status=stale`。
+两个接口只读本地缓存，不在 HTTP 请求中调用 COC API。成员聚合来自 `accounts` 中 `membership_status = 'member'` 的当前快照，捐兵数从 `coc_raw` 读取；状态分别来自 `current_war_cache` 和 `capital_raid_status_cache`；官方资料来自 `clan_profile_cache`，包含徽章、等级、加入方式、战争胜平负/连胜、战争与都城联赛、三类积分、地区、开战频率、加入门槛、官方标签和描述。资料同步失败但有旧缓存时 `profile_status=stale`。
 
 `clan_profile_cache` 跟随 `coc_sync` 每 6 小时刷新。未同步的配置部落仍返回空卡片，不影响其他部落；详情标签不属于已启用自有部落时返回 `404`。
 
