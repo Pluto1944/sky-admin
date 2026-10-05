@@ -310,6 +310,7 @@ def member_summary_map(conn: sqlite3.Connection, player_tags: list[str]) -> dict
     cwl_by_player: dict[str, dict[str, Any]] = defaultdict(
         lambda: {
             "one_stars": 0, "three_stars": 0, "attacks": 0,
+            "appearances": 0, "missed_attacks": 0,
             "periods": set(), "updated_at": None,
         }
     )
@@ -317,7 +318,8 @@ def member_summary_map(conn: sqlite3.Connection, player_tags: list[str]) -> dict
         period_placeholders = ",".join("?" for _ in periods)
         cwl_rows = conn.execute(
             f"""SELECT lr.player_tag, lr.period, lr.offense_1stars,
-                       lr.offense_3stars, lr.attacks, lr.fetched_at
+                       lr.offense_3stars, lr.attacks, lr.appearances,
+                       lr.missed_attacks, lr.fetched_at
                 FROM league_results lr
                 WHERE lr.player_tag IN ({placeholders}) AND lr.period IN ({period_placeholders})
                   AND EXISTS (
@@ -331,6 +333,8 @@ def member_summary_map(conn: sqlite3.Connection, player_tags: list[str]) -> dict
             entry["one_stars"] += _int(row["offense_1stars"])
             entry["three_stars"] += _int(row["offense_3stars"])
             entry["attacks"] += _int(row["attacks"])
+            entry["appearances"] += _int(row["appearances"])
+            entry["missed_attacks"] += _int(row["missed_attacks"])
             entry["periods"].add(row["period"])
             if row["fetched_at"] and (entry["updated_at"] is None or row["fetched_at"] > entry["updated_at"]):
                 entry["updated_at"] = row["fetched_at"]
@@ -354,8 +358,11 @@ def member_summary_map(conn: sqlite3.Connection, player_tags: list[str]) -> dict
                 "periods": sorted(cwl["periods"], reverse=True),
                 "one_stars": cwl["one_stars"],
                 "three_stars": cwl["three_stars"], "attacks": cwl["attacks"],
+                "appearances": cwl["appearances"],
+                "missed_attacks": cwl["missed_attacks"],
                 "one_star_rate": _rate(cwl["one_stars"], cwl["attacks"]),
                 "three_star_rate": _rate(cwl["three_stars"], cwl["attacks"]),
+                "missed_attack_rate": _rate(cwl["missed_attacks"], cwl["appearances"]),
             },
             "combat_updated_at": updated,
         })
