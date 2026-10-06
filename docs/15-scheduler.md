@@ -8,7 +8,7 @@
 | 任务 | 频率 / 窗口 | 主要写入 | 要点 |
 |---|---|---|---|
 | `current_wars` | 每 2 分钟检查，按战争状态限频 | `current_war_cache`、结束时 `war_history_cache` / `member_war_facts` | 最终普通战才归档；单部落失败保留上次成功快照 |
-| `cwl_live` | 活跃期每 2 分钟 | `cwl_live_group_cache`、`cwl_live_war_cache` | 只采集原始分组/逐场档案；完成后投影成绩 |
+| `cwl_live` | 战斗日每 2 分钟；准备日按轮次限频 | `cwl_live_group_cache`、`cwl_live_war_cache` | 第一轮准备日动态 30/2 分钟；后续准备日由上一轮结束触发并保留 30 分钟兜底 |
 | `cwl_assembly` | 月初窗口每 5 分钟 | 名单 revision、集结核对 | 开赛或截止后冻结，不重绑已冻结 revision |
 | `farm_stats` | 30 分钟 | `farm_stats` | API 只读缓存，不在请求内批量访问 COC |
 | `coc_sync` | 6 小时 | `accounts`、部落资料 | COC 身份和当前归属权威同步 |
@@ -37,6 +37,11 @@
 `cwl_live` 将当月每队的分组目录和目录中每个 `war_tag` 独立保存。每个分组计算
 `raw_status`：采集中、完整或已结束但缺档。只有完整分组会调用投影器重建
 `league_results`；进行中的成绩不得进入该表。
+
+CWL 的第二轮至最后一轮准备日与上一轮战斗日重叠，因此调度器只对当前战斗日保持
+2 分钟高频刷新。第一轮准备日平时每 30 分钟刷新，开战前 30 分钟提升到 2 分钟；
+后续准备日首次入库后每 30 分钟兜底，并在上一轮任一战争新确认 `warEnded` 时立即刷新
+下一轮。已经结束的 `war_tag` 永久停拉，单场请求失败不阻塞同组其余战争。
 
 `cwl` 任务和 `scripts/fetch_cwl_data.py` 不访问第三方 API，也不直写成绩；它们只对本地完整档案
 进行重建。历史补档使用 `scripts/backfill_cwl_live.py`，默认 dry-run，已有同月原始缓存时拒绝覆盖。

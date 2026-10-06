@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 import config
 import modules.coc_sync.service as service_module
 from modules.coc_sync.cwl_live import normalize_cwl_group, normalize_cwl_war
-from scripts.scheduler import _run_cwl_live
+from scripts.scheduler import _cwl_war_refresh_due, _run_cwl_live
 from shared.db.connection import Database
 from tests.coc_sync.cwl_live_fixtures import league_group, league_war_one, team
 
@@ -126,3 +126,112 @@ def test_cwl_live_scheduler_labels_not_in_war_as_waiting(tmp_path, monkeypatch):
     ).fetchone()
     assert dict(row) == {"status": "waiting", "error": "等待联赛开启"}
     db.close()
+
+
+def test_cwl_live_refreshes_next_round_when_previous_round_ends(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "cwl-round-transition.sqlite3")
+    monkeypatch.setattr(config, "DB_PATH", db_path)
+    db = Database(db_path)
+    db.init_schema()
+    _seed_team(db)
+    db.close()
+
+    calls = {"#W1": 0, "#W2": 0}
+    state = {
+        "previous_ended": False,
+        "synced_at": "2026-09-03T04:00:00+00:00",
+    }
+
+    class FakeService:
+        def fetch_cwl_group(self, selected_team):
+            raw_group = league_group()
+            raw_group["season"] = "2026-09-01"
+            return normalize_cwl_group(raw_group, selected_team, state["synced_at"])
+
+        def fetch_cwl_war(self, war_tag):
+            calls[war_tag] += 1
+            if war_tag == "#W1":
+                war_state = "warEnded" if state["previous_ended"] else "inWar"
+            else:
+                war_state = "inWar" if state["previous_ended"] else "preparation"
+            return normalize_cwl_war(
+                league_war_one(state=war_state), war_tag, state["synced_at"]
+            )
+
+    monkeypatch.setattr(service_module, "CocSyncService", FakeService)
+    now = datetime(2026, 9, 3, 12, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+
+    _run_cwl_live(now=now)
+    assert calls == {"#W1": 1, "#W2": 1}
+
+    state["synced_at"] = "2026-09-03T04:03:00+00:00"
+    _run_cwl_live(now=now + timedelta(minutes=3))
+    assert calls == {"#W1": 2, "#W2": 1}
+
+    state["previous_ended"] = True
+    state["synced_at"] = "2026-09-03T04:06:00+00:00"
+    _run_cwl_live(now=now + timedelta(minutes=6))
+    assert calls == {"#W1": 3, "#W2": 2}
+
+    db = Database(db_path)
+    states = dict(db.conn.execute(
+        "SELECT war_tag, state FROM cwl_live_war_cache ORDER BY war_tag"
+    ).fetchall())
+    assert states == {"#W1": "warEnded", "#W2": "inWar"}
+    db.close()
+
+
+def test_first_cwl_preparation_only_accelerates_near_start():
+    now = datetime(2026, 9, 1, 12, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+    cache = {
+        "state": "preparation",
+        "attempted_at": (now - timedelta(minutes=3)).isoformat(),
+        "data_json": json.dumps({"start_time": "20260901T130000.000Z"}),
+    }
+    assert not _cwl_war_refresh_due(
+        cache,
+        round_number=1,
+        previous_war_tags=(),
+        cached_by_war_tag={"#W1": cache},
+        now=now,
+    )
+
+    cache["data_json"] = json.dumps({"start_time": "20260901T043000.000Z"})
+    assert _cwl_war_refresh_due(
+        cache,
+        round_number=1,
+        previous_war_tags=(),
+        cached_by_war_tag={"#W1": cache},
+        now=now,
+    )
+
+
+def test_later_cwl_preparation_handles_round_transition_only_once():
+    now = datetime(2026, 9, 4, 12, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+    previous = {
+        "state": "warEnded",
+        "updated_at": (now - timedelta(minutes=1)).isoformat(),
+    }
+    preparing = {
+        "state": "preparation",
+        "attempted_at": (now - timedelta(minutes=10)).isoformat(),
+        "updated_at": (now - timedelta(minutes=10)).isoformat(),
+        "data_json": "{}",
+    }
+    caches = {"#W1": previous, "#W2": preparing}
+    assert _cwl_war_refresh_due(
+        preparing,
+        round_number=2,
+        previous_war_tags=("#W1",),
+        cached_by_war_tag=caches,
+        now=now,
+    )
+
+    preparing["updated_at"] = now.isoformat()
+    assert not _cwl_war_refresh_due(
+        preparing,
+        round_number=2,
+        previous_war_tags=("#W1",),
+        cached_by_war_tag=caches,
+        now=now,
+    )

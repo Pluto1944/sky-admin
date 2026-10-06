@@ -4,7 +4,7 @@
 统一管理需要周期性执行的任务，状态落 `sync_jobs` 表：
 
     current_wars 全部自有部落当前战争（战斗日 2 分钟，准备日动态 30/2 分钟）
-    cwl_live    当月 CWL 联赛组与逐场战争（活跃期每 2 分钟）
+    cwl_live    当月 CWL 联赛组与逐场战争（战斗日 2 分钟，准备日按轮次限频）
     cwl_assembly 正式名单与各联赛部落集结检查（每月 1 日 14:00 至 3 日 16:00）
     farm_stats  互刷部落统计（每 30 分钟）
     coc_sync    COC 玩家档案（每 6 小时）
@@ -117,6 +117,11 @@ CURRENT_WAR_ERROR_BACKOFF_MINUTES = (5, 10, 20, 30)
 CURRENT_WAR_PREPARATION_MINUTES = 30
 CURRENT_WAR_PREPARATION_NEAR_START_MINUTES = 2
 CURRENT_WAR_PREPARATION_NEAR_START_WINDOW_MINUTES = 30
+CWL_WAR_ACTIVE_REFRESH_MINUTES = 2
+CWL_WAR_PREPARATION_REFRESH_MINUTES = 30
+CWL_WAR_FIRST_PREPARATION_NEAR_START_MINUTES = 2
+CWL_WAR_FIRST_PREPARATION_NEAR_START_WINDOW_MINUTES = 30
+CWL_WAR_FALLBACK_REFRESH_MINUTES = 30
 
 
 def _parse_coc_time(value: str | None) -> datetime | None:
@@ -155,6 +160,71 @@ def _current_war_refresh_minutes(cache: dict, now: datetime) -> int:
                 return CURRENT_WAR_PREPARATION_NEAR_START_MINUTES
         return CURRENT_WAR_PREPARATION_MINUTES
     return CURRENT_WAR_REFRESH_MINUTES.get(cache.get("status"), 30)
+
+
+def _cwl_previous_round_just_ended(
+    cache: dict,
+    previous_war_tags: tuple[str, ...],
+    cached_by_war_tag: dict[str, dict],
+) -> bool:
+    """上一轮确认结束且本场尚未在结束后尝试刷新时返回 True。"""
+    if not previous_war_tags:
+        return False
+    previous = [cached_by_war_tag.get(tag) for tag in previous_war_tags]
+    ended = [item for item in previous if item and item.get("state") == "warEnded"]
+    if not ended:
+        return False
+    ended_at = [
+        _parse_coc_time(item.get("updated_at") or item.get("attempted_at"))
+        for item in ended
+    ]
+    ended_at = [value for value in ended_at if value is not None]
+    checked_at = [
+        _parse_coc_time(cache.get("updated_at")),
+        _parse_coc_time(cache.get("attempted_at")),
+    ]
+    checked_at = [value for value in checked_at if value is not None]
+    return bool(ended_at) and (not checked_at or max(checked_at) < max(ended_at))
+
+
+def _cwl_war_refresh_due(
+    cache: dict | None,
+    *,
+    round_number: int,
+    previous_war_tags: tuple[str, ...],
+    cached_by_war_tag: dict[str, dict],
+    now: datetime,
+) -> bool:
+    """按 CWL 轮次关系判断一场未结束战争是否需要访问官方 API。"""
+    if cache is None:
+        return True
+    state = cache.get("state")
+    if state == "warEnded":
+        return False
+    age = _minutes_since(cache.get("attempted_at"), now)
+    if state == "inWar":
+        retry_minutes = CWL_WAR_ACTIVE_REFRESH_MINUTES
+    elif state == "preparation":
+        if round_number > 1 and _cwl_previous_round_just_ended(
+            cache, previous_war_tags, cached_by_war_tag
+        ):
+            return True
+        retry_minutes = CWL_WAR_PREPARATION_REFRESH_MINUTES
+        if round_number == 1:
+            try:
+                payload = json.loads(cache.get("data_json") or "{}")
+            except (TypeError, json.JSONDecodeError):
+                payload = {}
+            start_time = _parse_coc_time(payload.get("start_time"))
+            if start_time is not None:
+                minutes_until_start = (
+                    start_time - now.astimezone(timezone.utc)
+                ).total_seconds() / 60
+                if minutes_until_start <= CWL_WAR_FIRST_PREPARATION_NEAR_START_WINDOW_MINUTES:
+                    retry_minutes = CWL_WAR_FIRST_PREPARATION_NEAR_START_MINUTES
+    else:
+        retry_minutes = CWL_WAR_FALLBACK_REFRESH_MINUTES
+    return age is None or age >= retry_minutes
 
 
 def _archive_current_war(
@@ -600,11 +670,30 @@ def _run_cwl_live(force: bool = False, now: datetime | None = None) -> dict:
 
     unique_war_tags = []
     seen_war_tags = set()
+    round_context: dict[str, tuple[int, tuple[str, ...]]] = {}
     for group in group_payloads:
-        for war_tag in group_war_tags(group):
-            if war_tag not in seen_war_tags:
-                seen_war_tags.add(war_tag)
-                unique_war_tags.append(war_tag)
+        previous_war_tags: tuple[str, ...] = ()
+        for round_number, round_item in enumerate(group.get("rounds") or [], start=1):
+            round_war_tags = tuple(group_war_tags({"rounds": [round_item]}))
+            for war_tag in round_war_tags:
+                round_context.setdefault(
+                    war_tag, (round_number, previous_war_tags)
+                )
+                if war_tag not in seen_war_tags:
+                    seen_war_tags.add(war_tag)
+                    unique_war_tags.append(war_tag)
+            previous_war_tags = round_war_tags
+
+    cached_by_war_tag: dict[str, dict] = {}
+    if unique_war_tags:
+        placeholders = ",".join("?" for _ in unique_war_tags)
+        cached_by_war_tag = {
+            row["war_tag"]: dict(row)
+            for row in db.conn.execute(
+                f"SELECT * FROM cwl_live_war_cache WHERE war_tag IN ({placeholders})",
+                unique_war_tags,
+            ).fetchall()
+        }
 
     war_ok = war_skipped = war_failed = 0
     from modules.player.member_stats import cwl_attack_counts
@@ -613,17 +702,18 @@ def _run_cwl_live(force: bool = False, now: datetime | None = None) -> dict:
     player_service = PlayerService(PlayerRepository(db.conn))
     own_cwl_tags = {team["clan_tag"] for team in teams if team.get("clan_tag")}
     for war_tag in unique_war_tags:
-        cached = db.conn.execute(
-            "SELECT * FROM cwl_live_war_cache WHERE war_tag = ?", (war_tag,)
-        ).fetchone()
-        cached = dict(cached) if cached else None
+        cached = cached_by_war_tag.get(war_tag)
         if cached and cached.get("state") == "warEnded":
             war_skipped += 1
             continue
-        age = _minutes_since((cached or {}).get("attempted_at"), local_now)
-        cached_state = (cached or {}).get("state")
-        retry_minutes = 2 if cached_state in {"preparation", "inWar"} else 30
-        due = force or cached is None or age is None or age >= retry_minutes
+        round_number, previous_war_tags = round_context.get(war_tag, (0, ()))
+        due = force or _cwl_war_refresh_due(
+            cached,
+            round_number=round_number,
+            previous_war_tags=previous_war_tags,
+            cached_by_war_tag=cached_by_war_tag,
+            now=local_now,
+        )
         if not due:
             war_skipped += 1
             continue
@@ -668,6 +758,15 @@ def _run_cwl_live(force: bool = False, now: datetime | None = None) -> dict:
                     player_service.mark_activity(
                         player_tag, war.get("synced_at") or attempted_at, "cwl_attack"
                     )
+            cached_by_war_tag[war_tag] = {
+                **(cached or {}),
+                "war_tag": war_tag,
+                "state": war.get("state") or "unknown",
+                "status": war.get("status") or "unknown",
+                "data_json": war_payload,
+                "updated_at": war.get("synced_at"),
+                "attempted_at": attempted_at,
+            }
             war_ok += 1
         except Exception as exc:  # noqa: BLE001 - 单场失败隔离
             war_failed += 1
@@ -676,6 +775,11 @@ def _run_cwl_live(force: bool = False, now: datetime | None = None) -> dict:
                     "UPDATE cwl_live_war_cache SET error = ?, attempted_at = ? WHERE war_tag = ?",
                     (str(exc), attempted_at, war_tag),
                 )
+                cached_by_war_tag[war_tag] = {
+                    **cached,
+                    "error": str(exc),
+                    "attempted_at": attempted_at,
+                }
             else:
                 db.conn.execute(
                     """INSERT INTO cwl_live_war_cache
@@ -683,6 +787,13 @@ def _run_cwl_live(force: bool = False, now: datetime | None = None) -> dict:
                        VALUES (?, ?, 'unknown', 'error', NULL, ?, NULL, ?)""",
                     (war_tag, period, str(exc), attempted_at),
                 )
+                cached_by_war_tag[war_tag] = {
+                    "war_tag": war_tag,
+                    "state": "unknown",
+                    "status": "error",
+                    "error": str(exc),
+                    "attempted_at": attempted_at,
+                }
         db.conn.commit()
 
     complete_groups, projected_rows = _refresh_cwl_projections(db, teams, period, attempted_at)
