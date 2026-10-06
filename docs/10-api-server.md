@@ -61,8 +61,9 @@ sudo systemctl start sky-admin
 GET /api/ping
 ```
 
-无需认证。返回服务状态、已部署的 Git 发布版本和时间戳。`version` 读取根目录
-`VERSION`，必须与本次发布 Tag 一致；它可用于小程序“关于”页核对前后端是否同步。
+无需认证。返回服务状态、已部署的 Git 发布版本和时间戳。API 进程启动时读取根目录
+`VERSION` 并冻结运行身份；后续只更新磁盘文件但未重启服务时，`version` 仍如实返回旧进程
+加载的版本。`VERSION` 必须与本次发布 Tag 一致。
 
 **响应示例**：
 ```json
@@ -71,6 +72,40 @@ GET /api/ping
   "service": "sky-admin-api",
   "version": "v1.1.1",
   "timestamp": "2026-08-08T08:00:00+00:00"
+}
+```
+
+### 1.1 系统运行版本
+
+```
+GET /api/system/version
+```
+
+无需认证。聚合当前 API worker 的启动身份和 `sky-scheduler.service` 写入
+`service_runtime` 的启动身份/心跳。`healthy` 表示调度器心跳未超过 15 分钟；`consistent`
+只有在两个组件版本、Git commit 一致、心跳正常且启动时均无已跟踪未提交改动时才为 `true`。
+
+```json
+{
+  "status": "ok",
+  "release_version": "v1.3.0",
+  "healthy": true,
+  "consistent": true,
+  "components": {
+    "api": {
+      "component": "api",
+      "git_commit": "<full commit>",
+      "git_describe": "v1.3.0",
+      "tracked_dirty": false,
+      "started_at": "2026-10-06T01:00:00+00:00",
+      "health": "healthy"
+    },
+    "scheduler": {
+      "component": "scheduler",
+      "heartbeat_at": "2026-10-06T01:01:00+00:00",
+      "health": "healthy"
+    }
+  }
 }
 ```
 

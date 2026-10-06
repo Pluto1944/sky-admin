@@ -64,6 +64,11 @@ export function getServerInfo() {
   return request('/api/ping')
 }
 
+/** 获取 API 与调度器的实际运行版本和一致性状态。 */
+export function getSystemVersion() {
+  return request('/api/system/version')
+}
+
 /**
  * 微信登录
  * @param {string} code - wx.login() 返回的 code
@@ -191,6 +196,8 @@ export function getCwlLiveDetail(clanTag, period, round) {
 }
 
 export default {
+  getServerInfo,
+  getSystemVersion,
   wechatLogin,
   getMyInfo,
   bindAccount,

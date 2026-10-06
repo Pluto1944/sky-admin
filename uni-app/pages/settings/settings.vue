@@ -127,7 +127,7 @@
 
 <script>
 import TopBar from '@/components/TopBar.vue'
-import { wechatLogin, getMyInfo, bindAccount, getServerInfo } from '@/utils/api.js'
+import { wechatLogin, getMyInfo, bindAccount, getServerInfo, getSystemVersion } from '@/utils/api.js'
 import { APP_VERSION } from '@/config/release.js'
 
 export default {
@@ -291,18 +291,47 @@ export default {
 
     async showAbout() {
       let serverVersion = '获取失败'
+      let serviceStatus = '暂不可用'
+      let details = ''
       try {
-        const serverInfo = await getServerInfo()
-        serverVersion = serverInfo.version || '未知'
+        const systemInfo = await getSystemVersion()
+        serverVersion = systemInfo.release_version || '未知'
+        if (!systemInfo.healthy) {
+          serviceStatus = '调度器异常'
+        } else if (!systemInfo.consistent) {
+          serviceStatus = '运行中，组件版本不一致'
+        } else {
+          serviceStatus = '正常'
+        }
+        if (this.userInfo && this.userInfo.role === 'admin') {
+          const components = systemInfo.components || {}
+          details = `\n\n运行详情（管理员）\n${this.runtimeLine('API', components.api)}\n${this.runtimeLine('调度器', components.scheduler)}`
+        }
       } catch (err) {
-        // “关于”信息应保持可查看，服务暂不可达只影响版本核对。
+        try {
+          const serverInfo = await getServerInfo()
+          serverVersion = serverInfo.version || '未知'
+          serviceStatus = 'API 正常，调度器状态未知'
+        } catch (pingErr) {
+          // “关于”信息应保持可查看，服务暂不可达只影响版本核对。
+        }
       }
       uni.showModal({
         title: '苍穹联赛助手',
-        content: `小程序版本：${APP_VERSION}\n服务版本：${serverVersion}\n\nCOC 部落冲突联赛管理工具\n提供成员管理、联赛战绩查看等功能`,
+        content: `小程序版本：${APP_VERSION}\n服务版本：${serverVersion}\n服务状态：${serviceStatus}${details}\n\nCOC 部落冲突联赛管理工具\n提供成员管理、联赛战绩查看等功能`,
         showCancel: false,
         confirmText: '知道了'
       })
+    },
+
+    runtimeLine(label, component) {
+      if (!component || component.health === 'missing') return `${label}：未上报`
+      const commit = component.git_commit && component.git_commit !== 'unknown'
+        ? component.git_commit.slice(0, 8)
+        : '未知提交'
+      const health = component.health === 'healthy' ? '正常' : '心跳超时'
+      const dirty = component.tracked_dirty ? ' · 有未提交改动' : ''
+      return `${label}：${component.release_version || '未知'} · ${commit} · ${health}${dirty}`
     },
 
     handleLogout() {

@@ -1,7 +1,8 @@
 # 15 — 周期调度
 
 > 生产常驻入口：`scripts/scheduler.py`，服务：`sky-scheduler.service`。
-> 每次执行状态存入 `sync_jobs`；不要再增加独立 cron 或竞争性的常驻循环。
+> 每次任务执行状态存入 `sync_jobs`；调度器进程身份和心跳单独存入 `service_runtime`。
+> 不要再增加独立 cron 或竞争性的常驻循环。
 
 ## 任务边界
 
@@ -48,12 +49,17 @@ CWL 的第二轮至最后一轮准备日与上一轮战斗日重叠，因此调�
 
 ## 运维
 
+常驻 loop 启动时冻结 `VERSION`、Git commit、`git describe` 和已跟踪工作区状态，并以
+`component=scheduler` 写入 `service_runtime`。主循环每轮以及每个任务执行后更新心跳；长任务运行期间
+允许最多 15 分钟无新心跳。`--once` 和 `--list` 是临时命令，不覆盖常驻进程身份。
+
 ```bash
 source scripts/load_env.sh
 venv/bin/python scripts/scheduler.py --list
 venv/bin/python scripts/scheduler.py --once current_wars
 venv/bin/python scripts/scheduler.py --once capital_raid_status --force
 systemctl status sky-scheduler.service
+curl -fsS http://127.0.0.1:8000/api/system/version
 ```
 
 生产不得手工启动第二个 scheduler 或带 `--reload` 的 uvicorn。代码或配置变更后以 systemd 重启，

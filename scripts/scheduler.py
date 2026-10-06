@@ -55,6 +55,8 @@ load_env()
 
 import config  # noqa: E402
 from shared.db.connection import Database  # noqa: E402
+from shared.runtime_identity import capture_runtime_identity  # noqa: E402
+from shared.service_runtime import record_service_runtime, touch_service_runtime  # noqa: E402
 
 POLL_SECONDS = 60  # 主循环轮询间隔（秒）
 BUSINESS_TZ = ZoneInfo("Asia/Shanghai")
@@ -1792,8 +1794,14 @@ def loop() -> None:
     """常驻主循环。"""
     db = _open_db()
     _ensure_rows(db)
-    print(f"[{now_iso()}] 调度器启动，轮询间隔 {POLL_SECONDS}s")
+    runtime_identity = capture_runtime_identity("scheduler")
+    record_service_runtime(db.conn, runtime_identity)
+    print(
+        f"[{now_iso()}] 调度器启动，轮询间隔 {POLL_SECONDS}s，"
+        f"版本 {runtime_identity.release_version}，提交 {runtime_identity.git_commit[:12]}"
+    )
     while True:
+        touch_service_runtime(db.conn, "scheduler")
         now_ts = datetime.now(timezone.utc).timestamp()
         for job_id, job in JOBS.items():
             row = _get_row(db, job_id)
@@ -1803,7 +1811,9 @@ def loop() -> None:
             if next_ts is not None and now_ts < next_ts:
                 continue
             result = run_one(db, job_id)
+            touch_service_runtime(db.conn, "scheduler")
             print(f"[{now_iso()}] {job['name']}({job_id}): {result.get('status')} {result.get('reason', '')}")
+        touch_service_runtime(db.conn, "scheduler")
         time.sleep(POLL_SECONDS)
 
 

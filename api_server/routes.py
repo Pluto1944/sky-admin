@@ -2,6 +2,7 @@
 
 当前提供：
 - GET /api/ping            健康检查
+- GET /api/system/version  API / 调度器运行身份与一致性
 - GET /api/members          成员列表（读取 accounts 表）
 - GET /api/clan/overview    自有部落概览（读取 accounts 缓存）
 - GET /api/clan/league-stats  联赛战绩统计（滚动窗口三星率）
@@ -20,7 +21,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from modules.player.repository import PlayerRepository
 from modules.player.farm_management import canonical_tag, farm_management_by_clan
@@ -31,23 +32,28 @@ from modules.coc_sync.war_history import war_history_summary
 from .deps import get_repo, get_db
 from .auth import create_token, require_user
 from shared.db.connection import Database
-from shared.release import read_release_version
+from shared.service_runtime import build_system_version, get_service_runtime
 from config import CLANS, CLAN_CATEGORY_LABELS, DB_PATH, LEAGUE_COMBAT, get_farm_clans
 
 router = APIRouter(prefix="/api")
 
 
 @router.get("/ping")
-def ping():
+def ping(request: Request):
     """健康检查接口。返回服务状态、发布版本和时间戳。"""
-    from datetime import datetime, timezone
-
     return {
         "status": "ok",
         "service": "sky-admin-api",
-        "version": read_release_version(),
+        "version": request.app.state.runtime_identity.release_version,
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
+
+
+@router.get("/system/version")
+def system_version(request: Request, db: Database = Depends(get_db)):
+    """返回 API 与调度器实际运行的版本、提交和心跳一致性。"""
+    scheduler = get_service_runtime(db.conn, "scheduler")
+    return build_system_version(request.app.state.runtime_identity, scheduler)
 
 
 @router.get("/members")

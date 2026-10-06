@@ -39,6 +39,7 @@ Git Tag：v主版本.次版本.修订版本，例如 v1.0.3
 
 - 正式 Tag 使用 annotated tag，不使用临时或含糊名称；
 - Git Tag 是唯一的发布版本身份。根目录 `VERSION`、小程序 `manifest.json` / `package.json` / `config/release.js` 和后端 `/api/ping` 只是它在各运行环境的同步副本，必须完全一致；
+- API 和调度器在进程启动时冻结 `release_version`、`git_commit`、`git_describe`、`tracked_dirty`、`started_at`；修改磁盘代码或 `VERSION` 不会伪装成已经部署，必须重启对应服务；
 - 已推送的版本 Tag 视为不可变，不覆盖、不强制移动；
 - 发布后发现问题时创建新的修订版本，不复用原版本号；
 - Tag 必须指向已经提交并完成验证的 commit，未提交文件永远不会进入 Tag。
@@ -300,6 +301,19 @@ done
 - 相关 `sync_jobs` 的最近状态和运行时间；
 - 服务日志中无持续异常。
 
+两个服务重启并通过基础健康检查后，执行统一运行身份验收：
+
+```bash
+venv/bin/python scripts/verify_runtime_version.py \
+  --expected-version vX.Y.Z \
+  --expected-commit "$(git rev-parse HEAD)"
+```
+
+脚本读取 `/api/system/version`，要求 API 与调度器均心跳正常、均运行预期版本和完整 commit、
+启动时没有已跟踪未提交改动，并且两个组件身份一致。任何一项不满足均以非零状态退出；不能仅凭
+`systemctl is-active` 或磁盘上的 `VERSION` 判断部署完成。调度器心跳存入独立的
+`service_runtime`，任务成功/失败仍只看 `sync_jobs`，两者不得混用。
+
 外部 COC API 故障与本地服务故障必须区分。若官方接口不可用但本地服务和缓存回退正常，应明确标注外部依赖异常，不得通过清空缓存或盲目更换 Token 制造更大问题。
 
 ## 8. 发布验收清单
@@ -315,6 +329,7 @@ done
 - [ ] annotated Tag 已创建并推送；
 - [ ] Tag 解引用后的 commit 与发布 commit 一致；
 - [ ] 后端变更已备份、部署并验证；
+- [ ] `/api/system/version` 显示 API 与调度器均为预期 Tag commit、心跳正常且身份一致；
 - [ ] 小程序版本号和版本介绍已填写；
 - [ ] 已明确记录上传、审核、发布三个状态；
 - [ ] 发布后完成普通用户入口复测。

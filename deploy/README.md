@@ -332,7 +332,16 @@ cd /home/ubuntu/YANG/sky-admin
 git pull                              # 拉取最新代码
 sudo systemctl restart sky-admin      # 重启 FastAPI 生效
 sudo systemctl restart sky-scheduler  # 重启调度器生效（若调度器相关代码有改动）
+
+# 两个服务都启动后，核对它们实际加载的 VERSION 与 Git commit
+venv/bin/python scripts/verify_runtime_version.py \
+  --expected-version "$(cat VERSION)" \
+  --expected-commit "$(git rev-parse HEAD)"
 ```
+
+`/api/ping` 只证明 API 可响应；`verify_runtime_version.py` 还会检查调度器心跳、两个组件的
+实际启动提交和启动时工作区状态。它失败时不能把部署标记为完成，应先检查
+`/api/system/version` 与两个 systemd 服务日志。
 
 ### SSL 证书
 

@@ -1,9 +1,11 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 import api_server.routes as routes
 from shared.release import read_release_version, validate_release_version
+from shared.runtime_identity import RuntimeIdentity
 
 
 def test_validate_release_version_accepts_semver_tag():
@@ -24,4 +26,14 @@ def test_read_release_version_reads_declared_file(tmp_path: Path):
 
 
 def test_ping_reports_declared_release_version():
-    assert routes.ping()["version"] == read_release_version()
+    identity = RuntimeIdentity(
+        component="api",
+        release_version="v9.8.7",
+        git_commit="a" * 40,
+        git_describe="v9.8.7",
+        tracked_dirty=False,
+        started_at="2026-10-06T00:00:00+00:00",
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime_identity=identity)))
+
+    assert routes.ping(request)["version"] == "v9.8.7"

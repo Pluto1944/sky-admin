@@ -404,6 +404,19 @@ CREATE TABLE IF NOT EXISTS sync_jobs (
 );
 """
 
+# 常驻组件运行身份。与 sync_jobs 的业务任务状态分离，避免混淆进程版本和任务结果。
+_SERVICE_RUNTIME_DDL = """
+CREATE TABLE IF NOT EXISTS service_runtime (
+    component      TEXT PRIMARY KEY,
+    release_version TEXT NOT NULL,
+    git_commit     TEXT NOT NULL,
+    git_describe   TEXT NOT NULL,
+    tracked_dirty  INTEGER NOT NULL DEFAULT 0,
+    started_at     TEXT NOT NULL,
+    heartbeat_at   TEXT NOT NULL
+);
+"""
+
 _CHILDREN_DDL = (
     _REGISTRATIONS_DDL.format(table="registrations")
     + _LEAGUE_TEAMS_DDL
@@ -423,6 +436,7 @@ _CHILDREN_DDL = (
     + _CWL_ROSTER_SNAPSHOTS_DDL
     + _CWL_ASSEMBLY_CACHE_DDL
     + _SYNC_JOBS_DDL
+    + _SERVICE_RUNTIME_DDL
 )
 
 _SCHEMA = _ACCOUNTS_DDL.format(table="accounts") + _CHILDREN_DDL
@@ -669,6 +683,12 @@ class Database:
         if not sj_cols:
             self.conn.execute(_SYNC_JOBS_DDL)
 
+        runtime_cols = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(service_runtime)")
+        }
+        if not runtime_cols:
+            self.conn.execute(_SERVICE_RUNTIME_DDL)
+
         # 普通战旧聚合任务已随旧表物理退役；清理历史运行状态，避免 --list
         # 显示一个不再存在且无法调度的任务。
         self.conn.execute("DELETE FROM sync_jobs WHERE job_id = 'war_results'")
@@ -739,7 +759,7 @@ class Database:
             "farm_fill_accounts",
             "clan_profile_cache",
             "league_results", "league_teams",
-            "registrations", "accounts", "sync_jobs",
+            "registrations", "accounts", "sync_jobs", "service_runtime",
         ):
             self.conn.execute(f"DROP TABLE IF EXISTS {table}")
         self.conn.commit()
