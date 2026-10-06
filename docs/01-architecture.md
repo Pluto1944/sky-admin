@@ -40,7 +40,7 @@
 
 | 决策点 | 结论 |
 |--------|------|
-| 在线 Excel 交互 | 腾讯文档 API 自动读写；第一版走本地 xlsx，预留 API 接口层 |
+| 在线 Excel 交互 | 腾讯文档官方 MCP 主用，OpenAPI v3 可手动回退；本地 xlsx 仍可选 |
 | 账号唯一标识 | COC 真实 Tag（如 `#XXXX`）作为主键 `player_tag` |
 | 排序组合方式 | 加权综合分：归一化匹配值 × 0.6 + 归一化历史战绩 × 0.4（权重可配） |
 | 历史战绩计算 | 多指标折算，占位空函数，公式后续自行补充 |
@@ -72,7 +72,7 @@ flowchart TD
         PR[(accounts)]
     end
     subgraph INFRA["shared 基础设施"]
-        IO[io_adapter<br/>ExcelIO/LocalXlsx]
+        IO[io_adapter<br/>ExcelIO/LocalXlsx/TencentDoc]
         DB[db/connection<br/>单一SQLite连接]
         CFG[config/common + columns]
     end
@@ -93,7 +93,7 @@ flowchart TD
 ### 分层职责
 
 - **纯函数层**：`rank_score`（排序综合分）、`sorter`（分组排序）、`status_rule`（状态推断）、`mapper`（COC 字段映射）、`columns`（表头关键词解析），输入→输出无副作用
-- **IO 层**：`shared/io_adapter/ExcelIO` 抽象，当前用 `LocalXlsxAdapter`，`TencentDocAdapter` 预留
+- **IO 层**：`shared/io_adapter/ExcelIO` 抽象，支持 `LocalXlsxAdapter` 和腾讯文档双后端 `TencentDocAdapter`
 - **存储层**：领域 Repository 共享同一个 SQLite 连接
 - **中枢**：`PlayerService` 是账号数据读写的唯一入口，其他模块不直接碰 `accounts` 表
 
@@ -197,7 +197,7 @@ flowchart TD
 - **pandas + openpyxl**：读写 Excel
 - **SQLite**（内置 `sqlite3`）：本地数据库，零配置、单文件、便于备份
 - **pytest + pytest-cov**：单元测试与覆盖率
-- **腾讯文档 OpenAPI v3**：在线文档读写（调试 Token 或 OAuth 自动刷新）
+- **腾讯文档官方 MCP / OpenAPI v3**：MCP 主用，OpenAPI 保留为人工切换的故障回退
 
 ---
 
@@ -282,13 +282,15 @@ sky-admin/
 
 ---
 
-## 九、腾讯文档 API 接入
+## 九、腾讯文档接入
 
-- 实现：`shared/io_adapter/tencent_doc.py`，OpenAPI v3
-- **授权方式**：凭证仅从环境变量读取；兼容调试 Access Token，也支持正式 OAuth Refresh Token
-- 配置 `TENCENT_DOC_CLIENT_SECRET` 和 `TENCENT_DOC_REFRESH_TOKEN` 后，Access Token 缺失、HTTP 401 或业务码 `400006` 时自动刷新并重试一次
-- Refresh Token 由 OAuth 授权码换取，官方有效期为 1 年；到期后需重新授权一次
-- **安全**：所有凭证仅放环境变量，绝不入库、不提交仓库
+- 实现：`shared/io_adapter/tencent_doc.py`，业务层继续只依赖 `ExcelIO`
+- **主后端**：`TENCENT_DOC_BACKEND=mcp`，使用官方托管 MCP 与 `TENCENT_DOCS_TOKEN`
+- **回退后端**：`TENCENT_DOC_BACKEND=openapi`，保留原 OpenAPI v3、Access Token 和 OAuth 刷新逻辑
+- `auto` 仅在启动时按是否存在 MCP Token 选后端；写入失败后不会自动跨后端重试，避免结果不明确时重复写入
+- MCP 支持读取合并单元格、原地覆盖、扩缩表、冻结表头和筛选；OpenAPI 继续按原能力处理
+- 2026-10-06 已用正式报名文档完成 MCP 生产验收：读取 36 个 Sheet、导入 233 条十月报名、完整编排写入中间 Sheet 并回读成功；正式公示文档未参与测试写入
+- **安全**：所有凭证仅放环境变量，绝不入库、不提交仓库；聊天中暴露过的 Token 必须重置后再使用
 
 ---
 
@@ -432,13 +434,14 @@ v2.2 把 `registrations` 升级为**自包含事实源**，从根上消除该复
 
 ---
 
-## 十三、腾讯文档 API 接入说明
+## 十三、腾讯文档后端切换说明
 
-- 实现：`shared/io_adapter/tencent_doc.py`，OpenAPI v3；核心接口 `get_range`（读）、`batchupdate`（写）、`get_sheet`（元数据）
-- **授权方式**：兼容调试 Access Token；正式运行推荐同时配置 `TENCENT_DOC_CLIENT_SECRET` / `TENCENT_DOC_REFRESH_TOKEN`
-- Access Token 缺失或失效时自动刷新并重试一次；Refresh Token 官方有效期为 1 年，到期后重新授权
-- **安全**：所有凭证仅放环境变量，绝不入库、不提交仓库
-- **接入方式**：仅新增 `io_adapter/tencent_doc.py` 实现 `ExcelIO`，业务层零改动
+- **MCP**：设置 `TENCENT_DOC_BACKEND=mcp` 与 `TENCENT_DOCS_TOKEN`；Token 到期或泄露后到官方授权页重置
+- **OpenAPI 回退**：设置 `TENCENT_DOC_BACKEND=openapi`；原 `TENCENT_DOC_ACCESS_TOKEN`、`CLIENT_ID`、`OPEN_ID` 及可选 OAuth 刷新凭证继续有效
+- **切换边界**：每个进程启动时只选择一个后端，不在一次读写流程中自动切换；故障后先核对在线文档，再人工切换并重跑
+- **调用方**：CLI、月度联赛脚本、调度任务和玩家档案导出统一经 `TencentDocAdapter`，不需要各自实现 MCP
+- **接入方式**：业务层仍使用 `ExcelIO`，本地 xlsx 与腾讯文档选择方式不变
+- **正式名单边界**：`arrange` 只依据当前报名、配置和历史事实重建中间名单，不会反向导入正式公示表中的人工改动；正式表发布并人工调整后，普通重跑不保证名单一致
 
 ---
 

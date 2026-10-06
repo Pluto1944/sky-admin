@@ -29,12 +29,7 @@ fi
 
 PY="${PYTHON:-python3}"
 
-: "${TENCENT_DOC_CLIENT_ID:?请在 .env 设置 TENCENT_DOC_CLIENT_ID}"
-: "${TENCENT_DOC_OPEN_ID:?请在 .env 设置 TENCENT_DOC_OPEN_ID}"
-if [[ -z "${TENCENT_DOC_ACCESS_TOKEN:-}" ]]; then
-  : "${TENCENT_DOC_CLIENT_SECRET:?缺少 Access Token 时请设置 TENCENT_DOC_CLIENT_SECRET}"
-  : "${TENCENT_DOC_REFRESH_TOKEN:?缺少 Access Token 时请设置 TENCENT_DOC_REFRESH_TOKEN}"
-fi
+require_tencent_doc_credentials
 : "${PUBLISH_DOC_FILE_ID:?请在 .env 设置 PUBLISH_DOC_FILE_ID}"
 
 echo "=== 发布联赛报名结果：${LEAGUE_PERIOD} → ${PUBLISH_DOC_FILE_ID} ==="

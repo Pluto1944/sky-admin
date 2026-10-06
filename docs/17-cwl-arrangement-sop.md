@@ -36,8 +36,32 @@
 
 ## 4. 凭证和环境检查
 
-确认 `.env` 已配置且有效：`COC_API_TOKEN`、`TENCENT_DOC_*`、`REG_DOC_FILE_ID`、`ROSTER_DOC_FILE_ID`。
-腾讯文档推荐配置 `TENCENT_DOC_CLIENT_SECRET` 和 `TENCENT_DOC_REFRESH_TOKEN`，Access Token 失效时会自动刷新并重试；Refresh Token 官方有效期为 1 年。调试 Access Token 无刷新能力，过期后仍需手动更新。禁止在聊天、日志或 Git 中暴露任何凭证。
+确认 `.env` 已配置且有效：`COC_API_TOKEN`、腾讯文档凭证、`REG_DOC_FILE_ID`、`ROSTER_DOC_FILE_ID`。
+
+腾讯文档默认使用官方 MCP：
+
+```dotenv
+TENCENT_DOC_BACKEND=mcp
+TENCENT_DOCS_TOKEN=在腾讯文档授权页生成的Token
+```
+
+MCP Token 按腾讯文档空间授权，有效期 1 年；到期或泄露后在
+[腾讯文档 MCP 授权页](https://docs.qq.com/open/auth/mcp.html)重置。不要把 Token 粘贴到聊天、日志或 Git。
+
+保留的 OpenAPI v3 可用于 MCP 故障时回退。确认旧凭证仍有效后，将
+`TENCENT_DOC_BACKEND` 改为 `openapi`；恢复 MCP 时改回 `mcp`。也可只对单次命令临时覆盖：
+
+```bash
+TENCENT_DOC_BACKEND=openapi bash scripts/register_and_arrange.sh YYYY-MM
+```
+
+写入失败后先检查腾讯文档中的实际结果，再决定是否重跑或切换后端。程序不会在写操作中途自动
+切换后端，以免请求结果不明确时重复写入。OpenAPI 配置 `TENCENT_DOC_CLIENT_SECRET` 和
+`TENCENT_DOC_REFRESH_TOKEN` 后仍支持自动刷新 Access Token。
+
+2026-10-06 已完成 MCP 生产验收：成功读取正式报名文档的 36 个 Sheet 和合并单元格，导入
+233 条十月报名，重建九月 243 条战绩，完整写入并回读中间名单。创建、覆盖、清空、扩缩表、
+样式、冻结和筛选此前也已在临时文档逐项验证；正式公示文档未用于测试写入。
 
 ## 5. 备份数据库
 
@@ -85,6 +109,16 @@ env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
 同月重跑时，程序会清空该月全部报名记录的旧 `league_type`、`rank_order`、`team_info`，再只回写
 本次实际分配；修改黑名单、排除名单或报名后可以直接重跑，但仍需重新核对输出并单独更新公示表。
 
+上述重跑只适用于正式发布前的编排阶段。正式表发布并由管理员人工修改后，正式表与数据库报名
+快照已经是两个事实源：`arrange` 会重新读取最新报名和当前配置，不会把正式表的换人、占位号、
+补位或手工换队反向导入数据库。因此，发布后的测试重跑只能写中间文档，必须与正式表逐队对比，
+不得因为命令成功就再次发布。若需要稳定复现月初名单，应使用冻结的报名/配置快照，或先设计正式
+名单回写与锁定机制。
+
+十月验收中，月初正式表为 243 人，本次按最新报名重排为 230 人；新增实战队按普通队伍填入真实
+成员，加上报名变化和正式表人工调整，造成大量队伍变化。这是当前重建语义的结果，不是 MCP 读写
+错误。正式表及其活动 `cwl_roster_snapshots` 快照仍是开赛后的展示与集结核对依据。
+
 ## 8. 发布公示报名表（可选、单独执行）
 
 确认安排无误后，才执行：
@@ -96,7 +130,8 @@ env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
     bash scripts/publish_to_results.sh YYYY-MM
 ```
 
-该步骤写入 `PUBLISH_DOC_FILE_ID` 指定的公示文档，与安排文档分开。若腾讯文档只有一个显示中的 Sheet，删除旧 Sheet 可能失败；应先保留或新建一个备用 Sheet 后重试。
+该步骤写入 `PUBLISH_DOC_FILE_ID` 指定的公示文档，与安排文档分开。MCP 后端会原地清空并覆盖
+同名 Sheet；OpenAPI 后端仍使用删表重建，文档只有一个 Sheet 时应先保留或新建备用 Sheet。
 发布完成后打开公示文档，确认当月同名 Sheet、队伍数量和最终人数与审核通过的工作名单一致。
 
 ## 9. 开赛和匹配检查

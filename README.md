@@ -152,7 +152,7 @@ tests/                       # 按模块归类：shared / player / cwl_registrat
 | `TEAMS` | `cwl_registration/config.py` | 队伍配置列表（11 支队伍）：每队含名称/人数/标签/管理/类别(combat\|shell)/预留位置 |
 | `NEW_COMBAT_INSERT_START` | `cwl_registration/config.py` | 战营新增插入起始编号（默认30） |
 | `COMBAT_MIN_MATCH_VALUE` | `cwl_registration/config.py` | 实战最低匹配值门槛：低于此值的普通实战账号强制转壳子（战营账号豁免） |
-| `IO_ADAPTER` | `shared/config/common.py` | IO 适配器：`tencent`（腾讯文档）或默认本地 xlsx |
+| `app.io_adapter` | `config/settings.yaml` | IO 适配器：`tencent`（腾讯文档）或 `local`（本地 xlsx） |
 
 ## 运行测试
 
@@ -178,10 +178,9 @@ scripts/sync_and_export.sh
 ```
 
 - `player-export --to tencent` 只影响本条命令，不改动全局 `IO_ADAPTER`；导出的是
-  `player` 库的完整业务视图（含报名状态、历史分、部落身份等），带筛选/冻结（腾讯侧忽略）。
-- 底层是 `shared/io_adapter/tencent_doc.py`（腾讯文档 OpenAPI v3）；如需让所有命令
-  默认走在线文档，可把 `shared/config/common.py` 的 `IO_ADAPTER` 切为 `'tencent'`。
+  `player` 库的完整业务视图（含报名状态、历史分、部落身份等）；MCP 后端会应用筛选和冻结表头。
+- 底层是 `shared/io_adapter/tencent_doc.py`。`config/settings.yaml` 中 `app.io_adapter: tencent`
+  时，所有相关命令统一使用腾讯文档适配器。
 
-> ⚠️ **授权现状（重要）**：当前采用**调试 access_token（B 方案）**，**没有 refresh_token、不做自动刷新**。
-> `TENCENT_DOC_ACCESS_TOKEN` **有效期约 30 天，到期需手动更新**：回腾讯文档开放平台「开发者信息」复制新 token，重新 `export` 环境变量即可。
+> 腾讯文档默认使用官方 MCP：设置 `TENCENT_DOC_BACKEND=mcp` 与 `TENCENT_DOCS_TOKEN`。MCP Token 到期或泄露后在授权页重置；需要回退时设置 `TENCENT_DOC_BACKEND=openapi`，原 OpenAPI 凭证和刷新逻辑仍保留。写入失败后不会自动切换后端重试。
 > 所有凭证（COC / 腾讯）一律走**环境变量**，切勿写进脚本或提交仓库。

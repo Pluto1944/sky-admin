@@ -38,7 +38,7 @@ scripts/register_and_arrange.sh 2026-08
 2. 从完整本地 CWL 原始档案重建星数 → `league_results` 表（CWL 月 = 2026-07，自动推算 = 联赛-1）
 3. 编排名单 + 基准重建 + 升降级 → 腾讯在线文档（联赛月份 = 2026-08）
 
-前置：`.env` 中配置 `COC_API_TOKEN` + `TENCENT_DOC_*` + `REG_DOC_FILE_ID` + `ROSTER_DOC_FILE_ID`。推荐同时配置 `TENCENT_DOC_CLIENT_SECRET` 和 `TENCENT_DOC_REFRESH_TOKEN`，以便 Access Token 失效时自动刷新。
+前置：`.env` 中配置 `COC_API_TOKEN`、`REG_DOC_FILE_ID`、`ROSTER_DOC_FILE_ID`，并选择腾讯文档后端。推荐使用 `TENCENT_DOC_BACKEND=mcp` + `TENCENT_DOCS_TOKEN`；MCP 故障时可切为 `TENCENT_DOC_BACKEND=openapi`，继续使用保留的 OpenAPI 凭证。程序不会在写入中途自动跨后端重试。
 
 ---
 

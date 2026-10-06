@@ -50,3 +50,42 @@ while IFS= read -r _line || [[ -n "$_line" ]]; do
 done < "$_ENV_FILE"
 
 unset _line _key _val _ENV_FILE _ENV_ROOT
+
+# 解析并校验腾讯文档后端凭证。调用方需先 source 本文件。
+# - mcp：官方 MCP Token；
+# - openapi：原 OpenAPI v3 凭证；
+# - auto（默认）：有 MCP Token 时用 MCP，否则回退到 OpenAPI。
+require_tencent_doc_credentials() {
+  local backend="${TENCENT_DOC_BACKEND:-auto}"
+  case "$backend" in
+    auto)
+      if [[ -n "${TENCENT_DOCS_TOKEN:-${TENCENT_DOC_MCP_TOKEN:-}}" ]]; then
+        backend="mcp"
+      else
+        backend="openapi"
+      fi
+      ;;
+    mcp|openapi)
+      ;;
+    *)
+      echo "错误: TENCENT_DOC_BACKEND 仅支持 mcp、openapi 或 auto（收到: '$backend'）" >&2
+      return 1
+      ;;
+  esac
+
+  export TENCENT_DOC_BACKEND="$backend"
+  if [[ "$backend" == "mcp" ]]; then
+    if [[ -z "${TENCENT_DOCS_TOKEN:-${TENCENT_DOC_MCP_TOKEN:-}}" ]]; then
+      echo "错误: MCP 后端需要 TENCENT_DOCS_TOKEN" >&2
+      return 1
+    fi
+    return 0
+  fi
+
+  : "${TENCENT_DOC_CLIENT_ID:?OpenAPI 后端需要 TENCENT_DOC_CLIENT_ID}"
+  : "${TENCENT_DOC_OPEN_ID:?OpenAPI 后端需要 TENCENT_DOC_OPEN_ID}"
+  if [[ -z "${TENCENT_DOC_ACCESS_TOKEN:-}" ]]; then
+    : "${TENCENT_DOC_CLIENT_SECRET:?缺少 Access Token 时请设置 TENCENT_DOC_CLIENT_SECRET}"
+    : "${TENCENT_DOC_REFRESH_TOKEN:?缺少 Access Token 时请设置 TENCENT_DOC_REFRESH_TOKEN}"
+  fi
+}

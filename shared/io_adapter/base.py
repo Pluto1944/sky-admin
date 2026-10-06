@@ -1,8 +1,8 @@
 """IO 适配层抽象接口。
 
-业务模块只依赖 ExcelIO，不直接 import openpyxl / 腾讯文档 SDK。
-- 当前实现：LocalXlsxAdapter（本地 xlsx）
-- 预留实现：TencentDocAdapter（腾讯文档 API，待企业资质）
+业务模块只依赖 ExcelIO，不直接 import openpyxl 或腾讯文档协议实现。
+- LocalXlsxAdapter：本地 xlsx；
+- TencentDocAdapter：腾讯文档官方 MCP / OpenAPI v3 双后端。
 测试时可注入 FakeExcelIO（见 tests/fakes.py）。
 """
 from __future__ import annotations
@@ -44,6 +44,5 @@ class ExcelIO(ABC):
         freeze_header=True：冻结首行表头（滚动时表头常驻）。
         两者均为展示层可选项，不支持的适配器可忽略（默认 False 向后兼容）。
         highlight_rows: 需要红色字体的数据行索引集合（0-based，不含表头行）。
-            背景填充色暂不支持（腾讯文档 v3 API 限制）。
         """
         ...
