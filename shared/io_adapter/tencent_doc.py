@@ -40,6 +40,7 @@ from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
 from shared.io_adapter.base import ExcelIO
+from shared.observability import observe_external_request
 
 ALLOWED_HOST = "docs.qq.com"
 BASE_URL = "https://docs.qq.com"
@@ -627,16 +628,18 @@ class TencentDocAdapter(ExcelIO):
             method="POST",
         )
         try:
-            with urlopen(request, timeout=self._timeout) as response:
-                response_headers = getattr(response, "headers", None)
-                if response_headers is not None:
-                    session_id = response_headers.get("Mcp-Session-Id")
-                    if session_id:
-                        self._mcp_session_id = session_id
-                    content_type = response_headers.get("Content-Type", "")
-                else:
-                    content_type = "application/json"
-                raw = response.read().decode("utf-8", errors="replace")
+            with observe_external_request("tencent_docs", "mcp_rpc") as observation:
+                with urlopen(request, timeout=self._timeout) as response:
+                    observation.set_http_status(getattr(response, "status", None))
+                    response_headers = getattr(response, "headers", None)
+                    if response_headers is not None:
+                        session_id = response_headers.get("Mcp-Session-Id")
+                        if session_id:
+                            self._mcp_session_id = session_id
+                        content_type = response_headers.get("Content-Type", "")
+                    else:
+                        content_type = "application/json"
+                    raw = response.read().decode("utf-8", errors="replace")
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
             if exc.code == 401:
@@ -964,8 +967,14 @@ class TencentDocAdapter(ExcelIO):
 
             req = Request(url, data=data_bytes, headers=headers, method=method)
             try:
-                with urlopen(req, timeout=self._timeout) as resp:
-                    raw = resp.read().decode("utf-8")
+                with observe_external_request(
+                    "tencent_docs",
+                    f"openapi_{method.lower()}",
+                    resource_key=path,
+                ) as observation:
+                    with urlopen(req, timeout=self._timeout) as resp:
+                        observation.set_http_status(getattr(resp, "status", None))
+                        raw = resp.read().decode("utf-8")
             except HTTPError as e:
                 if e.code == 401 and attempt == 0 and self._can_refresh_token():
                     self._refresh_access_token()
@@ -1022,8 +1031,10 @@ class TencentDocAdapter(ExcelIO):
 
         req = Request(url, headers={"Accept": "application/json"}, method="GET")
         try:
-            with urlopen(req, timeout=self._timeout) as resp:
-                raw = resp.read().decode("utf-8")
+            with observe_external_request("tencent_docs", "oauth_refresh") as observation:
+                with urlopen(req, timeout=self._timeout) as resp:
+                    observation.set_http_status(getattr(resp, "status", None))
+                    raw = resp.read().decode("utf-8")
         except HTTPError as e:
             raise TencentDocError(
                 f"刷新腾讯文档 Access Token 失败：HTTP {e.code}"

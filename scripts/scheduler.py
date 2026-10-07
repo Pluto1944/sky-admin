@@ -55,6 +55,12 @@ load_env()
 
 import config  # noqa: E402
 from shared.db.connection import Database  # noqa: E402
+from shared.observability import (  # noqa: E402
+    capture_external_requests,
+    finish_job_run,
+    prune_observability_history,
+    start_job_run,
+)
 from shared.runtime_identity import capture_runtime_identity  # noqa: E402
 from shared.service_runtime import record_service_runtime, touch_service_runtime  # noqa: E402
 
@@ -63,6 +69,10 @@ BUSINESS_TZ = ZoneInfo("Asia/Shanghai")
 PLAYER_DETAIL_REQUEST_DELAY_SECONDS = max(
     0.0, float(os.getenv("COC_PLAYER_REQUEST_DELAY_SECONDS", "0.05"))
 )
+OBSERVABILITY_RETENTION_DAYS = max(
+    1, int(os.getenv("OBSERVABILITY_RETENTION_DAYS", "30"))
+)
+_last_observability_prune_date: str | None = None
 
 
 def now_iso() -> str:
@@ -1711,36 +1721,61 @@ def run_one(db: Database, job_id: str, force: bool = False) -> dict:
     job = JOBS[job_id]
     _update(db, job_id, last_status="running", last_error="")
 
-    start = time.monotonic()
+    started_at = now_iso()
+    run_id: int | None = None
     try:
-        run_fn = job["run"]
-        if job_id in {
-            "current_wars", "cwl", "cwl_live", "cwl_assembly",
-            "capital_raid_status", "capital_member_stats", "clan_games_stats",
-        }:
-            result = run_fn(force=force)
-        else:
-            result = run_fn()
-        duration = time.monotonic() - start
-        status = result.get("status", "success")
-        reason = result.get("reason", "")
-        _update(
-            db, job_id,
-            last_status=status,
-            last_duration=round(duration, 2),
-            last_error=reason if status != "success" else "",
-        )
-        _increment(db, job_id, failed=(status == "failed"))
-    except Exception as e:  # noqa: BLE001 —— 单任务隔离，兜住一切异常
-        duration = time.monotonic() - start
-        _update(
-            db, job_id,
-            last_status="failed",
-            last_duration=round(duration, 2),
-            last_error=str(e),
-        )
-        _increment(db, job_id, failed=True)
-        result = {"status": "failed", "reason": str(e)}
+        run_id = start_job_run(db.conn, job_id, started_at)
+    except Exception as exc:  # noqa: BLE001 - 观测失败不能阻断业务任务
+        print(f"[warn] 无法创建任务观测记录 {job_id}: {exc}", file=sys.stderr)
+
+    start = time.monotonic()
+    with capture_external_requests(job_id) as request_capture:
+        try:
+            run_fn = job["run"]
+            if job_id in {
+                "current_wars", "cwl", "cwl_live", "cwl_assembly",
+                "capital_raid_status", "capital_member_stats", "clan_games_stats",
+            }:
+                result = run_fn(force=force)
+            else:
+                result = run_fn()
+            duration = time.monotonic() - start
+            status = result.get("status", "success")
+            reason = result.get("reason", "")
+            _update(
+                db, job_id,
+                last_status=status,
+                last_duration=round(duration, 2),
+                last_error=reason if status != "success" else "",
+            )
+            _increment(db, job_id, failed=(status == "failed"))
+        except Exception as e:  # noqa: BLE001 —— 单任务隔离，兜住一切异常
+            duration = time.monotonic() - start
+            status = "failed"
+            reason = str(e)
+            _update(
+                db, job_id,
+                last_status=status,
+                last_duration=round(duration, 2),
+                last_error=reason,
+            )
+            _increment(db, job_id, failed=True)
+            result = {"status": status, "reason": reason}
+
+    if run_id is not None:
+        try:
+            finish_job_run(
+                db.conn,
+                run_id=run_id,
+                job_id=job_id,
+                finished_at=now_iso(),
+                status=status,
+                duration_ms=round(duration * 1000),
+                reason=reason,
+                events=request_capture.events,
+            )
+        except Exception as exc:  # noqa: BLE001 - 观测失败不能改变业务结果
+            print(f"[warn] 无法完成任务观测记录 {job_id}: {exc}", file=sys.stderr)
 
     # 无论成败都推进 next_run_at，避免失败任务每轮被高频重试
     if job.get("daily_at"):
@@ -1752,6 +1787,22 @@ def run_one(db: Database, job_id: str, force: bool = False) -> dict:
     _update(db, job_id, last_run_at=now_iso(), next_run_at=next_iso)
 
     return result
+
+
+def _maybe_prune_observability(db: Database) -> None:
+    """每天清理一次旧观测明细；清理失败不影响调度。"""
+    global _last_observability_prune_date
+    today = datetime.now(timezone.utc).date().isoformat()
+    if _last_observability_prune_date == today:
+        return
+    try:
+        prune_observability_history(
+            db.conn, retention_days=OBSERVABILITY_RETENTION_DAYS,
+        )
+    except Exception as exc:  # noqa: BLE001 - 观测维护失败不能阻断业务任务
+        print(f"[warn] 观测历史清理失败: {exc}", file=sys.stderr)
+        return
+    _last_observability_prune_date = today
 
 
 def _increment(db: Database, job_id: str, failed: bool) -> None:
@@ -1801,6 +1852,7 @@ def loop() -> None:
         f"版本 {runtime_identity.release_version}，提交 {runtime_identity.git_commit[:12]}"
     )
     while True:
+        _maybe_prune_observability(db)
         touch_service_runtime(db.conn, "scheduler")
         now_ts = datetime.now(timezone.utc).timestamp()
         for job_id, job in JOBS.items():

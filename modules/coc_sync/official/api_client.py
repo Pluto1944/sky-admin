@@ -17,6 +17,8 @@ from urllib.parse import quote, urlparse
 from urllib.request import ProxyHandler, Request, build_opener
 from urllib.error import HTTPError, URLError
 
+from shared.observability import observe_external_request
+
 ALLOWED_HOST = "api.clashofclans.com"
 BASE_URL = "https://api.clashofclans.com/v1"
 DEFAULT_TIMEOUT = 15  # 秒
@@ -47,25 +49,43 @@ class CocApiClient:
         每个成员至少包含：tag / name / role / expLevel / trophies /
         league / clanRank / donations 等（由官方 API 决定）。
         """
-        data = self._get(f"/clans/{self._encode_tag(clan_tag)}/members")
+        data = self._get(
+            f"/clans/{self._encode_tag(clan_tag)}/members",
+            operation="clan_members",
+            resource_key=clan_tag,
+        )
         return data.get("items", [])
 
     def get_clan(self, clan_tag: str) -> dict:
         """查询部落概要信息（含 memberList）。"""
-        return self._get(f"/clans/{self._encode_tag(clan_tag)}")
+        return self._get(
+            f"/clans/{self._encode_tag(clan_tag)}",
+            operation="clan_profile",
+            resource_key=clan_tag,
+        )
 
     def get_player(self, player_tag: str) -> dict:
         """按玩家 Tag 查询单个账号信息。"""
-        return self._get(f"/players/{self._encode_tag(player_tag)}")
+        return self._get(
+            f"/players/{self._encode_tag(player_tag)}",
+            operation="player_profile",
+            resource_key=player_tag,
+        )
 
     def get_current_war(self, clan_tag: str) -> dict:
         """查询指定部落的当前战争详情。"""
-        return self._get(f"/clans/{self._encode_tag(clan_tag)}/currentwar")
+        return self._get(
+            f"/clans/{self._encode_tag(clan_tag)}/currentwar",
+            operation="current_war",
+            resource_key=clan_tag,
+        )
 
     def get_capital_raid_seasons(self, clan_tag: str, limit: int = 8) -> list[dict]:
         """查询部落都城突袭周末历史。"""
         data = self._get(
-            f"/clans/{self._encode_tag(clan_tag)}/capitalraidseasons?limit={int(limit)}"
+            f"/clans/{self._encode_tag(clan_tag)}/capitalraidseasons?limit={int(limit)}",
+            operation="capital_raid_seasons",
+            resource_key=clan_tag,
         )
         return data.get("items", [])
 
@@ -81,7 +101,9 @@ class CocApiClient:
         path = f"/clans/{self._encode_tag(clan_tag)}/warlog"
         if limit is not None:
             path += f"?limit={limit}"
-        data = self._get(path)
+        data = self._get(
+            path, operation="clan_war_log", resource_key=clan_tag,
+        )
         return data.get("items", [])
 
     def get_cwl_war(self, war_tag: str) -> dict:
@@ -89,7 +111,11 @@ class CocApiClient:
 
         返回 clan / opponent 双方的成员名单及每人每场进攻明细（stars / attacks）。
         """
-        return self._get(f"/clanwarleagues/wars/{self._encode_tag(war_tag)}")
+        return self._get(
+            f"/clanwarleagues/wars/{self._encode_tag(war_tag)}",
+            operation="cwl_war",
+            resource_key=war_tag,
+        )
 
     def get_league_group(self, clan_tag: str) -> dict | None:
         """查询部落当前联赛组信息。GET /clans/{clanTag}/currentwar/leaguegroup
@@ -98,7 +124,12 @@ class CocApiClient:
         返回含 season / state / rounds[].warTags[] 等。
         """
         try:
-            return self._get(f"/clans/{self._encode_tag(clan_tag)}/currentwar/leaguegroup")
+            return self._get(
+                f"/clans/{self._encode_tag(clan_tag)}/currentwar/leaguegroup",
+                operation="cwl_group",
+                resource_key=clan_tag,
+                expected_http_statuses=(404,),
+            )
         except CocApiError as e:
             if "404" in str(e):
                 return None
@@ -119,7 +150,14 @@ class CocApiClient:
         # 只对单个 path 段做编码，不放行 '/' 等分隔符，防止路径穿越
         return quote(t, safe="")
 
-    def _get(self, path: str) -> dict:
+    def _get(
+        self,
+        path: str,
+        *,
+        operation: str = "get",
+        resource_key: str | None = None,
+        expected_http_statuses: tuple[int, ...] = (),
+    ) -> dict:
         if not self._token:
             raise CocApiError(
                 "缺少 COC_API_TOKEN 环境变量，请先设置后再调用（切勿硬编码密钥）。"
@@ -139,16 +177,23 @@ class CocApiClient:
             },
             method="GET",
         )
-        try:
-            with self._opener.open(req, timeout=self._timeout) as resp:
-                body = resp.read().decode("utf-8")
-        except HTTPError as e:
-            detail = e.read().decode("utf-8", errors="replace") if e.fp else ""
-            raise CocApiError(f"COC API 返回错误 {e.code}: {detail}") from e
-        except URLError as e:
-            raise CocApiError(f"请求 COC API 失败：{e.reason}") from e
+        with observe_external_request(
+            "coc_official",
+            operation,
+            resource_key=resource_key,
+            expected_http_statuses=expected_http_statuses,
+        ) as observation:
+            try:
+                with self._opener.open(req, timeout=self._timeout) as resp:
+                    observation.set_http_status(getattr(resp, "status", None))
+                    body = resp.read().decode("utf-8")
+            except HTTPError as e:
+                detail = e.read().decode("utf-8", errors="replace") if e.fp else ""
+                raise CocApiError(f"COC API 返回错误 {e.code}: {detail}") from e
+            except URLError as e:
+                raise CocApiError(f"请求 COC API 失败：{e.reason}") from e
 
-        try:
-            return json.loads(body)
-        except json.JSONDecodeError as e:
-            raise CocApiError("COC API 响应不是合法 JSON") from e
+            try:
+                return json.loads(body)
+            except json.JSONDecodeError as e:
+                raise CocApiError("COC API 响应不是合法 JSON") from e

@@ -4,6 +4,8 @@ from typing import Any
 import requests
 import json
 
+from shared.observability import observe_external_request
+
 
 class WeChatApiError(RuntimeError):
     def __init__(self, message: str, *, code: int | None = None, submission_unknown: bool = False):
@@ -23,39 +25,50 @@ class WeChatHttpClient:
     def access_token(self) -> str:
         if self._access_token:
             return self._access_token
-        response = self.session.get(
-            "https://api.weixin.qq.com/cgi-bin/token",
-            params={"grant_type": "client_credential", "appid": self.app_id, "secret": self.app_secret},
-            timeout=self.timeout,
-        )
-        payload = self._json(response)
-        self._raise_error(payload)
+        with observe_external_request("wechat_official", "access_token") as observation:
+            response = self.session.get(
+                "https://api.weixin.qq.com/cgi-bin/token",
+                params={"grant_type": "client_credential", "appid": self.app_id, "secret": self.app_secret},
+                timeout=self.timeout,
+            )
+            observation.set_http_status(getattr(response, "status_code", None))
+            payload = self._json(response)
+            self._raise_error(payload)
         self._access_token = payload["access_token"]
         return self._access_token
 
     def upload_content_image(self, image_path: str) -> str:
-        response = self._post_file("https://api.weixin.qq.com/cgi-bin/media/uploadimg", image_path)
-        payload = self._json(response)
-        self._raise_error(payload)
+        self.access_token()
+        with observe_external_request("wechat_official", "upload_content_image") as observation:
+            response = self._post_file("https://api.weixin.qq.com/cgi-bin/media/uploadimg", image_path)
+            observation.set_http_status(getattr(response, "status_code", None))
+            payload = self._json(response)
+            self._raise_error(payload)
         return payload["url"]
 
     def upload_cover(self, image_path: str) -> str:
-        response = self._post_file("https://api.weixin.qq.com/cgi-bin/material/add_material", image_path, media_type="image")
-        payload = self._json(response)
-        self._raise_error(payload)
+        self.access_token()
+        with observe_external_request("wechat_official", "upload_cover") as observation:
+            response = self._post_file("https://api.weixin.qq.com/cgi-bin/material/add_material", image_path, media_type="image")
+            observation.set_http_status(getattr(response, "status_code", None))
+            payload = self._json(response)
+            self._raise_error(payload)
         return payload["media_id"]
 
     def create_draft(self, payload: dict) -> str:
         body = {"articles": [{"title": payload["title"], "thumb_media_id": payload["thumb_media_id"], "content": payload["content"]}]}
-        response = self.session.post(
-            "https://api.weixin.qq.com/cgi-bin/draft/add",
-            params={"access_token": self.access_token()},
-            data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
-            headers={"Content-Type": "application/json; charset=utf-8"},
-            timeout=self.timeout,
-        )
-        result = self._json(response)
-        self._raise_error(result)
+        access_token = self.access_token()
+        with observe_external_request("wechat_official", "create_draft") as observation:
+            response = self.session.post(
+                "https://api.weixin.qq.com/cgi-bin/draft/add",
+                params={"access_token": access_token},
+                data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+                headers={"Content-Type": "application/json; charset=utf-8"},
+                timeout=self.timeout,
+            )
+            observation.set_http_status(getattr(response, "status_code", None))
+            result = self._json(response)
+            self._raise_error(result)
         return result["media_id"]
 
     def mass_send_all(self, media_id: str, client_msg_id: str) -> dict[str, str]:
@@ -68,30 +81,36 @@ class WeChatHttpClient:
             "send_ignore_reprint": 0,
             "clientmsgid": client_msg_id,
         }
-        response = self.session.post(
-            "https://api.weixin.qq.com/cgi-bin/message/mass/sendall",
-            params={"access_token": self.access_token()},
-            data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
-            headers={"Content-Type": "application/json; charset=utf-8"},
-            timeout=self.timeout,
-        )
-        result = self._json(response)
-        self._raise_error(result)
+        access_token = self.access_token()
+        with observe_external_request("wechat_official", "mass_send") as observation:
+            response = self.session.post(
+                "https://api.weixin.qq.com/cgi-bin/message/mass/sendall",
+                params={"access_token": access_token},
+                data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+                headers={"Content-Type": "application/json; charset=utf-8"},
+                timeout=self.timeout,
+            )
+            observation.set_http_status(getattr(response, "status_code", None))
+            result = self._json(response)
+            self._raise_error(result)
         return {
             "msg_id": str(result["msg_id"]),
             "msg_data_id": str(result.get("msg_data_id", "")),
         }
 
     def get_mass_send_status(self, msg_id: str) -> str:
-        response = self.session.post(
-            "https://api.weixin.qq.com/cgi-bin/message/mass/get",
-            params={"access_token": self.access_token()},
-            data=json.dumps({"msg_id": msg_id}).encode("utf-8"),
-            headers={"Content-Type": "application/json; charset=utf-8"},
-            timeout=self.timeout,
-        )
-        result = self._json(response)
-        self._raise_error(result)
+        access_token = self.access_token()
+        with observe_external_request("wechat_official", "mass_send_status") as observation:
+            response = self.session.post(
+                "https://api.weixin.qq.com/cgi-bin/message/mass/get",
+                params={"access_token": access_token},
+                data=json.dumps({"msg_id": msg_id}).encode("utf-8"),
+                headers={"Content-Type": "application/json; charset=utf-8"},
+                timeout=self.timeout,
+            )
+            observation.set_http_status(getattr(response, "status_code", None))
+            result = self._json(response)
+            self._raise_error(result)
         return str(result["msg_status"])
 
     def _post_file(self, url: str, image_path: str, **extra) -> Any:

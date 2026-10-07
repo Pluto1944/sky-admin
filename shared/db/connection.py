@@ -404,6 +404,45 @@ CREATE TABLE IF NOT EXISTS sync_jobs (
 );
 """
 
+_SYNC_JOB_RUNS_DDL = """
+CREATE TABLE IF NOT EXISTS sync_job_runs (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id                 TEXT NOT NULL,
+    started_at             TEXT NOT NULL,
+    finished_at            TEXT,
+    status                 TEXT NOT NULL DEFAULT 'running',
+    duration_ms            INTEGER,
+    reason                 TEXT,
+    external_request_count INTEGER NOT NULL DEFAULT 0,
+    external_failure_count INTEGER NOT NULL DEFAULT 0,
+    rate_limited_count     INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_job_runs_job_started
+ON sync_job_runs(job_id, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS external_request_events (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id       INTEGER NOT NULL,
+    job_id       TEXT NOT NULL,
+    provider     TEXT NOT NULL,
+    operation    TEXT NOT NULL,
+    resource_key TEXT,
+    outcome      TEXT NOT NULL,
+    http_status  INTEGER,
+    duration_ms  INTEGER NOT NULL,
+    error_type   TEXT,
+    started_at   TEXT NOT NULL,
+    FOREIGN KEY(run_id) REFERENCES sync_job_runs(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_external_requests_provider_started
+ON external_request_events(provider, started_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_external_requests_job_started
+ON external_request_events(job_id, started_at DESC);
+"""
+
 # 常驻组件运行身份。与 sync_jobs 的业务任务状态分离，避免混淆进程版本和任务结果。
 _SERVICE_RUNTIME_DDL = """
 CREATE TABLE IF NOT EXISTS service_runtime (
@@ -436,6 +475,7 @@ _CHILDREN_DDL = (
     + _CWL_ROSTER_SNAPSHOTS_DDL
     + _CWL_ASSEMBLY_CACHE_DDL
     + _SYNC_JOBS_DDL
+    + _SYNC_JOB_RUNS_DDL
     + _SERVICE_RUNTIME_DDL
 )
 

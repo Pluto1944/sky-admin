@@ -26,6 +26,8 @@
 | 竞赛贡献 | `clan_games_member_snapshots` | `(period, player_tag)` | 月末成就快照和差值 |
 | 部落资料 | `clan_profile_cache` | `clan_tag` | 自有部落官方资料缓存 |
 | 调度状态 | `sync_jobs` | `job_id` | 周期任务的状态、时间和失败信息 |
+| 调度运行历史 | `sync_job_runs` | `id` | 每轮任务状态、耗时、原因及外部请求计数；默认保留 30 天 |
+| 外部请求明细 | `external_request_events` | `id` | 按任务记录外部来源、操作、结果、HTTP 状态和耗时；不保存凭证或响应正文 |
 | 服务运行身份 | `service_runtime` | `component` | 常驻组件启动时冻结的版本、Git 提交、工作区状态与心跳 |
 
 `capital_raid_status_cache` 与都城成员贡献事实分离：它每个自有部落只保留一行最近周末状态，服务概览卡片的开启提醒，不保存成员明细。同步失败只更新错误与尝试时间，已有同周状态不会被空结果覆盖。
@@ -34,6 +36,11 @@
 `component=scheduler` 上报启动身份并更新心跳；API 的运行身份直接保存在各 Uvicorn worker
 内存中，由 `/api/system/version` 与调度器记录聚合。发布版本或 Git 提交变化只有在组件重启后
 才会更新，这正是用于识别“磁盘代码已更新、进程仍运行旧代码”的依据。
+
+`sync_jobs` 只保存每个任务的最新状态和累计次数；`sync_job_runs` 保存逐轮历史，
+`external_request_events` 通过 `run_id` 关联到具体任务轮次。删除过期的运行历史时，请求明细通过
+外键级联删除。默认保留 30 天，可通过 `OBSERVABILITY_RETENTION_DAYS` 调整。观测表是可丢弃的
+运行数据，不是业务事实；观测写入或清理失败不得改变同步任务结果。
 
 ## 普通部落战
 

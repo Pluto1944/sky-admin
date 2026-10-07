@@ -8,6 +8,8 @@ from urllib.parse import urlparse
 
 import requests
 
+from shared.observability import observe_external_request
+
 
 @dataclass(frozen=True)
 class ImageBlob:
@@ -50,9 +52,13 @@ class RetryingImageDownloader:
         last_error: BaseException | None = None
         for attempt in range(1, self.attempts + 1):
             try:
-                response = self.session.get(url, timeout=self.timeout)
-                response.raise_for_status()
-                return ImageBlob(response.content, response.headers.get("Content-Type", ""))
+                with observe_external_request(
+                    "layout_image", "download", resource_key=host,
+                ) as observation:
+                    response = self.session.get(url, timeout=self.timeout)
+                    observation.set_http_status(getattr(response, "status_code", None))
+                    response.raise_for_status()
+                    return ImageBlob(response.content, response.headers.get("Content-Type", ""))
             except requests.RequestException as exc:
                 last_error = exc
                 if attempt == self.attempts or not self._is_retryable(exc):

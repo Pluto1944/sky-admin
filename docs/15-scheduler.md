@@ -65,3 +65,25 @@ curl -fsS http://127.0.0.1:8000/api/system/version
 生产不得手工启动第二个 scheduler 或带 `--reload` 的 uvicorn。代码或配置变更后以 systemd 重启，
 并检查服务状态、`sync_jobs` 和真实 API 输出。外部 API 失败是可观测的任务失败，不得以空数据覆盖
 已成功缓存。
+
+## 可观测性
+
+每次 `run_one` 都会在 `sync_job_runs` 保存一条逐轮记录，并把该轮内已接入观测的外部请求批量写入
+`external_request_events`。当前覆盖 COC 官方 API、ClashKing、腾讯文档 MCP/OpenAPI，以及阵型任务的
+SocialData、X、微信公众号和图片下载请求。记录内容仅包括来源、操作、资源键、结果分类、HTTP 状态、
+耗时和异常类型，不保存 Token、请求头或响应正文。
+
+外部请求观测采用进程内收集、任务结束后批量落库。创建、完成或清理观测记录失败时只输出警告，
+不能改变业务任务的成功或失败状态。历史默认保留 30 天，由 `OBSERVABILITY_RETENTION_DAYS` 调整；
+调度器每天清理一次过期运行记录及其请求明细。
+
+只读诊断命令：
+
+```bash
+source scripts/load_env.sh
+venv/bin/python scripts/observability_report.py --hours 24
+venv/bin/python scripts/observability_report.py --hours 168 --json
+```
+
+报告包含任务运行次数、失败数、外部请求量、429、成功率、平均/P95/最大耗时，以及当前战争、部落
+资料、成员资料和当月 CWL 的数据新鲜度。该命令以 SQLite `mode=ro` 打开数据库，不执行迁移或写入。

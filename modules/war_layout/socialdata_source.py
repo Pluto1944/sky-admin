@@ -6,6 +6,8 @@ from urllib.parse import quote, urlencode
 
 import requests
 
+from shared.observability import observe_external_request
+
 from .models import PostPayload
 from .socialdata_guard import SocialDataBudgetGuard
 from .source_x import XPage
@@ -70,9 +72,11 @@ class SocialDataSource:
     def _get(self, path: str) -> dict:
         self.guard.check_and_record()
         try:
-            response = self.session.get(f"{self.BASE_URL}{path}", headers=self.headers, timeout=self.timeout)
-            response.raise_for_status()
-            payload = response.json()
+            with observe_external_request("socialdata", "search") as observation:
+                response = self.session.get(f"{self.BASE_URL}{path}", headers=self.headers, timeout=self.timeout)
+                observation.set_http_status(getattr(response, "status_code", None))
+                response.raise_for_status()
+                payload = response.json()
         except (requests.RequestException, ValueError) as exc:
             raise SocialDataError(f"SocialData request failed: {type(exc).__name__}") from exc
         if not isinstance(payload, dict):

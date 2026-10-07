@@ -2,6 +2,8 @@ from typing import Any
 
 import requests
 
+from shared.observability import observe_external_request
+
 from .models import PostPayload
 from .source_x import XPage
 
@@ -54,8 +56,11 @@ class XHttpTransport:
 
     def _get(self, url: str, **kwargs) -> dict:
         try:
-            response = self.session.get(url, headers=self.headers, timeout=self.timeout, **kwargs)
-            response.raise_for_status()
-            return response.json()
+            operation = "resolve_user" if "/by/username/" in url else "timeline"
+            with observe_external_request("x_api", operation) as observation:
+                response = self.session.get(url, headers=self.headers, timeout=self.timeout, **kwargs)
+                observation.set_http_status(getattr(response, "status_code", None))
+                response.raise_for_status()
+                return response.json()
         except (requests.RequestException, ValueError) as exc:
             raise XApiError(f"X API request failed: {type(exc).__name__}") from exc

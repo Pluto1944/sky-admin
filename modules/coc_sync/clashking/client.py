@@ -16,6 +16,9 @@ import subprocess
 import sys
 from collections import defaultdict
 from datetime import datetime
+from urllib.parse import unquote, urlparse
+
+from shared.observability import observe_external_request
 
 API_BASE = "https://api.clashk.ing"
 
@@ -24,17 +27,42 @@ API_BASE = "https://api.clashk.ing"
 # HTTP 层
 # ═══════════════════════════════════════════════════════════════════════
 
+def _metric_identity(url: str) -> tuple[str, str | None]:
+    parts = [unquote(part) for part in urlparse(url).path.split("/") if part]
+    if "previous" in parts:
+        index = parts.index("previous")
+        return "war_log", parts[index - 1] if index else None
+    if "seasons" in parts:
+        index = parts.index("seasons")
+        return "cwl_seasons", parts[index - 1] if index else None
+    if "cwl" in parts:
+        index = parts.index("cwl")
+        resource = ":".join(parts[index + 1:index + 3]) or None
+        return "cwl_group_archive", resource
+    return "get", None
+
+
 def _curl_get(url: str, timeout: int = 30) -> dict | list | None:
     """用 curl 发送 GET 请求，绕过 Cloudflare 防护。"""
+    operation, resource_key = _metric_identity(url)
     try:
-        result = subprocess.run(
-            ["curl", "-s", "-H", "Accept: application/json", url],
-            capture_output=True, text=True, timeout=timeout,
-        )
-        body = result.stdout.strip()
-        if not body or body == "null":
-            return None
-        return json.loads(body)
+        with observe_external_request(
+            "clashking", operation, resource_key=resource_key,
+        ) as observation:
+            result = subprocess.run(
+                ["curl", "-s", "-H", "Accept: application/json", url],
+                capture_output=True, text=True, timeout=timeout,
+            )
+            if result.returncode != 0:
+                observation.mark_failed(
+                    "process_error", error_type=f"curl_exit_{result.returncode}",
+                )
+                return None
+            body = result.stdout.strip()
+            if not body or body == "null":
+                observation.mark_failed("empty_response", error_type="empty_response")
+                return None
+            return json.loads(body)
     except Exception as e:
         print(f"  [ClashKing HTTP] {e}", file=sys.stderr)
         return None
