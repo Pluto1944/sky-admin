@@ -3,7 +3,7 @@
     <view class="clan-members-toolbar">
       <view class="clan-members-overview">
         <view class="clan-members-overview-main">
-          <text class="clan-members-count">{{ sortedMembers.length }}</text>
+          <text class="clan-members-count">{{ totalCount }}</text>
           <text class="clan-members-count-label">位成员</text>
           <text v-if="updatedAt" class="clan-members-update">更新 {{ updatedAt }}</text>
         </view>
@@ -22,7 +22,7 @@
         </view>
       </view>
     </view>
-    <view v-if="!loading && sortedMembers.length > pageSize" class="clan-members-pagination">
+    <view v-if="!loading && totalCount > pageSize" class="clan-members-pagination">
       <text class="clan-members-page-action" :class="{ disabled: currentPage <= 1 }" @tap="previousPage">‹ 上一页</text>
       <text class="clan-members-page-label">第 {{ currentPage }}/{{ totalPages }} 页 · 每页 {{ pageSize }} 人</text>
       <text class="clan-members-page-action" :class="{ disabled: currentPage >= totalPages }" @tap="nextPage">下一页 ›</text>
@@ -34,7 +34,7 @@
         <view class="clan-members-tr clan-members-head">
           <view class="clan-members-td cm-name" @tap="onSort('account_name')">昵称{{ sortMark('account_name') }}</view><view class="clan-members-td cm-tag">玩家标签</view><view class="clan-members-td cm-clan" @tap="onSort('clan_tag')">部落{{ sortMark('clan_tag') }}</view><view class="clan-members-td cm-role">职位</view><view class="clan-members-td cm-th" @tap="onSort('town_hall_level')">本{{ sortMark('town_hall_level') }}</view><view class="clan-members-td cm-league">联赛</view><view class="clan-members-td cm-trophy" @tap="onSort('trophies')">奖杯{{ sortMark('trophies') }}</view><view class="clan-members-td cm-attacks" @tap="onSort('season_attack_wins')">赛季进攻{{ sortMark('season_attack_wins') }}</view><view class="clan-members-td cm-donation" @tap="onSort('donations')">赛季捐兵{{ sortMark('donations') }}</view><view class="clan-members-td cm-donation" @tap="onSort('donations_received')">赛季收兵{{ sortMark('donations_received') }}</view><view class="clan-members-td cm-war" @tap="onSort('war_recent_15')">部落战近15场{{ sortMark('war_recent_15') }}</view><view class="clan-members-td cm-cwl" @tap="onSort('cwl_recent_3m')">联赛近3月{{ sortMark('cwl_recent_3m') }}</view><view class="clan-members-td cm-cwl-risk" @tap="onSort('cwl_one_star_rate')">一星率近3月{{ sortMark('cwl_one_star_rate') }}</view><view class="clan-members-td cm-cwl-risk" @tap="onSort('cwl_missed_attack_rate')">漏刀近3月{{ sortMark('cwl_missed_attack_rate') }}</view><view class="clan-members-td cm-capital" @tap="onSort('capital_recent_4w')">都城近4周{{ sortMark('capital_recent_4w') }}</view><view class="clan-members-td cm-games" @tap="onSort('clan_games')">竞赛贡献{{ sortMark('clan_games') }}</view><view class="clan-members-td cm-activity" @tap="onSort('last_activity_at')">最近活动{{ sortMark('last_activity_at') }}</view>
         </view>
-        <view v-if="!sortedMembers.length" class="clan-members-no-result">没有符合条件的成员</view>
+        <view v-if="!members.length" class="clan-members-no-result">没有符合条件的成员</view>
         <view v-for="(item, idx) in pageMembers" :key="item.player_tag" class="clan-members-tr" :class="{ 'clan-members-even': idx % 2 === 1 }">
           <view class="clan-members-td cm-name clan-members-name-text"><text>{{ item.account_name || '-' }}</text><text v-if="item.membership_status === 'left'" class="clan-members-left-badge">已离开</text></view><view class="clan-members-td cm-tag">{{ item.player_tag || '-' }}</view><view class="clan-members-td cm-clan">{{ item.clan_name || item.clan_tag || '-' }}</view><view class="clan-members-td cm-role">{{ formatRole(item.clan_role) }}</view><view class="clan-members-td cm-th">{{ item.town_hall_level || '-' }}</view><view class="clan-members-td cm-league">{{ item.league_name || '-' }}</view><view class="clan-members-td cm-trophy">{{ numberText(item.trophies) }}</view><view class="clan-members-td cm-attacks">{{ numberText(item.season_attack_wins) }}</view><view class="clan-members-td cm-donation">{{ numberText(item.donations) }}</view><view class="clan-members-td cm-donation">{{ numberText(item.donations_received) }}</view><view class="clan-members-td cm-war clan-members-two-lines"><text>{{ warLine1(item.war_recent_15) }}</text><text class="clan-members-subline">{{ warLine2(item.war_recent_15) }}</text></view><view class="clan-members-td cm-cwl clan-members-two-lines"><text>{{ cwlLine1(item.cwl_recent_3m) }}</text><text class="clan-members-subline">{{ cwlLine2(item.cwl_recent_3m) }}</text></view><view class="clan-members-td cm-cwl-risk clan-members-two-lines"><text>{{ cwlOneStarLine1(item.cwl_recent_3m) }}</text><text class="clan-members-subline">{{ cwlOneStarLine2(item.cwl_recent_3m) }}</text></view><view class="clan-members-td cm-cwl-risk clan-members-two-lines"><text>{{ cwlMissedLine1(item.cwl_recent_3m) }}</text><text class="clan-members-subline">{{ cwlMissedLine2(item.cwl_recent_3m) }}</text></view><view class="clan-members-td cm-capital clan-members-two-lines"><text>{{ capitalLine1(item.capital_recent_4w) }}</text><text class="clan-members-subline">{{ capitalLine2(item.capital_recent_4w) }}</text></view><view class="clan-members-td cm-games clan-members-two-lines"><text>{{ gamesLine1(item.clan_games) }}</text><text class="clan-members-subline">{{ gamesLine2(item.clan_games) }}</text></view><view class="clan-members-td cm-activity clan-members-two-lines"><text>{{ activityTime(item) }}</text><text class="clan-members-subline">{{ activityReason(item) }}</text></view>
         </view>
@@ -70,7 +70,7 @@
 <script>
 import { getMembers } from '@/utils/api.js'
 
-let membersCache = null
+const membersCache = Object.create(null)
 const MEMBER_PAGE_SIZE = 100
 
 export default {
@@ -78,11 +78,11 @@ export default {
   props: { initialClanTag: { type: String, default: '' } },
   data() {
     return {
-      members: [], allowedClans: [], loading: true, updatedAt: '',
+      members: [], allowedClans: [], loading: true, updatedAt: '', totalCount: 0,
       sortKey: 'town_hall_level', sortOrder: 'desc', searchText: '',
       memberFilter: 'member', clanFilters: [], filterPanelVisible: false,
       draftMemberFilter: 'member', draftClanFilters: [],
-      pageSize: MEMBER_PAGE_SIZE, currentPage: 1, tableScrollTop: 0
+      pageSize: MEMBER_PAGE_SIZE, currentPage: 1, tableScrollTop: 0, requestSerial: 0
     }
   },
   computed: {
@@ -106,70 +106,62 @@ export default {
       if (this.searchText) labels.push(`“${this.searchText}”`)
       return labels.length ? labels.join(' · ') : '全部成员'
     },
-    sortedMembers() {
-      const keyword = this.searchText.trim().toLowerCase()
-      const result = this.members.filter((item) => {
-        if (this.memberFilter !== 'all' && (item.membership_status || item.status) !== this.memberFilter) return false
-        if (this.clanFilters.length && !this.clanFilters.includes(item.clan_tag)) return false
-        if (!keyword) return true
-        return [item.account_name, item.player_name, item.player_tag, item.clan_tag, item.league_name].filter(Boolean).some(value => String(value).toLowerCase().includes(keyword))
-      })
-      const key = this.sortKey
-      result.sort((x, y) => {
-        const xv = this.sortValue(x, key); const yv = this.sortValue(y, key)
-        if (xv == null && yv == null) return 0
-        if (xv == null) return 1
-        if (yv == null) return -1
-        const comparison = typeof xv === 'number' && typeof yv === 'number' ? xv - yv : String(xv).localeCompare(String(yv), 'zh-CN')
-        return this.sortOrder === 'desc' ? -comparison : comparison
-      })
-      return result
-    },
-    totalPages() { return Math.max(1, Math.ceil(this.sortedMembers.length / this.pageSize)) },
-    pageMembers() {
-      const page = Math.min(this.currentPage, this.totalPages)
-      const start = (page - 1) * this.pageSize
-      return this.sortedMembers.slice(start, start + this.pageSize)
-    }
+    totalPages() { return Math.max(1, Math.ceil(this.totalCount / this.pageSize)) },
+    pageMembers() { return this.members }
   },
   watch: {
-    initialClanTag() { this.applyInitialClan() },
-    totalPages(value) {
-      if (this.currentPage > value) this.goToPage(value)
-    }
+    initialClanTag() { this.applyInitialClan(true) }
   },
   created() {
-    if (membersCache) {
-      this.applyResponse(membersCache)
-      this.loading = false
-    } else {
-      this.fetchMembers()
-    }
+    this.applyInitialClan(false)
+    this.fetchMembers()
   },
   methods: {
     applyResponse(res) {
       this.members = res.members || []
       this.allowedClans = res.clans || []
+      this.totalCount = Number(res.count) || 0
       this.updatedAt = res.updated_at ? this.formatTime(res.updated_at) : ''
-      this.currentPage = 1
-      this.applyInitialClan()
+      this.currentPage = Number(res.page) || this.currentPage
     },
-    applyInitialClan() {
+    applyInitialClan(fetchAfterChange) {
       if (this.initialClanTag) {
         this.clanFilters = [this.initialClanTag]
         this.memberFilter = 'member'
+      } else {
+        this.clanFilters = []
       }
-      this.resetPage()
+      this.currentPage = 1
+      this.resetTableScroll()
+      if (fetchAfterChange) this.fetchMembers()
+    },
+    requestOptions() {
+      return {
+        page: this.currentPage, pageSize: this.pageSize,
+        memberStatus: this.memberFilter, clanTags: this.clanFilters.slice(),
+        search: this.searchText.trim(), sortKey: this.sortKey, sortOrder: this.sortOrder
+      }
     },
     async fetchMembers() {
+      const options = this.requestOptions()
+      const cacheKey = JSON.stringify(options)
+      const serial = ++this.requestSerial
+      if (membersCache[cacheKey]) {
+        this.applyResponse(membersCache[cacheKey])
+        this.loading = false
+        return
+      }
+      this.loading = true
       try {
-        const res = await getMembers()
-        membersCache = res
+        const res = await getMembers(options)
+        if (serial !== this.requestSerial) return
+        membersCache[cacheKey] = res
         this.applyResponse(res)
       } catch (e) {
+        if (serial !== this.requestSerial) return
         uni.showToast({ title: '加载成员失败', icon: 'none' })
       } finally {
-        this.loading = false
+        if (serial === this.requestSerial) this.loading = false
       }
     },
     formatRole(value) { return ({ leader: '首领', coLeader: '副首领', admin: '长老', member: '成员' }[value] || value || '-') },
@@ -215,16 +207,6 @@ export default {
     capitalLine2(stats) { return stats && stats.weeks ? `出刀 ${stats.attacks}/${stats.available_attacks} · 均${this.compactNumber(stats.loot_per_attack)}` : '' },
     gamesLine1(stats) { return stats ? `${stats.period || '-'} ${stats.complete ? this.numberText(stats.points) : '记录不完整'}` : '-' },
     gamesLine2(stats) { return stats && stats.average_3 != null ? `近${stats.period_count}期均 ${Math.round(stats.average_3)}` : '' },
-    sortValue(item, key) {
-      if (key === 'war_recent_15') return item.war_recent_15 && item.war_recent_15.three_star_rate
-      if (key === 'cwl_recent_3m') return item.cwl_recent_3m && item.cwl_recent_3m.three_star_rate
-      if (key === 'cwl_one_star_rate') return item.cwl_recent_3m && item.cwl_recent_3m.one_star_rate
-      if (key === 'cwl_missed_attack_rate') return item.cwl_recent_3m && item.cwl_recent_3m.missed_attack_rate
-      if (key === 'capital_recent_4w') return item.capital_recent_4w && item.capital_recent_4w.looted
-      if (key === 'clan_games') return item.clan_games && item.clan_games.points
-      if (key === 'last_activity_at') return item.last_activity_at ? new Date(String(item.last_activity_at).replace('+00:00', 'Z')).getTime() : null
-      return item[key]
-    },
     resetTableScroll() {
       this.tableScrollTop = 1
       this.$nextTick(() => { this.tableScrollTop = 0 })
@@ -232,12 +214,14 @@ export default {
     resetPage() {
       this.currentPage = 1
       this.resetTableScroll()
+      this.fetchMembers()
     },
     goToPage(page) {
       const target = Math.min(this.totalPages, Math.max(1, Number(page) || 1))
       if (target === this.currentPage) return
       this.currentPage = target
       this.resetTableScroll()
+      this.fetchMembers()
     },
     previousPage() { this.goToPage(this.currentPage - 1) },
     nextPage() { this.goToPage(this.currentPage + 1) },

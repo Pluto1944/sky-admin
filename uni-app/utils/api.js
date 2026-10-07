@@ -100,11 +100,21 @@ export function bindAccount(accountName, playerTag) {
 }
 
 /**
- * 获取成员列表
- * @returns {Promise} { count, members, clans: [{ tag, name }] }
+ * 分页获取成员列表
+ * @param {object} options - page/pageSize/memberStatus/clanTags/search/sortKey/sortOrder
+ * @returns {Promise} { count, page, page_size, total_pages, members, clans }
  */
-export function getMembers() {
-  return request('/api/members')
+export function getMembers(options = {}) {
+  const query = [
+    `page=${encodeURIComponent(options.page || 1)}`,
+    `page_size=${encodeURIComponent(options.pageSize || 100)}`,
+    `membership_status=${encodeURIComponent(options.memberStatus || 'member')}`,
+    `sort_key=${encodeURIComponent(options.sortKey || 'town_hall_level')}`,
+    `sort_order=${encodeURIComponent(options.sortOrder || 'desc')}`
+  ]
+  if (options.clanTags && options.clanTags.length) query.push(`clan_tags=${encodeURIComponent(options.clanTags.join(','))}`)
+  if (options.search) query.push(`search=${encodeURIComponent(options.search)}`)
+  return request(`/api/members?${query.join('&')}`)
 }
 
 /** 获取全部自有部落的概览卡片。 */

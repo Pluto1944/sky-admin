@@ -60,14 +60,32 @@ def system_version(request: Request, db: Database = Depends(get_db)):
 def list_members(
     repo: PlayerRepository = Depends(get_repo),
     db: Database = Depends(get_db),
+    page: int = 1,
+    page_size: int = 100,
+    membership_status: str = "member",
+    clan_tags: str = "",
+    search: str = "",
+    sort_key: str = "town_hall_level",
+    sort_order: str = "desc",
 ):
-    """获取所有 COC 成员列表。
+    """分页获取 COC 成员列表。
 
-    从 accounts 表读取，返回每个成员的：
+    从 accounts 表及本地统计投影读取，先完成完整结果集的筛选、排序，再返回当前页：
     - player_tag, account_name, exp_level, trophies, league_name
     - town_hall_level, clan_tag, clan_role, status
     - membership_status, last_synced_at, updated_at
     """
+    if page < 1:
+        raise HTTPException(status_code=422, detail="page 必须大于等于 1")
+    if page_size < 1 or page_size > 100:
+        raise HTTPException(status_code=422, detail="page_size 必须在 1 到 100 之间")
+    if membership_status not in {"all", "member", "left"}:
+        raise HTTPException(status_code=422, detail="membership_status 仅支持 all/member/left")
+    if sort_key not in _MEMBER_SORT_KEYS:
+        raise HTTPException(status_code=422, detail="不支持的成员排序字段")
+    if sort_order not in {"asc", "desc"}:
+        raise HTTPException(status_code=422, detail="sort_order 仅支持 asc/desc")
+
     try:
         from modules.player.member_stats import member_summary_map
 
@@ -97,10 +115,42 @@ def list_members(
             member["clan_category"] = clan.get("category") if clan else None
             member.update(summaries.get(member["player_tag"], {}))
             members.append(member)
+
+        selected_clans = {
+            normalize_tag(value)
+            for value in clan_tags.split(",")
+            if normalize_tag(value)
+        }
+        keyword = search.strip().casefold()
+        filtered = []
+        for member in members:
+            current_status = member.get("membership_status") or member.get("status")
+            if membership_status != "all" and current_status != membership_status:
+                continue
+            if selected_clans and normalize_tag(member.get("clan_tag")) not in selected_clans:
+                continue
+            if keyword:
+                searchable = (
+                    member.get("account_name"), member.get("player_name"),
+                    member.get("player_tag"), member.get("clan_tag"),
+                    member.get("clan_name"), member.get("league_name"),
+                )
+                if not any(keyword in str(value).casefold() for value in searchable if value):
+                    continue
+            filtered.append(member)
+
+        filtered = _sort_member_items(filtered, sort_key, sort_order)
+        count = len(filtered)
+        total_pages = max(1, (count + page_size - 1) // page_size)
+        offset = (page - 1) * page_size
+        page_members = filtered[offset:offset + page_size]
         updated_values = [member.get("last_synced_at") for member in members if member.get("last_synced_at")]
         return {
-            "count": len(members),
-            "members": members,
+            "count": count,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+            "members": page_members,
             "updated_at": max(updated_values) if updated_values else None,
             "clans": [
                 {
@@ -141,6 +191,48 @@ def _safe_number(value) -> int:
         return int(value or 0)
     except (TypeError, ValueError):
         return 0
+
+
+_MEMBER_SORT_KEYS = {
+    "account_name", "clan_tag", "town_hall_level", "trophies",
+    "season_attack_wins", "donations", "donations_received",
+    "war_recent_15", "cwl_recent_3m", "cwl_one_star_rate",
+    "cwl_missed_attack_rate", "capital_recent_4w", "clan_games",
+    "last_activity_at",
+}
+
+
+def _member_sort_value(member: dict, key: str):
+    if key == "war_recent_15":
+        return (member.get("war_recent_15") or {}).get("three_star_rate")
+    if key == "cwl_recent_3m":
+        return (member.get("cwl_recent_3m") or {}).get("three_star_rate")
+    if key == "cwl_one_star_rate":
+        return (member.get("cwl_recent_3m") or {}).get("one_star_rate")
+    if key == "cwl_missed_attack_rate":
+        return (member.get("cwl_recent_3m") or {}).get("missed_attack_rate")
+    if key == "capital_recent_4w":
+        return (member.get("capital_recent_4w") or {}).get("looted")
+    if key == "clan_games":
+        return (member.get("clan_games") or {}).get("points")
+    return member.get(key)
+
+
+def _sort_member_items(members: list[dict], key: str, order: str) -> list[dict]:
+    """稳定排序成员；无样本值无论升降序都放在结果末尾。"""
+    present = []
+    missing = []
+    for member in members:
+        value = _member_sort_value(member, key)
+        (missing if value is None else present).append((member, value))
+
+    present.sort(key=lambda item: str(item[0].get("player_tag") or "").casefold())
+    present.sort(
+        key=lambda item: item[1].casefold() if isinstance(item[1], str) else item[1],
+        reverse=order == "desc",
+    )
+    missing.sort(key=lambda item: str(item[0].get("player_tag") or "").casefold())
+    return [member for member, _ in present + missing]
 
 
 def _clan_operating_status(db: Database) -> tuple[dict[str, dict], dict[str, dict]]:

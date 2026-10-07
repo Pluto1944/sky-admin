@@ -150,6 +150,51 @@ def test_member_api_derives_public_fields_and_hides_raw(db, monkeypatch):
     assert response["clans"][0]["category_label"] == "战营"
 
 
+def test_member_api_paginates_filters_searches_and_sorts(db, monkeypatch):
+    _seed_accounts(db)
+    db.conn.execute(
+        "UPDATE accounts SET town_hall_level = 16 WHERE player_tag = '#P1'"
+    )
+    db.conn.execute(
+        "UPDATE accounts SET town_hall_level = 18 WHERE player_tag = '#P2'"
+    )
+    db.conn.execute(
+        """INSERT INTO accounts
+           (player_tag, account_name, clan_tag, membership_status, town_hall_level)
+           VALUES ('#LEFT', '离开者', '#OWN1', 'left', 18)"""
+    )
+    db.conn.commit()
+    monkeypatch.setattr(routes, "CLANS", [
+        {"tag": "#OWN1", "name": "自有一营", "category": "combat", "enabled": True},
+    ])
+
+    first = routes.list_members(
+        PlayerRepository(db.conn), db, page=1, page_size=1,
+        membership_status="member", sort_key="town_hall_level", sort_order="desc",
+    )
+    assert first["count"] == 2
+    assert first["page"] == 1
+    assert first["page_size"] == 1
+    assert first["total_pages"] == 2
+    assert [item["player_tag"] for item in first["members"]] == ["#P2"]
+
+    searched = routes.list_members(
+        PlayerRepository(db.conn), db, membership_status="all", search="离开",
+    )
+    assert searched["count"] == 1
+    assert searched["members"][0]["player_tag"] == "#LEFT"
+
+
+def test_member_sort_keeps_missing_samples_at_end():
+    members = [
+        {"player_tag": "#NONE", "cwl_recent_3m": None},
+        {"player_tag": "#HIGH", "cwl_recent_3m": {"one_star_rate": 30.0}},
+        {"player_tag": "#LOW", "cwl_recent_3m": {"one_star_rate": 10.0}},
+    ]
+    result = routes._sort_member_items(members, "cwl_one_star_rate", "desc")
+    assert [item["player_tag"] for item in result] == ["#HIGH", "#LOW", "#NONE"]
+
+
 def test_capital_and_games_summary(db):
     _seed_accounts(db)
     db.conn.execute(
