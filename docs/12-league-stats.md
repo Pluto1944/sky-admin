@@ -53,6 +53,11 @@ cwl_live_group_cache + cwl_live_war_cache + league_teams
 `league_results` 行。每支队伍只聚合包含该队的对局；完整分组中其他队之间的比赛只用于完整性验证。
 进行中的月度成绩不会进入 `league_results`，从而不会污染下月编排和历史窗口。
 
+联赛首页的历史月份选择只根据 `league_teams` 与持久化的
+`cwl_live_group_cache.raw_status=complete` 判断可用性。`raw_status` 已由上述完整性流程在写入时
+校验，因此页面请求不得再次反序列化所有历史 `data_json`；用户真正选择某个历史月份或详情后，
+才解析该月份所需的固定原始档案。
+
 进攻统计为我方成员攻击的星数、攻击次数、一星刀数和三星数；防守统计为对手攻击指向我方成员的总数和三星数。
 每名玩家每次实际进入一场阵容计一次 `appearances`，该场没有进攻记录则计一次
 `missed_attacks`；实际发起进攻且最终星数等于 1 时计一次 `offense_1stars`。三项均从最终逐场档案

@@ -619,57 +619,35 @@ def _pending_cwl_summary(team: dict, cache: dict | None = None) -> dict:
 
 
 def _cwl_live_available_periods(db: Database) -> list[dict]:
-    """返回当前月份，以及逐场详情完整的历史月份。"""
-    current = _current_cwl_live_period()
-    periods = [
-        row["period"] for row in db.conn.execute(
-            """SELECT DISTINCT period FROM league_teams
-               WHERE category IN ('combat', 'shell')
-               ORDER BY period DESC"""
-        ).fetchall()
-    ]
-    if current not in periods:
-        periods.insert(0, current)
+    """返回当前月份，以及原始档案已完成校验的历史月份。
 
-    result = []
-    for period in periods:
-        teams = _cwl_live_teams(db, period)
+    ``raw_status`` 由调度器/补档流程在逐场战争全部封存后写入。列表接口只读这项
+    持久化完整性结论，不能为了生成月份选择器重复解析全部历史战争 JSON。
+    """
+    current = _current_cwl_live_period()
+    rows = db.conn.execute(
+        """SELECT lt.period,
+                  COUNT(*) AS team_count,
+                  SUM(CASE WHEN cache.raw_status = 'complete' THEN 1 ELSE 0 END)
+                    AS complete_count
+           FROM league_teams AS lt
+           LEFT JOIN cwl_live_group_cache AS cache
+             ON cache.period = lt.period AND cache.clan_tag = lt.clan_tag
+           WHERE lt.category IN ('combat', 'shell')
+           GROUP BY lt.period
+           ORDER BY lt.period DESC"""
+    ).fetchall()
+
+    result = [
+        {"period": current, "label": f"{current[:4]}年{int(current[5:])}月", "current": True}
+    ]
+    for row in rows:
+        period = row["period"]
         if period == current:
-            result.append({"period": period, "label": f"{period[:4]}年{int(period[5:])}月", "current": True})
             continue
-        if not teams:
+        if int(row["team_count"] or 0) != int(row["complete_count"] or 0):
             continue
-        group_rows = db.conn.execute(
-            "SELECT clan_tag, data_json FROM cwl_live_group_cache WHERE period = ?",
-            (period,),
-        ).fetchall()
-        groups = {
-            normalize_tag(row["clan_tag"]): _load_json(row["data_json"])
-            for row in group_rows
-        }
-        war_rows = db.conn.execute(
-            "SELECT war_tag, data_json FROM cwl_live_war_cache WHERE season = ?",
-            (period,),
-        ).fetchall()
-        wars = {
-            normalize_tag(row["war_tag"]): _load_json(row["data_json"])
-            for row in war_rows
-        }
-        complete = True
-        for team in teams:
-            group = groups.get(team.get("clan_tag"))
-            if not group or group.get("season") != period:
-                complete = False
-                break
-            war_tags = group_war_tags(group)
-            if not war_tags or any(
-                tag not in wars or not wars[tag] or wars[tag].get("status") != "war_ended"
-                for tag in war_tags
-            ):
-                complete = False
-                break
-        if complete:
-            result.append({"period": period, "label": f"{period[:4]}年{int(period[5:])}月", "current": False})
+        result.append({"period": period, "label": f"{period[:4]}年{int(period[5:])}月", "current": False})
     return result
 
 

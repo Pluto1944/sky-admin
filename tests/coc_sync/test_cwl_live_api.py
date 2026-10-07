@@ -127,26 +127,31 @@ def test_cwl_available_periods_include_current_and_only_complete_history(db, mon
         {"period": "2026-10", "label": "2026年10月", "current": True},
     ]
 
-    group = json.loads(db.conn.execute(
-        "SELECT data_json FROM cwl_live_group_cache WHERE period='2026-09'"
-    ).fetchone()[0])
-    group["state"] = "ended"
     db.conn.execute(
-        "UPDATE cwl_live_group_cache SET state='ended', status='ended', data_json=? WHERE period='2026-09'",
-        (json.dumps(group),),
+        """UPDATE cwl_live_group_cache
+           SET state='ended', status='ended', raw_status='complete',
+               raw_complete_at='2026-09-10T00:00:00+00:00'
+           WHERE period='2026-09'"""
     )
-    for war_tag in ("#W1", "#W2"):
-        row = db.conn.execute(
-            "SELECT data_json FROM cwl_live_war_cache WHERE war_tag=?", (war_tag,)
-        ).fetchone()
-        war = json.loads(row[0])
-        war["state"] = "warEnded"
-        war["status"] = "war_ended"
-        db.conn.execute(
-            "UPDATE cwl_live_war_cache SET state='warEnded', status='war_ended', data_json=? WHERE war_tag=?",
-            (json.dumps(war), war_tag),
-        )
     db.conn.commit()
 
     complete = routes.cwl_live("2026-09", db)
     assert [item["period"] for item in complete["available_periods"]] == ["2026-10", "2026-09"]
+
+
+def test_cwl_available_periods_does_not_parse_historical_payloads(db, monkeypatch):
+    monkeypatch.setattr(routes, "_current_cwl_live_period", lambda: "2026-10")
+    _seed(db)
+    db.conn.execute(
+        "UPDATE cwl_live_group_cache SET raw_status='complete' WHERE period='2026-09'"
+    )
+    db.conn.commit()
+    monkeypatch.setattr(
+        routes,
+        "_load_json",
+        lambda _value: (_ for _ in ()).throw(AssertionError("不应解析历史 JSON")),
+    )
+
+    periods = routes._cwl_live_available_periods(db)
+
+    assert [item["period"] for item in periods] == ["2026-10", "2026-09"]
