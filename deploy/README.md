@@ -310,6 +310,17 @@ curl https://api.skycoc.cc/api/ping
 curl -I http://api.skycoc.cc/api/ping
 ```
 
+生产 HTTPS server 对大于 1KB 的 JSON / 文本响应启用 gzip。上线或恢复 Nginx 配置后，用成员接口
+确认协商生效；响应应包含 `Content-Encoding: gzip`，同时保留 `Vary: Accept-Encoding`：
+
+```bash
+curl --noproxy '*' --compressed -sS -D - -o /dev/null \
+  https://api.skycoc.cc/api/members
+```
+
+不带 `Accept-Encoding: gzip` 的客户端仍收到原始响应；gzip 只改变传输编码，不改变 JSON 内容或
+FastAPI 接口契约。修改配置后必须先执行 `sudo nginx -t`，通过后再 reload。
+
 **sky-scheduler（周期调度器）：**
 
 ```bash
