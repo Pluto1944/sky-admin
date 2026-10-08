@@ -89,7 +89,7 @@ const CACHE_REFRESH_INTERVAL_MS = 60 * 1000
 export default {
   components: { TopBar },
   data() {
-    return { clanTag: '', warKey: '', war: null, loading: true, loadError: '', nowMs: Date.now(), clockTimer: null, refreshTimer: null }
+    return { clanTag: '', warKey: '', war: null, renderedUpdatedAt: null, loading: true, loadError: '', nowMs: Date.now(), clockTimer: null, refreshTimer: null }
   },
   computed: {
     isHistory() { return !!this.warKey },
@@ -120,7 +120,19 @@ export default {
       if (!this.clanTag) { this.loadError = '缺少部落标签'; this.loading = false; return }
       if (!this.war) this.loading = true
       this.loadError = ''
-      try { this.war = this.isHistory ? await getWarHistoryDetail(this.clanTag, this.warKey) : await getCurrentWar(this.clanTag) }
+      try {
+        const nextWar = this.isHistory ? await getWarHistoryDetail(this.clanTag, this.warKey) : await getCurrentWar(this.clanTag)
+        const nextUpdatedAt = nextWar.updated_at || nextWar.synced_at || null
+        if (this.war && this.renderedUpdatedAt === nextUpdatedAt) {
+          const syncKeys = ['sync_error', 'sync_attempted_at', 'sync_failure_count', 'is_stale']
+          syncKeys.forEach(key => {
+            if (this.war[key] !== nextWar[key]) this.$set(this.war, key, nextWar[key])
+          })
+          return
+        }
+        this.war = nextWar
+        this.renderedUpdatedAt = nextUpdatedAt
+      }
       catch (e) { this.loadError = e.message || '战争详情加载失败' }
       finally { this.loading = false }
     },

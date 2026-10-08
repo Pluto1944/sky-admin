@@ -239,12 +239,13 @@ GET /api/clan/cwl-live?period=YYYY-MM
 ### 2.6 单个 CWL 部落详情
 
 ```
-GET /api/clan/cwl-live/{clan_tag}?period=YYYY-MM&round=4
+GET /api/clan/cwl-live/{clan_tag}?period=YYYY-MM&round=4&view=war-day
+GET /api/clan/cwl-live/{clan_tag}?period=YYYY-MM&view=overview
 ```
 
-无需认证，但 `clan_tag` 必须属于对应月份的 `league_teams`，否则返回 `404`。详情包含第 1～7 场战斗日、双方对位宽表、大本概览、小组对局、成员进攻和成员防守统计。
+无需认证，但 `clan_tag` 必须属于对应月份的 `league_teams`，否则返回 `404`。`view=war-day` 只返回第 1～7 场战斗日及双方对位宽表，不生成、也不返回四张总览表；`view=overview` 只返回大本概览、小组对局、成员进攻和成员防守统计，不返回逐场阵容。两种响应都包含部落头部摘要、同月可切换队伍和 `payload_view`。`view` 不传时暂时返回完整响应，仅用于兼容已发布的旧版小程序；新版前端必须显式传参，未知值返回 `422`。
 
-两个接口只读取 `cwl_live_group_cache` 和 `cwl_live_war_cache`，不会在 HTTP 请求中访问 COC。实时同步与页面结构见 [19-cwl-live-dashboard.md](19-cwl-live-dashboard.md)。
+汇总和详情接口只读取 `cwl_live_group_cache`、`cwl_live_war_cache` 及当月 `league_teams`，不会在 HTTP 请求中访问 COC。实时同步与页面结构见 [19-cwl-live-dashboard.md](19-cwl-live-dashboard.md)。
 
 ### 2.7 CWL 集结检查
 

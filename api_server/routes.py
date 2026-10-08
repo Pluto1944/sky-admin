@@ -756,7 +756,9 @@ def _build_cwl_live_summary(db: Database, period: str) -> dict:
         if not group or group.get("season") != period:
             item = _pending_cwl_summary(team, cache)
         else:
-            dashboard = build_cwl_dashboard(group, _cwl_live_wars(db, group))
+            dashboard = build_cwl_dashboard(
+                group, _cwl_live_wars(db, group), view="summary"
+            )
             item = {**dashboard["summary"], "error": (cache or {}).get("error")}
             item["leader_name"] = team.get("leader_name") or ""
             item["manager_names"] = team.get("manager_names") or ""
@@ -944,8 +946,11 @@ def cwl_live_detail(
     period: Optional[str] = None,
     round: Optional[int] = None,
     db: Database = Depends(get_db),
+    view: Optional[str] = None,
 ):
-    """返回当月单个自有联赛部落的战斗日和联赛总览。"""
+    """按需返回单个自有联赛部落的战斗日或联赛总览。"""
+    if view not in {None, "war-day", "overview"}:
+        raise HTTPException(status_code=422, detail="view 仅支持 war-day/overview")
     selected_period = period or _current_cwl_live_period()
     if not _valid_period(selected_period):
         raise HTTPException(status_code=400, detail="period 必须为 YYYY-MM")
@@ -958,7 +963,9 @@ def cwl_live_detail(
     cache = _cwl_live_group_row(db, selected_period, normalized)
     group = _load_json((cache or {}).get("data_json"))
     if group and group.get("season") == selected_period:
-        result = build_cwl_dashboard(group, _cwl_live_wars(db, group))
+        result = build_cwl_dashboard(
+            group, _cwl_live_wars(db, group), view=view or "full"
+        )
         result["error"] = (cache or {}).get("error")
     else:
         summary = _pending_cwl_summary(team, cache)
@@ -978,18 +985,19 @@ def cwl_live_detail(
             "status": summary["status"],
             "current_round": None,
             "summary": summary,
-            "rounds": [],
-            "overview": {
+            "updated_at": summary.get("synced_at"),
+            "error": summary.get("error"),
+        }
+        if view in {None, "war-day"}:
+            result["rounds"] = []
+        if view in {None, "overview"}:
+            result["overview"] = {
                 "town_halls": {"levels": [], "rows": []},
                 "standings": {"round_count": 0, "rows": []},
                 "offense": {"round_count": 0, "rows": []},
                 "defense": {"round_count": 0, "rows": []},
-            },
-            "updated_at": summary.get("synced_at"),
-            "error": summary.get("error"),
-        }
+            }
 
-    summary_response = _build_cwl_live_summary(db, selected_period)
     result["available_teams"] = [
         {
             "team_index": item.get("team_index"),
@@ -998,10 +1006,11 @@ def cwl_live_detail(
             "clan_tag": item.get("clan_tag"),
             "display_name": item.get("team_name") or item.get("team_alias") or item.get("clan_tag"),
         }
-        for item in summary_response["clans"]
+        for item in teams
         if item.get("clan_tag")
     ]
-    if round is not None:
+    result["payload_view"] = view or "full"
+    if round is not None and "rounds" in result:
         result["requested_round"] = max(1, min(round, len(result["rounds"]) or 1))
     return result
 

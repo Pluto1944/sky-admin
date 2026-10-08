@@ -197,11 +197,12 @@ export function getCwlAssemblyDetail(clanTag) {
   return request(`/api/clan/cwl-assembly/${encodeURIComponent(clanTag)}`)
 }
 
-/** 获取单个联赛部落的战斗日与联赛总览。 */
-export function getCwlLiveDetail(clanTag, period, round) {
+/** 按需获取单个联赛部落的战斗日或联赛总览。 */
+export function getCwlLiveDetail(clanTag, period, round, view) {
   const query = []
   if (period) query.push(`period=${encodeURIComponent(period)}`)
   if (round) query.push(`round=${encodeURIComponent(round)}`)
+  if (view) query.push(`view=${encodeURIComponent(view)}`)
   return request(`/api/clan/cwl-live/${encodeURIComponent(clanTag)}${query.length ? '?' + query.join('&') : ''}`)
 }
 

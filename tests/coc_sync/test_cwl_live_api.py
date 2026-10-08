@@ -68,6 +68,31 @@ def test_cwl_live_summary_and_detail_read_cache(db):
     assert detail["available_teams"][0]["clan_tag"] == "#AAA"
 
 
+def test_cwl_live_detail_returns_requested_view_only(db):
+    _seed(db)
+
+    war_day = routes.cwl_live_detail(
+        "#aaa", "2026-09", 2, db, view="war-day"
+    )
+    overview = routes.cwl_live_detail(
+        "#aaa", "2026-09", None, db, view="overview"
+    )
+
+    assert war_day["payload_view"] == "war-day"
+    assert war_day["rounds"]
+    assert "overview" not in war_day
+    assert war_day["requested_round"] == 2
+    assert overview["payload_view"] == "overview"
+    assert overview["overview"]["offense"]["rows"]
+    assert "rounds" not in overview
+
+
+def test_cwl_live_detail_rejects_unknown_view(db):
+    with pytest.raises(HTTPException) as exc:
+        routes.cwl_live_detail("#AAA", "2026-09", None, db, view="everything")
+    assert exc.value.status_code == 422
+
+
 def test_cwl_check_in_aggregates_active_teams_and_pending_attacks(db, monkeypatch):
     _seed(db)
     monkeypatch.setattr(routes, "_current_cwl_live_period", lambda: "2026-09")

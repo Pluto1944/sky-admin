@@ -77,6 +77,25 @@ def test_dashboard_builds_rounds_standings_town_halls_and_member_stats():
     assert defense["successful_defenses"] == 2
 
 
+def test_dashboard_builds_only_requested_view():
+    group = normalize_cwl_group(league_group(), team(), "2026-09-03T00:00:00+00:00")
+    wars = {
+        "#W1": normalize_cwl_war(league_war_one(), "#W1", "2026-09-03T00:00:00+00:00"),
+        "#W2": normalize_cwl_war(league_war_two(), "#W2", "2026-09-05T00:00:00+00:00"),
+    }
+
+    war_day = build_cwl_dashboard(group, wars, view="war-day")
+    overview = build_cwl_dashboard(group, wars, view="overview")
+    summary = build_cwl_dashboard(group, wars, view="summary")
+
+    assert war_day["rounds"]
+    assert "overview" not in war_day
+    assert overview["overview"]["offense"]["rows"]
+    assert "rounds" not in overview
+    assert "rounds" not in summary
+    assert "overview" not in summary
+
+
 def test_member_states_distinguish_not_attacked_and_unattacked():
     dashboard = _dashboard()
     offense = next(row for row in dashboard["overview"]["offense"]["rows"] if row["player_tag"] == "#A2")

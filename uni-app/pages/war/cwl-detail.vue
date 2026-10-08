@@ -28,11 +28,13 @@
       </view>
 
       <view class="inner-tab-bar">
-        <view class="inner-tab" :class="{ active: activeView === 'war-day' }" @tap="activeView = 'war-day'">战斗日</view>
-        <view class="inner-tab" :class="{ active: activeView === 'overview' }" @tap="activeView = 'overview'">联赛总览</view>
+        <view class="inner-tab" :class="{ active: activeView === 'war-day' }" @tap="switchView('war-day')">战斗日</view>
+        <view class="inner-tab" :class="{ active: activeView === 'overview' }" @tap="switchView('overview')">联赛总览</view>
       </view>
 
       <view v-if="activeView === 'war-day'" class="war-day-pane">
+        <view v-if="viewLoading['war-day']" class="subview-loading">加载战斗日数据...</view>
+        <template v-else>
         <scroll-view v-if="rounds.length" scroll-x class="round-scroll">
           <view class="round-tabs">
             <view v-for="item in rounds" :key="item.round" class="round-tab" :class="[{ active: selectedRoundNumber === item.round }, 'round-' + item.status]" @tap="selectedRoundNumber = item.round">
@@ -73,9 +75,12 @@
             </view>
           </scroll-view>
         </view>
+        </template>
       </view>
 
       <view v-else class="overview-pane">
+        <view v-if="viewLoading.overview" class="subview-loading">加载联赛总览...</view>
+        <template v-else>
         <view class="overview-section">
           <view class="section-title" @tap="toggleSection('townHalls')"><text>大本概览</text><text>{{ openSections.townHalls ? '收起' : '展开' }}</text></view>
           <scroll-view v-if="openSections.townHalls" scroll-x class="wide-table-scroll">
@@ -115,6 +120,7 @@
             </view>
           </scroll-view>
         </view>
+        </template>
       </view>
       <view class="bottom-space"></view>
     </view>
@@ -169,7 +175,8 @@ export default {
     return {
       clanTag: '', period: '', detail: null, loading: true, loadError: '',
       activeView: 'war-day', selectedRoundNumber: null, requestedRound: null,
-      refreshTimer: null, standingMatch: null,
+      refreshTimer: null, standingMatch: null, loadedViews: {},
+      viewLoading: { 'war-day': false, overview: false }, viewVersions: {}, requestGeneration: 0,
       openSections: { townHalls: false, standings: true, offense: true, defense: false }
     }
   },
@@ -179,12 +186,13 @@ export default {
     rounds() { return this.detail && this.detail.rounds ? this.detail.rounds : [] },
     selectedRound() { return this.rounds.find(item => item.round === this.selectedRoundNumber) || this.rounds[0] || null },
     availableTeams() { return this.detail && this.detail.available_teams ? this.detail.available_teams : [] },
-    townHallLevels() { return this.detail ? this.detail.overview.town_halls.levels || [] : [] },
-    townHallRows() { return this.detail ? this.detail.overview.town_halls.rows || [] : [] },
-    standingsRows() { return this.detail ? this.detail.overview.standings.rows || [] : [] },
-    offenseRows() { return this.detail ? this.detail.overview.offense.rows || [] : [] },
-    defenseRows() { return this.detail ? this.detail.overview.defense.rows || [] : [] },
-    overviewRoundCount() { return this.detail ? this.detail.overview.standings.round_count || 0 : 0 },
+    overviewData() { return this.detail && this.detail.overview ? this.detail.overview : null },
+    townHallLevels() { return this.overviewData ? this.overviewData.town_halls.levels || [] : [] },
+    townHallRows() { return this.overviewData ? this.overviewData.town_halls.rows || [] : [] },
+    standingsRows() { return this.overviewData ? this.overviewData.standings.rows || [] : [] },
+    offenseRows() { return this.overviewData ? this.overviewData.offense.rows || [] : [] },
+    defenseRows() { return this.overviewData ? this.overviewData.defense.rows || [] : [] },
+    overviewRoundCount() { return this.overviewData ? this.overviewData.standings.round_count || 0 : 0 },
     overviewRoundNumbers() { return Array.from({ length: this.overviewRoundCount }, (value, index) => index + 1) },
     townHallTableWidth() { return 540 + this.townHallLevels.length * 72 },
     standingsTableWidth() { return 410 + this.overviewRoundCount * 170 },
@@ -197,19 +205,19 @@ export default {
     this.activeView = options && options.view === 'overview' ? 'overview' : 'war-day'
     this.requestedRound = Number((options && options.round) || 0) || null
     rememberLeagueList()
-    this.fetchDetail()
+    this.fetchDetail(this.activeView)
   },
   onShow() {
     rememberLeagueList()
     this.stopTimer()
     if (this.isCurrentPeriod) {
-      if (this.detail) this.fetchDetail()
-      this.refreshTimer = setInterval(() => { this.fetchDetail() }, CACHE_REFRESH_INTERVAL_MS)
+      if (this.detail) this.fetchDetail(this.activeView)
+      this.refreshTimer = setInterval(() => { this.fetchDetail(this.activeView) }, CACHE_REFRESH_INTERVAL_MS)
     }
   },
   onHide() { this.stopTimer() },
   onUnload() { this.stopTimer() },
-  async onPullDownRefresh() { await this.fetchDetail(); uni.stopPullDownRefresh() },
+  async onPullDownRefresh() { await this.fetchDetail(this.activeView); uni.stopPullDownRefresh() },
   onShareAppMessage() {
     const round = this.selectedRoundNumber ? `&round=${this.selectedRoundNumber}` : ''
     return { title: `苍穹联赛助手｜${this.detail ? (this.detail.team.team_name || this.detail.team.team_alias) : '联赛'}`, path: `/pages/war/cwl-detail?clan_tag=${encodeURIComponent(this.clanTag)}&period=${encodeURIComponent(this.period)}&view=${this.activeView}${round}` }
@@ -218,19 +226,45 @@ export default {
     return { title: `苍穹联赛助手｜${this.detail ? (this.detail.team.team_name || this.detail.team.team_alias) : '联赛'}`, query: `clan_tag=${encodeURIComponent(this.clanTag)}&period=${encodeURIComponent(this.period)}&view=${this.activeView}&round=${this.selectedRoundNumber || ''}` }
   },
   methods: {
-    async fetchDetail() {
+    async fetchDetail(targetView) {
+      const requestedView = typeof targetView === 'string' ? targetView : this.activeView
       if (!this.clanTag) { this.loadError = '缺少部落标签'; this.loading = false; return }
       if (!this.detail) this.loading = true
+      if (!this.loadedViews[requestedView]) this.$set(this.viewLoading, requestedView, true)
       this.loadError = ''
+      const generation = this.requestGeneration
       try {
-        const res = await getCwlLiveDetail(this.clanTag, this.period, this.selectedRoundNumber || this.requestedRound)
-        this.detail = Object.assign({}, res)
+        const res = await getCwlLiveDetail(this.clanTag, this.period, this.selectedRoundNumber || this.requestedRound, requestedView)
+        if (generation !== this.requestGeneration) return
+        const responseVersion = res.updated_at || null
+        if (this.loadedViews[requestedView] && this.viewVersions[requestedView] === responseVersion) {
+          if (this.detail.error !== res.error) this.$set(this.detail, 'error', res.error)
+          return
+        }
+        const previous = this.detail || {}
+        const merged = Object.assign({}, previous, res)
+        if (!Object.prototype.hasOwnProperty.call(res, 'rounds') && previous.rounds) merged.rounds = previous.rounds
+        if (!Object.prototype.hasOwnProperty.call(res, 'overview') && previous.overview) merged.overview = previous.overview
+        this.detail = merged
+        this.$set(this.loadedViews, res.payload_view || requestedView, true)
+        this.$set(this.viewVersions, res.payload_view || requestedView, responseVersion)
         this.period = res.period || this.period
         const firstRound = (res.rounds || [])[0]
-        if (!this.selectedRoundNumber) this.selectedRoundNumber = this.requestedRound || res.requested_round || res.current_round || (firstRound && firstRound.round)
+        if (res.rounds && !this.selectedRoundNumber) this.selectedRoundNumber = this.requestedRound || res.requested_round || res.current_round || (firstRound && firstRound.round)
         this.$nextTick(() => { this.$forceUpdate() })
       } catch (e) { this.loadError = e.message || '联赛详情加载失败' }
-      finally { this.loading = false }
+      finally {
+        if (generation === this.requestGeneration) {
+          this.$set(this.viewLoading, requestedView, false)
+          this.loading = false
+        }
+      }
+    },
+    switchView(view) {
+      if (view === this.activeView) return
+      this.activeView = view
+      this.standingMatch = null
+      if (!this.loadedViews[view]) this.fetchDetail(view)
     },
     stopTimer() { if (this.refreshTimer) clearInterval(this.refreshTimer); this.refreshTimer = null },
     switchTeam(event) {
@@ -238,8 +272,13 @@ export default {
       if (!selected || selected.clan_tag === this.clanTag) return
       this.clanTag = selected.clan_tag
       this.selectedRoundNumber = null
+      this.requestedRound = null
+      this.requestGeneration += 1
+      this.loadedViews = {}
+      this.viewLoading = { 'war-day': false, overview: false }
+      this.viewVersions = {}
       this.detail = null
-      this.fetchDetail()
+      this.fetchDetail(this.activeView)
     },
     toggleSection(key) { this.$set(this.openSections, key, !this.openSections[key]) },
     roundStatusLabel(status) { return ({ in_war: '战斗日', preparation: '准备日', war_ended: '已结束', not_started: '未开始', unavailable: '待同步', bye: '轮空' })[status] || status },
@@ -313,6 +352,7 @@ export default {
 .detail-page { min-height: 100vh; background: #0f0f23; color: #d8dce8; }.detail-content { padding-bottom: 40rpx; }.state-box { min-height: 70vh; padding: 40rpx; display: flex; flex-direction: column; align-items: center; justify-content: center; box-sizing: border-box; }.state-text { color: #8890a0; font-size: 28rpx; }.error-text { margin-bottom: 18rpx; color: #e17055; font-size: 26rpx; text-align: center; }.retry-btn { color: #5fa8ff; font-size: 25rpx; }
 .team-card { margin: 20rpx 24rpx 0; padding: 20rpx; border: 1rpx solid #2a2a4a; border-radius: 14rpx; background: #18182d; }.team-title-row { display: flex; align-items: center; }.team-picker, .team-name { max-width: 300rpx; overflow: hidden; color: #fff; font-size: 29rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.team-tag { margin-left: 10rpx; color: #66708a; font-size: 20rpx; }.share-btn { margin: 0 0 0 auto; padding: 7rpx 16rpx; border: 0; border-radius: 6rpx; color: #aab4c8; background: #252540; font-size: 22rpx; line-height: 1.5; }.share-btn::after { border: 0; }.team-meta { margin-top: 16rpx; display: flex; flex-wrap: wrap; color: #9aa0b0; font-size: 22rpx; }.team-meta text { margin: 0 18rpx 8rpx 0; }.cache-warning { display: block; margin-top: 8rpx; color: #fdcb6e; font-size: 21rpx; }.updated-at { display: block; margin-top: 8rpx; color: #596178; font-size: 20rpx; }
 .inner-tab-bar { height: 76rpx; margin-top: 18rpx; display: flex; border-top: 1rpx solid #252540; border-bottom: 1rpx solid #252540; background: #141428; }.inner-tab { flex: 1; display: flex; align-items: center; justify-content: center; color: #7d8498; font-size: 27rpx; }.inner-tab.active { color: #5fa8ff; border-bottom: 4rpx solid #4a90d9; font-weight: 600; }
+.subview-loading { padding: 120rpx 30rpx; color: #66708a; font-size: 25rpx; text-align: center; }
 .round-scroll { width: 100%; background: #15152a; }.round-tabs { width: 950rpx; padding: 14rpx 20rpx; display: flex; flex-direction: row; }.round-tab { width: 118rpx; min-height: 64rpx; margin-right: 12rpx; padding: 8rpx; display: flex; flex-direction: column; align-items: center; justify-content: center; box-sizing: border-box; border: 1rpx solid #30304d; border-radius: 8rpx; color: #aab4c8; font-size: 23rpx; background: #202038; }.round-tab.active { color: #fff; border-color: #4a90d9; background: #263b61; }.round-status { margin-top: 4rpx; color: #66708a; font-size: 18rpx; }.round-tab.active .round-status { color: #9fc9ff; }.round-in_war .round-status { color: #ff7675; }.round-war_ended .round-status { color: #74b9ff; }
 .empty-box { padding: 140rpx 30rpx; color: #66708a; font-size: 27rpx; text-align: center; }.match-card { margin: 20rpx 24rpx; padding: 20rpx; border: 1rpx solid #2a2a4a; border-radius: 14rpx; background: #18182d; }.match-heading { display: flex; align-items: center; color: #fff; font-size: 27rpx; font-weight: 600; }.result-label { margin-left: auto; font-size: 22rpx; }.result-win { color: #00b894; }.result-loss { color: #e17055; }.result-tied { color: #fdcb6e; }.match-row { margin-top: 20rpx; display: flex; align-items: center; }.match-side { flex: 1; display: flex; flex-direction: column; }.enemy-side { align-items: flex-end; }.match-name { max-width: 260rpx; overflow: hidden; color: #f0f0f5; font-size: 26rpx; text-overflow: ellipsis; white-space: nowrap; }.match-tag { margin-top: 4rpx; color: #66708a; font-size: 19rpx; }.versus { margin: 0 14rpx; color: #4a90d9; font-size: 22rpx; }.score-row { margin-top: 18rpx; display: flex; align-items: center; justify-content: space-between; color: #c9cfda; font-size: 21rpx; }.score-divider { color: #4a90d9; }.time-info { margin-top: 16rpx; padding-top: 12rpx; display: flex; justify-content: space-between; border-top: 1rpx solid #252540; color: #66708a; font-size: 20rpx; }
 .table-note { display: block; margin: 16rpx 24rpx 10rpx; color: #66708a; font-size: 21rpx; }.wide-table-scroll { width: 100%; }.battle-table { width: 1276rpx; border-top: 1rpx solid #343452; border-bottom: 1rpx solid #343452; background: #15152a; }.tr { min-height: 68rpx; display: flex; flex-direction: row; align-items: stretch; box-sizing: border-box; border-bottom: 1rpx solid #2a2a44; }.tr-head { min-height: 76rpx; color: #dfe5f0; background: #242440; font-weight: 600; }.even { background: #19192f; }.td { flex-shrink: 0; min-height: 68rpx; padding: 5rpx; display: flex; align-items: center; justify-content: center; box-sizing: border-box; border-right: 1rpx solid #30304a; color: #c9cfda; font-size: 20rpx; text-align: center; white-space: nowrap; overflow: hidden; }.tr-head .td { min-height: 76rpx; }.battle-seq { width: 56rpx; }.battle-name { width: 170rpx; }.battle-th { width: 54rpx; }.battle-attack { width: 120rpx; }.battle-pos { width: 58rpx; }.enemy-cell { background: rgba(74,45,45,.13); }.seq-cell { color: #74b9ff; font-weight: 600; }.name-cell { padding: 0 10rpx; justify-content: flex-start; text-overflow: ellipsis; }.th-cell { color: #74b9ff; font-weight: 600; }.attack-good { color: #00b894; }.attack-mid { color: #fdcb6e; }.attack-bad { color: #e17055; }.attack-empty { color: #596178; }

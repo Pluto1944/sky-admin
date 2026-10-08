@@ -637,13 +637,22 @@ def _member_stats(group: dict, wars_by_tag: dict[str, dict], clan_tag: str) -> t
     return offense_rows, defense_rows
 
 
-def build_cwl_dashboard(group: dict, wars_by_tag: dict[str, dict]) -> dict:
-    """为 group 中的自有部落生成完整详情和四类总览统计。"""
+def build_cwl_dashboard(
+    group: dict,
+    wars_by_tag: dict[str, dict],
+    view: str = "full",
+) -> dict:
+    """为 group 中的自有部落生成按需详情。
+
+    ``war-day`` 只生成逐场战争，``overview`` 只生成四类总览，``summary``
+    仅保留列表卡片需要的汇总；默认 ``full`` 保持内部调用的完整响应兼容性。
+    """
+    if view not in {"full", "summary", "war-day", "overview"}:
+        raise ValueError(f"unsupported CWL dashboard view: {view}")
     clan_tag = group.get("clan_tag")
     rounds = build_team_rounds(group, wars_by_tag, clan_tag)
     standings = _standings(group, wars_by_tag)
     own_standing = next((item for item in standings if item.get("clan_tag") == clan_tag), None)
-    offense, defense = _member_stats(group, wars_by_tag, clan_tag)
     current_round = _current_round(rounds)
     timestamps = [group.get("synced_at")]
     timestamps.extend(item.get("synced_at") for item in rounds)
@@ -684,7 +693,7 @@ def build_cwl_dashboard(group: dict, wars_by_tag: dict[str, dict]) -> dict:
         "average_destruction": own_standing.get("average_destruction", 0) if own_standing else 0,
         "synced_at": updated_at,
     }
-    return {
+    result = {
         "period": group.get("period"),
         "team": {
             "team_index": group.get("team_index"),
@@ -700,13 +709,17 @@ def build_cwl_dashboard(group: dict, wars_by_tag: dict[str, dict]) -> dict:
         "status": status,
         "current_round": current_round,
         "summary": summary,
-        "rounds": rounds,
-        "overview": {
+        "updated_at": updated_at,
+        "error": None,
+    }
+    if view in {"full", "war-day"}:
+        result["rounds"] = rounds
+    if view in {"full", "overview"}:
+        offense, defense = _member_stats(group, wars_by_tag, clan_tag)
+        result["overview"] = {
             "town_halls": _town_hall_overview(group),
             "standings": {"round_count": len(group.get("rounds") or []), "rows": standings},
             "offense": {"round_count": len(group.get("rounds") or []), "rows": offense},
             "defense": {"round_count": len(group.get("rounds") or []), "rows": defense},
-        },
-        "updated_at": updated_at,
-        "error": None,
-    }
+        }
+    return result
