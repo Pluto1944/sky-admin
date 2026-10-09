@@ -21,6 +21,12 @@
 | 互刷统计 | `farm_stats` | `clan_tag` | 互刷部落配置与去速本统计缓存 |
 | 互刷填坑号 | `farm_fill_accounts` | `account_number` | 一次性导入的长期保护身份；`player_tag` 可重复且无 accounts 外键 |
 | 账号外部身份 | `wechat_users` | `openid` | 微信登录和账号绑定 |
+| 联盟套餐 | `alliance_plans` | `plan_code` | `free / paid / internal` 的部落配额、同步等级和权益快照 |
+| 联盟主体 | `alliances` | `id` / `alliance_key` | 联盟稳定身份、名称、状态、套餐与创建者；名称不是业务键 |
+| 联盟成员 | `alliance_members` | `(alliance_id, user_id)` | 用户在某个联盟内的角色和成员状态，不从全局角色推断 |
+| 联盟部落 | `alliance_clans` | `(alliance_id, clan_tag)` | 联盟订阅部落、业务标签、显示顺序和认证摘要 |
+| 联盟访问 | `alliance_visits` | `(alliance_id, user_id)` | 最近访问及默认联盟；访问记录本身不授予成员权限 |
+| 联盟审计 | `alliance_audit_events` | `id` / `event_key` | 联盟迁移及后续管理动作的幂等审计记录 |
 | 都城贡献 | `capital_raid_member_results` | `(clan_tag, start_time, player_tag)` | 突袭周末成员事实 |
 | 都城状态 | `capital_raid_status_cache` | `clan_tag` | 最近一次突袭周末的开启、进行、结束或未开启状态 |
 | 竞赛贡献 | `clan_games_member_snapshots` | `(period, player_tag)` | 月末成就快照和差值 |
@@ -31,6 +37,27 @@
 | 服务运行身份 | `service_runtime` | `component` | 常驻组件启动时冻结的版本、Git 提交、工作区状态与心跳 |
 
 `capital_raid_status_cache` 与都城成员贡献事实分离：它每个自有部落只保留一行最近周末状态，服务概览卡片的开启提醒，不保存成员明细。同步失败只更新错误与尝试时间，已有同周状态不会被空结果覆盖。
+
+## 联盟租户底座（M1）
+
+M1 只建立联盟数据模型与苍穹映射，不改变现有 API、前端或调度器。迁移期
+`config/settings.yaml` 仍是苍穹部落范围的生产权威来源；`alliance_clans` 是可审计的新模型映射，M2
+以后才逐步接入读取和授权。
+
+- `alliances.alliance_key` 是不可变的程序身份；苍穹固定使用 `sky-internal`，展示名称可修改；
+- `alliance_members.role` 只允许 `member / admin / leader`，同一联盟最多一个有效首领；
+- `wechat_users.role` 暂留给旧 API 兼容，不是新联盟权限依据；M1 按已确认的兼容策略，将迁移时已经存在的苍穹微信用户默认映射为联盟管理员，但不修改该遗留字段；
+- 固定配置迁入的 12 个苍穹自有部落作为内部可信存量标记为已认证，确保 M2 接入权限后现有用户可见范围不突然收窄；该规则不适用于以后新增的免费或付费联盟部落；
+- 一个创建者最多创建一个有效免费联盟；免费、付费套餐的有效部落上限分别为 1、10，内部套餐为苍穹迁移保留更高上限；
+- 部落数量约束由 SQLite trigger 执行，新增部落、重新启用部落、切换套餐或降低套餐配额都不能绕过；
+- `alliance_visits` 只记录入口和默认选择，不能替代 `alliance_members`；
+- `alliance_audit_events.event_key` 用于让同一份迁移清单重复应用时不产生重复审计。
+
+迁移命令为 `scripts/migrate_alliance_m1.py`。默认只读预览；写入必须显式使用 `--apply --yes`，
+并在写入前创建 SQLite 一致性备份。迁移工具默认把执行迁移时已有的全部 `wechat_users` 映射为
+苍穹管理员；可用已复核的 `--members-file` 将指定用户覆盖为 `member / admin / leader`。该默认规则
+只执行于苍穹存量迁移，M1 以后新加入联盟的用户仍默认是普通成员。建议将预览输出的配置哈希通过
+`--expected-config-hash` 带入应用命令，防止评审后配置发生漂移。
 
 `service_runtime` 不属于业务任务队列，也不复用 `sync_jobs`。当前由常驻调度器以
 `component=scheduler` 上报启动身份并更新心跳；API 的运行身份直接保存在各 Uvicorn worker
@@ -74,6 +101,8 @@
 - `team_index` 是月内从 0 开始的稳定队伍身份；`team_alias` 不是唯一键。
 - `farm_fill_accounts` 以填坑账号编号保留全部登记；当前部落归属始终通过 `player_tag` 关联
   `accounts.clan_tag`，不能用导入快照覆盖 COC 权威归属。
+- 联盟名称不是业务键；角色必须按 `(alliance_id, user_id)` 查询。访问过联盟不等于加入联盟，
+  未认证部落中的管理角色也不能仅凭角色字段取得管理数据。
 - 不在 API 请求路径访问 COC、ClashKing 或腾讯文档；先由任务或显式回填落本地。
 - SQLite schema 或批量写入前必须创建并验证一致性备份；生产备份使用 `scripts/backup_to_cos.py`。
 

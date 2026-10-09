@@ -103,6 +103,20 @@ flowchart TD
 - player 处于底层被依赖，但不反向依赖任何业务模块（无循环依赖）
 - 报名与 accounts 解耦（B 方案）：`registrations` 自包含，`player_tag` 降为可空缓存
 
+### 多联盟迁移边界（M1）
+
+M1 新增 `modules/alliance` 和六张联盟核心表，把“用户、联盟、部落订阅”从当前固定苍穹配置中
+抽象出来。当前阶段只建立数据模型、苍穹配置映射和可审计迁移工具：
+
+- 公共 COC 事实继续以 `clan_tag`、`war_tag`、`player_tag` 为全局业务键，不为每个联盟复制；
+- 联盟角色保存在 `(alliance_id, user_id)` 关系中，不能使用 `wechat_users.role` 作为新权限依据；
+- `config/settings.yaml` 仍是生产页面和调度器的苍穹部落来源，新表尚未接管现有读取；
+- `scripts/migrate_alliance_m1.py` 默认只读预览，显式应用时先做一致性备份；
+- M2 才新增联盟上下文和后端权限，M3 才增加前端联盟切换。本阶段不暴露创建入口。
+
+详细约束见 [`02-database.md`](02-database.md) 和
+[`多用户/实施计划.md`](多用户/实施计划.md)。
+
 ---
 
 ## 四、领域模块详解

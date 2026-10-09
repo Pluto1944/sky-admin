@@ -131,6 +131,176 @@ CREATE TABLE IF NOT EXISTS wechat_users (
 );
 """
 
+_ALLIANCE_CORE_DDL = """
+CREATE TABLE IF NOT EXISTS alliance_plans (
+    plan_code          TEXT PRIMARY KEY,
+    display_name       TEXT NOT NULL,
+    max_clans          INTEGER NOT NULL CHECK(max_clans > 0),
+    sync_tier          TEXT NOT NULL CHECK(sync_tier IN ('low', 'high', 'internal')),
+    entitlements_json  TEXT NOT NULL DEFAULT '{}',
+    status             TEXT NOT NULL DEFAULT 'active'
+                       CHECK(status IN ('active', 'inactive')),
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS alliances (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    alliance_key       TEXT NOT NULL UNIQUE,
+    name               TEXT NOT NULL,
+    status             TEXT NOT NULL DEFAULT 'active'
+                       CHECK(status IN ('active', 'suspended', 'archived')),
+    plan_code          TEXT NOT NULL,
+    created_by_user_id INTEGER,
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL,
+    FOREIGN KEY(plan_code) REFERENCES alliance_plans(plan_code),
+    FOREIGN KEY(created_by_user_id) REFERENCES wechat_users(id) ON DELETE SET NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_alliances_one_active_free_per_creator
+ON alliances(created_by_user_id)
+WHERE plan_code = 'free' AND status = 'active' AND created_by_user_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS alliance_members (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    alliance_id INTEGER NOT NULL,
+    user_id     INTEGER NOT NULL,
+    role        TEXT NOT NULL CHECK(role IN ('member', 'admin', 'leader')),
+    status      TEXT NOT NULL DEFAULT 'active'
+                CHECK(status IN ('active', 'invited', 'left', 'removed', 'blocked')),
+    joined_at   TEXT,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    UNIQUE(alliance_id, user_id),
+    FOREIGN KEY(alliance_id) REFERENCES alliances(id) ON DELETE CASCADE,
+    FOREIGN KEY(user_id) REFERENCES wechat_users(id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_alliance_members_one_active_leader
+ON alliance_members(alliance_id)
+WHERE role = 'leader' AND status = 'active';
+
+CREATE INDEX IF NOT EXISTS idx_alliance_members_user_status
+ON alliance_members(user_id, status);
+
+CREATE TABLE IF NOT EXISTS alliance_clans (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    alliance_id         INTEGER NOT NULL,
+    clan_tag            TEXT NOT NULL,
+    clan_name           TEXT,
+    category            TEXT NOT NULL DEFAULT 'other'
+                        CHECK(category IN ('combat', 'normal', 'farm', 'flat', 'other')),
+    sort_order          INTEGER NOT NULL DEFAULT 0 CHECK(sort_order >= 0),
+    status              TEXT NOT NULL DEFAULT 'active'
+                        CHECK(status IN ('active', 'inactive', 'removed')),
+    verification_status TEXT NOT NULL DEFAULT 'unverified'
+                        CHECK(verification_status IN ('unverified', 'verified', 'disputed', 'revoked')),
+    verified_by_user_id INTEGER,
+    verified_at         TEXT,
+    source              TEXT NOT NULL DEFAULT 'manual'
+                        CHECK(source IN ('manual', 'config_migration')),
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL,
+    UNIQUE(alliance_id, clan_tag),
+    FOREIGN KEY(alliance_id) REFERENCES alliances(id) ON DELETE CASCADE,
+    FOREIGN KEY(verified_by_user_id) REFERENCES wechat_users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_alliance_clans_tag_status
+ON alliance_clans(clan_tag, status);
+
+CREATE TRIGGER IF NOT EXISTS trg_alliance_clans_active_limit_insert
+BEFORE INSERT ON alliance_clans
+WHEN NEW.status = 'active'
+BEGIN
+    SELECT CASE WHEN (
+        SELECT COUNT(*) FROM alliance_clans
+        WHERE alliance_id = NEW.alliance_id AND status = 'active'
+    ) >= (
+        SELECT p.max_clans
+        FROM alliances a
+        JOIN alliance_plans p ON p.plan_code = a.plan_code
+        WHERE a.id = NEW.alliance_id
+    ) THEN RAISE(ABORT, 'alliance active clan limit exceeded') END;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_alliance_clans_active_limit_update
+BEFORE UPDATE OF alliance_id, status ON alliance_clans
+WHEN NEW.status = 'active'
+ AND (OLD.status != 'active' OR OLD.alliance_id != NEW.alliance_id)
+BEGIN
+    SELECT CASE WHEN (
+        SELECT COUNT(*) FROM alliance_clans
+        WHERE alliance_id = NEW.alliance_id AND status = 'active' AND id != OLD.id
+    ) >= (
+        SELECT p.max_clans
+        FROM alliances a
+        JOIN alliance_plans p ON p.plan_code = a.plan_code
+        WHERE a.id = NEW.alliance_id
+    ) THEN RAISE(ABORT, 'alliance active clan limit exceeded') END;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_alliances_plan_clan_limit_update
+BEFORE UPDATE OF plan_code ON alliances
+WHEN OLD.plan_code != NEW.plan_code
+BEGIN
+    SELECT CASE WHEN (
+        SELECT COUNT(*) FROM alliance_clans
+        WHERE alliance_id = OLD.id AND status = 'active'
+    ) > (
+        SELECT max_clans FROM alliance_plans WHERE plan_code = NEW.plan_code
+    ) THEN RAISE(ABORT, 'alliance active clan limit exceeded by plan change') END;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_alliance_plans_max_clans_update
+BEFORE UPDATE OF max_clans ON alliance_plans
+WHEN NEW.max_clans < OLD.max_clans
+BEGIN
+    SELECT CASE WHEN EXISTS (
+        SELECT 1
+        FROM alliances a
+        WHERE a.plan_code = OLD.plan_code
+          AND (
+              SELECT COUNT(*) FROM alliance_clans c
+              WHERE c.alliance_id = a.id AND c.status = 'active'
+          ) > NEW.max_clans
+    ) THEN RAISE(ABORT, 'plan max_clans is below an active alliance clan count') END;
+END;
+
+CREATE TABLE IF NOT EXISTS alliance_visits (
+    alliance_id      INTEGER NOT NULL,
+    user_id          INTEGER NOT NULL,
+    is_default       INTEGER NOT NULL DEFAULT 0 CHECK(is_default IN (0, 1)),
+    first_visited_at TEXT NOT NULL,
+    last_visited_at  TEXT NOT NULL,
+    PRIMARY KEY(alliance_id, user_id),
+    FOREIGN KEY(alliance_id) REFERENCES alliances(id) ON DELETE CASCADE,
+    FOREIGN KEY(user_id) REFERENCES wechat_users(id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_alliance_visits_one_default_per_user
+ON alliance_visits(user_id)
+WHERE is_default = 1;
+
+CREATE TABLE IF NOT EXISTS alliance_audit_events (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_key     TEXT UNIQUE,
+    alliance_id   INTEGER NOT NULL,
+    actor_user_id INTEGER,
+    action        TEXT NOT NULL,
+    entity_type   TEXT NOT NULL,
+    entity_id     TEXT,
+    details_json  TEXT NOT NULL DEFAULT '{}',
+    created_at    TEXT NOT NULL,
+    FOREIGN KEY(alliance_id) REFERENCES alliances(id) ON DELETE CASCADE,
+    FOREIGN KEY(actor_user_id) REFERENCES wechat_users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_alliance_audit_alliance_created
+ON alliance_audit_events(alliance_id, created_at DESC);
+"""
+
 _FARM_STATS_DDL = """
 CREATE TABLE IF NOT EXISTS farm_stats (
     clan_tag     TEXT PRIMARY KEY,
@@ -461,6 +631,7 @@ _CHILDREN_DDL = (
     + _LEAGUE_TEAMS_DDL
     + _LEAGUE_RESULTS_DDL
     + _WECHAT_USERS_DDL
+    + _ALLIANCE_CORE_DDL
     + _FARM_STATS_DDL
     + _FARM_FILL_ACCOUNTS_DDL
     + _CURRENT_WAR_CACHE_DDL
@@ -790,6 +961,8 @@ class Database:
         """清空并重建所有业务表（历史数据清零）。"""
         self.conn.execute("PRAGMA foreign_keys = OFF")
         for table in (
+            "alliance_audit_events", "alliance_visits", "alliance_clans",
+            "alliance_members", "alliances", "alliance_plans",
             "cwl_assembly_cache", "cwl_roster_snapshots",
             "cwl_live_war_cache", "cwl_live_group_cache", "war_history_cache",
             "member_war_facts",

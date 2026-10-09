@@ -1,0 +1,1 @@
+"""Alliance tenant model tests."""
