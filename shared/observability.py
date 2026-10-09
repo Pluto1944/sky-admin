@@ -20,6 +20,7 @@ from urllib.error import HTTPError, URLError
 
 DEFAULT_RETENTION_DAYS = 30
 _MAX_TEXT_LENGTH = 500
+DEFAULT_INTERRUPTED_REASON = "调度器进程重启，上一轮未正常结束"
 
 
 def _utc_now_iso() -> str:
@@ -249,6 +250,43 @@ def finish_job_run(
                 job_id,
             ),
         )
+
+
+def interrupt_running_job_runs(
+    conn,
+    *,
+    interrupted_at: str,
+    reason: str = DEFAULT_INTERRUPTED_REASON,
+) -> int:
+    """Close runs abandoned by a previous scheduler process.
+
+    The production scheduler is a singleton.  Therefore any ``running`` row
+    that still exists when a new daemon process starts belongs to the previous
+    process and can no longer finish normally.  Keep its duration and request
+    counters unknown instead of fabricating a completed measurement.
+    """
+    rows = conn.execute(
+        "SELECT DISTINCT job_id FROM sync_job_runs WHERE status = 'running'"
+    ).fetchall()
+    job_ids = [row[0] for row in rows]
+    if not job_ids:
+        return 0
+
+    message = _limited(reason, 1000) or DEFAULT_INTERRUPTED_REASON
+    with conn:
+        cursor = conn.execute(
+            """UPDATE sync_job_runs
+               SET finished_at = ?, status = 'interrupted', reason = ?
+               WHERE status = 'running'""",
+            (interrupted_at, message),
+        )
+        conn.executemany(
+            """UPDATE sync_jobs
+               SET last_status = 'interrupted', last_error = ?
+               WHERE job_id = ? AND last_status = 'running'""",
+            [(message, job_id) for job_id in job_ids],
+        )
+    return max(0, int(cursor.rowcount))
 
 
 def prune_observability_history(

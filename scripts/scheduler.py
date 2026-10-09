@@ -58,6 +58,7 @@ from shared.db.connection import Database  # noqa: E402
 from shared.observability import (  # noqa: E402
     capture_external_requests,
     finish_job_run,
+    interrupt_running_job_runs,
     prune_observability_history,
     start_job_run,
 )
@@ -1846,6 +1847,14 @@ def loop() -> None:
     db = _open_db()
     _ensure_rows(db)
     runtime_identity = capture_runtime_identity("scheduler")
+    try:
+        interrupted = interrupt_running_job_runs(
+            db.conn, interrupted_at=runtime_identity.started_at,
+        )
+        if interrupted:
+            print(f"[{now_iso()}] 已收口上一进程遗留任务 {interrupted} 条")
+    except Exception as exc:  # noqa: BLE001 - 观测恢复失败不能阻断调度
+        print(f"[warn] 无法收口上一进程遗留任务: {exc}", file=sys.stderr)
     record_service_runtime(db.conn, runtime_identity)
     print(
         f"[{now_iso()}] 调度器启动，轮询间隔 {POLL_SECONDS}s，"

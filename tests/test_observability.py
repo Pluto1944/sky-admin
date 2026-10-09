@@ -7,6 +7,7 @@ from shared.db.connection import Database
 from shared.observability import (
     capture_external_requests,
     finish_job_run,
+    interrupt_running_job_runs,
     observe_external_request,
     prune_observability_history,
     start_job_run,
@@ -161,6 +162,40 @@ def test_observability_finish_failure_does_not_change_job_result(monkeypatch):
     db.close()
 
 
+def test_scheduler_restart_marks_abandoned_run_interrupted():
+    db = Database(":memory:")
+    db.init_schema()
+    db.conn.execute(
+        """INSERT INTO sync_jobs
+           (job_id, job_name, last_status, last_error)
+           VALUES ('cwl_live', 'CWL', 'running', '')"""
+    )
+    db.conn.commit()
+    run_id = start_job_run(db.conn, "cwl_live", "2026-10-08T04:54:21+00:00")
+
+    recovered = interrupt_running_job_runs(
+        db.conn, interrupted_at="2026-10-08T04:55:07+00:00",
+    )
+
+    assert recovered == 1
+    run = db.conn.execute(
+        "SELECT * FROM sync_job_runs WHERE id = ?", (run_id,)
+    ).fetchone()
+    assert run["status"] == "interrupted"
+    assert run["finished_at"] == "2026-10-08T04:55:07+00:00"
+    assert run["duration_ms"] is None
+    assert run["reason"] == "调度器进程重启，上一轮未正常结束"
+    job = db.conn.execute(
+        "SELECT last_status, last_error FROM sync_jobs WHERE job_id = 'cwl_live'"
+    ).fetchone()
+    assert job["last_status"] == "interrupted"
+    assert job["last_error"] == run["reason"]
+    assert interrupt_running_job_runs(
+        db.conn, interrupted_at="2026-10-08T05:00:00+00:00",
+    ) == 0
+    db.close()
+
+
 def test_prune_removes_old_runs_and_request_events():
     db = Database(":memory:")
     db.init_schema()
@@ -237,5 +272,42 @@ def test_report_summarizes_requests_jobs_and_freshness():
     assert report["requests"][0]["requests"] == 1
     assert report["requests"][0]["success_rate"] == 1.0
     assert report["jobs"][0]["external_requests"] == 1
+    assert report["jobs"][0]["interrupted_runs"] == 0
     assert report["freshness"]["current_wars"][0]["clan_tag"] == "#2QQ"
+    db.close()
+
+
+def test_report_distinguishes_interrupted_and_running_runs():
+    db = Database(":memory:")
+    db.init_schema()
+    db.conn.execute(
+        "INSERT INTO sync_jobs (job_id, job_name) VALUES ('cwl_live', 'CWL')"
+    )
+    db.conn.commit()
+    start_job_run(db.conn, "cwl_live", "2026-10-08T00:00:00+00:00")
+    interrupt_running_job_runs(
+        db.conn, interrupted_at="2026-10-08T00:01:00+00:00",
+    )
+    start_job_run(db.conn, "cwl_live", "2026-10-08T00:02:00+00:00")
+
+    report = build_report(
+        db.conn,
+        hours=24,
+        now=datetime(2026, 10, 8, 1, tzinfo=timezone.utc),
+    )
+
+    assert report["jobs"] == [{
+        "job_id": "cwl_live",
+        "runs": 2,
+        "failed_runs": 0,
+        "interrupted_runs": 1,
+        "running_runs": 1,
+        "external_requests": 0,
+        "external_failures": 0,
+        "rate_limited": 0,
+        "avg_duration_ms": None,
+        "p95_duration_ms": None,
+        "max_duration_ms": None,
+        "last_started_at": "2026-10-08T00:02:00+00:00",
+    }]
     db.close()

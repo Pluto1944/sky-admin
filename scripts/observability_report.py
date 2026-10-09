@@ -100,6 +100,7 @@ def _job_summary(conn: sqlite3.Connection, since: str) -> list[dict]:
             "job_id": job_id,
             "runs": len(items),
             "failed_runs": sum(item["status"] == "failed" for item in items),
+            "interrupted_runs": sum(item["status"] == "interrupted" for item in items),
             "running_runs": sum(item["status"] == "running" for item in items),
             "external_requests": sum(int(item["external_request_count"] or 0) for item in items),
             "external_failures": sum(int(item["external_failure_count"] or 0) for item in items),
@@ -184,6 +185,7 @@ def _print_text(report: dict) -> None:
     for item in report["jobs"]:
         print(
             f"  {item['job_id']}: {item['runs']} 轮，失败 {item['failed_runs']}，"
+            f"中断 {item['interrupted_runs']}，"
             f"未完成 {item['running_runs']}，"
             f"外部请求 {item['external_requests']}，p95 {item['p95_duration_ms']}ms"
         )
