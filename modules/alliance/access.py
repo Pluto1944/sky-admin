@@ -89,6 +89,15 @@ class AllianceContext:
         return next((item for item in self.clans if item.clan_tag == normalized), None)
 
     def as_dict(self, *, include_clans: bool = True) -> dict:
+        verified_count = sum(
+            1 for clan in self.clans if clan.verification_status == "verified"
+        )
+        if self.clans and verified_count == len(self.clans):
+            verification_status = "verified"
+        elif verified_count:
+            verification_status = "partial"
+        else:
+            verification_status = "unverified"
         result = {
             "id": self.alliance_id,
             "key": self.alliance_key,
@@ -103,6 +112,8 @@ class AllianceContext:
                 "entitlements": self.entitlements,
             },
             "clan_count": len(self.clans),
+            "verified_clan_count": verified_count,
+            "verification_status": verification_status,
             "has_management_access": any(clan.management_allowed for clan in self.clans),
         }
         if include_clans:

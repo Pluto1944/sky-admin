@@ -46,6 +46,7 @@
 </template>
 
 <script>
+import { clearAllianceContext } from '@/utils/alliance.js'
 import { getMyInfo } from '@/utils/api.js'
 
 export default {
@@ -121,6 +122,7 @@ export default {
         success: (res) => {
           if (res.confirm) {
             uni.removeStorageSync('token')
+            clearAllianceContext()
             getApp().globalData.isLoggedIn = false
             getApp().globalData.userInfo = null
             uni.reLaunch({ url: '/pages/login/login' })

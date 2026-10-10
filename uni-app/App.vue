@@ -1,4 +1,6 @@
 <script>
+import { clearAllianceContext, loadAllianceContext } from '@/utils/alliance.js'
+
 export default {
   onLaunch() {
     console.log('App Launch')
@@ -26,8 +28,10 @@ export default {
           if (res.statusCode === 200) {
             this.globalData.userInfo = res.data
             this.globalData.isLoggedIn = true
+            loadAllianceContext().catch(() => {})
           } else {
             uni.removeStorageSync('token')
+            clearAllianceContext()
             this.globalData.isLoggedIn = false
           }
         },

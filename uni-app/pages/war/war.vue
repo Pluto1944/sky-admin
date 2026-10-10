@@ -229,6 +229,7 @@
 import TopBar from '@/components/TopBar.vue'
 import CwlCheckIn from './check-in.vue'
 import { getCurrentWars, getWarHistory, getCwlLive } from '@/utils/api.js'
+import { ALLIANCE_CHANGED_EVENT, activateSharedAlliance, allianceQuery, getCurrentAllianceId } from '@/utils/alliance.js'
 
 const CACHE_REFRESH_INTERVAL_MS = 60 * 1000
 const BUSINESS_TIMEZONE_OFFSET_MS = 8 * 60 * 60 * 1000
@@ -249,6 +250,16 @@ function consumeReturnTopTab() {
 function rememberReturnTopTab(tab) {
   const app = getApp()
   if (app && app.globalData) app.globalData.warReturnTopTab = tab
+}
+
+function withAlliance(url) {
+  const query = allianceQuery()
+  return query ? `${url}${url.indexOf('?') >= 0 ? '&' : '?'}${query}` : url
+}
+
+function withAllianceQuery(query) {
+  const alliance = allianceQuery()
+  return [query, alliance].filter(Boolean).join('&')
 }
 
 export default {
@@ -288,6 +299,7 @@ export default {
       nowMs: Date.now(),
       clockTimer: null,
       refreshTimer: null,
+      allianceChangeHandler: null,
       statusOptions: [
         { key: 'all', label: '全部' }, { key: 'in_war', label: '战斗日' },
         { key: 'preparation', label: '准备日' }, { key: 'war_ended', label: '已结束' },
@@ -364,6 +376,9 @@ export default {
     isCurrentLeaguePeriod() { return !this.leaguePeriod || this.leaguePeriod === currentBusinessPeriod() }
   },
   onLoad(options) {
+    activateSharedAlliance(options).catch(e => uni.showToast({ title: e.message || '联盟切换失败', icon: 'none' }))
+    this.allianceChangeHandler = () => this.resetForAlliance()
+    uni.$on(ALLIANCE_CHANGED_EVENT, this.allianceChangeHandler)
     if (options && ['league', 'check-in'].indexOf(options.tab) >= 0) this.activeTopTab = options.tab
     if (options && options.check_in_view === 'arrival') this.checkInView = 'arrival'
     if (options && options.view === 'history') {
@@ -391,29 +406,48 @@ export default {
   onUnload() {
     this.stopTimers()
     if (this.$refs.checkIn) this.$refs.checkIn.stopTimers()
+    if (this.allianceChangeHandler) uni.$off(ALLIANCE_CHANGED_EVENT, this.allianceChangeHandler)
   },
   onShareAppMessage(options) {
     const dataset = options && options.target && options.target.dataset
     if (dataset && dataset.shareType === 'cwl' && dataset.clanTag) {
-      return { title: `苍穹联赛助手｜${dataset.clanName || '联赛战斗日'}`, path: `/pages/war/cwl-detail?clan_tag=${encodeURIComponent(dataset.clanTag)}&period=${encodeURIComponent(dataset.period || this.leaguePeriod)}&view=war-day` }
+      return { title: `苍穹联赛助手｜${dataset.clanName || '联赛战斗日'}`, path: withAlliance(`/pages/war/cwl-detail?clan_tag=${encodeURIComponent(dataset.clanTag)}&period=${encodeURIComponent(dataset.period || this.leaguePeriod)}&view=war-day`) }
     }
     if (dataset && dataset.shareType === 'war-history' && dataset.clanTag && dataset.warKey) {
-      return { title: `苍穹联赛助手｜${dataset.clanName || '历史部落战'}`, path: `/pages/war/current-detail?clan_tag=${encodeURIComponent(dataset.clanTag)}&war_key=${encodeURIComponent(dataset.warKey)}` }
+      return { title: `苍穹联赛助手｜${dataset.clanName || '历史部落战'}`, path: withAlliance(`/pages/war/current-detail?clan_tag=${encodeURIComponent(dataset.clanTag)}&war_key=${encodeURIComponent(dataset.warKey)}`) }
     }
     if (dataset && dataset.clanTag) {
-      return { title: `苍穹联赛助手｜${dataset.clanName || '当前部落战'}`, path: `/pages/war/current-detail?clan_tag=${encodeURIComponent(dataset.clanTag)}` }
+      return { title: `苍穹联赛助手｜${dataset.clanName || '当前部落战'}`, path: withAlliance(`/pages/war/current-detail?clan_tag=${encodeURIComponent(dataset.clanTag)}`) }
     }
-    if (this.activeTopTab === 'league') return { title: `苍穹联赛助手｜${this.leaguePeriodLabel}联赛`, path: `/pages/war/war?tab=league&period=${encodeURIComponent(this.leaguePeriod)}` }
-    if (this.activeTopTab === 'check-in') return { title: '苍穹联赛助手｜联赛点名', path: `/pages/war/war?tab=check-in&check_in_view=${this.checkInView}` }
-    if (this.warView === 'history') return { title: `苍穹联赛助手｜${this.selectedHistoryClan ? this.selectedHistoryClan.clan_name : '历史部落战'}`, path: `/pages/war/war?view=history&clan_tag=${encodeURIComponent(this.selectedHistoryClanTag)}` }
-    return { title: '苍穹联赛助手｜当前部落战', path: '/pages/war/war' }
+    if (this.activeTopTab === 'league') return { title: `苍穹联赛助手｜${this.leaguePeriodLabel}联赛`, path: withAlliance(`/pages/war/war?tab=league&period=${encodeURIComponent(this.leaguePeriod)}`) }
+    if (this.activeTopTab === 'check-in') return { title: '苍穹联赛助手｜联赛点名', path: withAlliance(`/pages/war/war?tab=check-in&check_in_view=${this.checkInView}`) }
+    if (this.warView === 'history') return { title: `苍穹联赛助手｜${this.selectedHistoryClan ? this.selectedHistoryClan.clan_name : '历史部落战'}`, path: withAlliance(`/pages/war/war?view=history&clan_tag=${encodeURIComponent(this.selectedHistoryClanTag)}`) }
+    return { title: '苍穹联赛助手｜当前部落战', path: withAlliance('/pages/war/war') }
   },
   onShareTimeline() {
-    if (this.activeTopTab === 'league') return { title: `苍穹联赛助手｜${this.leaguePeriodLabel}联赛`, query: `tab=league&period=${encodeURIComponent(this.leaguePeriod)}` }
-    if (this.activeTopTab === 'check-in') return { title: '苍穹联赛助手｜联赛点名', query: `tab=check-in&check_in_view=${this.checkInView}` }
-    return { title: this.warView === 'history' ? `苍穹联赛助手｜${this.selectedHistoryClan ? this.selectedHistoryClan.clan_name : '历史部落战'}` : '苍穹联赛助手｜当前部落战', query: this.warView === 'history' ? `view=history&clan_tag=${encodeURIComponent(this.selectedHistoryClanTag)}` : '' }
+    if (this.activeTopTab === 'league') return { title: `苍穹联赛助手｜${this.leaguePeriodLabel}联赛`, query: withAllianceQuery(`tab=league&period=${encodeURIComponent(this.leaguePeriod)}`) }
+    if (this.activeTopTab === 'check-in') return { title: '苍穹联赛助手｜联赛点名', query: withAllianceQuery(`tab=check-in&check_in_view=${this.checkInView}`) }
+    return { title: this.warView === 'history' ? `苍穹联赛助手｜${this.selectedHistoryClan ? this.selectedHistoryClan.clan_name : '历史部落战'}` : '苍穹联赛助手｜当前部落战', query: withAllianceQuery(this.warView === 'history' ? `view=history&clan_tag=${encodeURIComponent(this.selectedHistoryClanTag)}` : '') }
   },
   methods: {
+    resetForAlliance() {
+      this.activeTopTab = 'clan-war'
+      this.warView = 'current'
+      this.clans = []
+      this.categories = []
+      this.updatedAt = ''
+      this.historyWars = []
+      this.historyClans = []
+      this.historyCategories = []
+      this.leagueClans = []
+      this.leaguePeriods = []
+      this.leaguePeriod = ''
+      this.filterInitialized = false
+      this.selectedCategories = []
+      this.selectedClans = []
+      this.statusFilter = 'all'
+      this.fetchCurrentWars()
+    },
     onTopTab(tab) {
       this.activeTopTab = tab
       this.filterVisible = false
@@ -439,10 +473,12 @@ export default {
       if (selected) this.switchWarView(selected)
     },
     async fetchCurrentWars() {
+      const allianceId = getCurrentAllianceId()
       if (!this.clans.length) this.loading = true
       this.loadError = ''
       try {
         const res = await getCurrentWars()
+        if (allianceId !== getCurrentAllianceId()) return
         this.clans = res.clans || []
         this.categories = res.categories || []
         this.updatedAt = res.updated_at || ''
@@ -457,10 +493,12 @@ export default {
       } finally { this.loading = false }
     },
     async fetchWarHistory() {
+      const allianceId = getCurrentAllianceId()
       if (!this.historyWars.length) this.historyLoading = true
       this.historyError = ''
       try {
         const res = await getWarHistory()
+        if (allianceId !== getCurrentAllianceId()) return
         this.historyWars = res.wars || []
         this.historyCategories = res.categories || []
         this.historyClans = res.clans || []
@@ -476,11 +514,13 @@ export default {
       } finally { this.historyLoading = false }
     },
     async fetchCwlLive(period) {
+      const allianceId = getCurrentAllianceId()
       const selected = typeof period === 'string' ? period : this.leaguePeriod
       if (!this.leagueClans.length) this.leagueLoading = true
       this.leagueError = ''
       try {
         const res = await getCwlLive(selected)
+        if (allianceId !== getCurrentAllianceId()) return
         this.leagueClans = res.clans || []
         this.leaguePeriod = res.period || ''
         this.leagueUpdatedAt = res.updated_at || ''
@@ -559,15 +599,15 @@ export default {
     },
     openDetail(clan) {
       if (['not_in_war', 'sync_pending', 'error'].indexOf(clan.status) >= 0) return
-      uni.navigateTo({ url: `/pages/war/current-detail?clan_tag=${encodeURIComponent(clan.clan_tag)}` })
+      uni.navigateTo({ url: withAlliance(`/pages/war/current-detail?clan_tag=${encodeURIComponent(clan.clan_tag)}`) })
     },
     openHistoryDetail(war) {
-      uni.navigateTo({ url: `/pages/war/current-detail?clan_tag=${encodeURIComponent(war.clan_tag)}&war_key=${encodeURIComponent(war.war_key)}` })
+      uni.navigateTo({ url: withAlliance(`/pages/war/current-detail?clan_tag=${encodeURIComponent(war.clan_tag)}&war_key=${encodeURIComponent(war.war_key)}`) })
     },
     openLeagueDetail(clan) {
       if (!clan.clan_tag) return
       rememberReturnTopTab('league')
-      uni.navigateTo({ url: `/pages/war/cwl-detail?clan_tag=${encodeURIComponent(clan.clan_tag)}&period=${encodeURIComponent(this.leaguePeriod)}&view=war-day` })
+      uni.navigateTo({ url: withAlliance(`/pages/war/cwl-detail?clan_tag=${encodeURIComponent(clan.clan_tag)}&period=${encodeURIComponent(this.leaguePeriod)}&view=war-day`) })
     },
     categoryLabel(key) {
       const item = this.historyCategories.find(category => category.key === key) || this.categories.find(category => category.key === key)

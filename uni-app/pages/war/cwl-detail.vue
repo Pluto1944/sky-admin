@@ -155,6 +155,7 @@
 <script>
 import TopBar from '@/components/TopBar.vue'
 import { getCwlLiveDetail } from '@/utils/api.js'
+import { ALLIANCE_CHANGED_EVENT, activateSharedAlliance, allianceQuery } from '@/utils/alliance.js'
 
 const CACHE_REFRESH_INTERVAL_MS = 60 * 1000
 const BUSINESS_TIMEZONE_OFFSET_MS = 8 * 60 * 60 * 1000
@@ -176,12 +177,13 @@ export default {
       clanTag: '', period: '', detail: null, loading: true, loadError: '',
       activeView: 'war-day', selectedRoundNumber: null, requestedRound: null,
       refreshTimer: null, standingMatch: null, loadedViews: {},
+      allianceChangeHandler: null,
       viewLoading: { 'war-day': false, overview: false }, viewVersions: {}, requestGeneration: 0,
       openSections: { townHalls: false, standings: true, offense: true, defense: false }
     }
   },
   computed: {
-    listFallback() { return `/pages/war/war?tab=league&period=${encodeURIComponent(this.period || '')}` },
+    listFallback() { const alliance = allianceQuery(); return `/pages/war/war?tab=league&period=${encodeURIComponent(this.period || '')}${alliance ? '&' + alliance : ''}` },
     isCurrentPeriod() { return !this.period || this.period === currentBusinessPeriod() },
     rounds() { return this.detail && this.detail.rounds ? this.detail.rounds : [] },
     selectedRound() { return this.rounds.find(item => item.round === this.selectedRoundNumber) || this.rounds[0] || null },
@@ -199,11 +201,14 @@ export default {
     offenseTableWidth() { return 650 + this.overviewRoundCount * 130 },
     defenseTableWidth() { return 700 + this.overviewRoundCount * 130 }
   },
-  onLoad(options) {
+  async onLoad(options) {
     try { this.clanTag = decodeURIComponent((options && options.clan_tag) || '') } catch (e) { this.clanTag = (options && options.clan_tag) || '' }
     this.period = (options && options.period) || ''
     this.activeView = options && options.view === 'overview' ? 'overview' : 'war-day'
     this.requestedRound = Number((options && options.round) || 0) || null
+    try { await activateSharedAlliance(options) } catch (e) { this.loadError = e.message || '联盟切换失败' }
+    this.allianceChangeHandler = () => uni.switchTab({ url: '/pages/war/war' })
+    uni.$on(ALLIANCE_CHANGED_EVENT, this.allianceChangeHandler)
     rememberLeagueList()
     this.fetchDetail(this.activeView)
   },
@@ -216,14 +221,16 @@ export default {
     }
   },
   onHide() { this.stopTimer() },
-  onUnload() { this.stopTimer() },
+  onUnload() { this.stopTimer(); if (this.allianceChangeHandler) uni.$off(ALLIANCE_CHANGED_EVENT, this.allianceChangeHandler) },
   async onPullDownRefresh() { await this.fetchDetail(this.activeView); uni.stopPullDownRefresh() },
   onShareAppMessage() {
     const round = this.selectedRoundNumber ? `&round=${this.selectedRoundNumber}` : ''
-    return { title: `苍穹联赛助手｜${this.detail ? (this.detail.team.team_name || this.detail.team.team_alias) : '联赛'}`, path: `/pages/war/cwl-detail?clan_tag=${encodeURIComponent(this.clanTag)}&period=${encodeURIComponent(this.period)}&view=${this.activeView}${round}` }
+    const alliance = allianceQuery()
+    return { title: `苍穹联赛助手｜${this.detail ? (this.detail.team.team_name || this.detail.team.team_alias) : '联赛'}`, path: `/pages/war/cwl-detail?clan_tag=${encodeURIComponent(this.clanTag)}&period=${encodeURIComponent(this.period)}&view=${this.activeView}${round}${alliance ? '&' + alliance : ''}` }
   },
   onShareTimeline() {
-    return { title: `苍穹联赛助手｜${this.detail ? (this.detail.team.team_name || this.detail.team.team_alias) : '联赛'}`, query: `clan_tag=${encodeURIComponent(this.clanTag)}&period=${encodeURIComponent(this.period)}&view=${this.activeView}&round=${this.selectedRoundNumber || ''}` }
+    const alliance = allianceQuery()
+    return { title: `苍穹联赛助手｜${this.detail ? (this.detail.team.team_name || this.detail.team.team_alias) : '联赛'}`, query: `clan_tag=${encodeURIComponent(this.clanTag)}&period=${encodeURIComponent(this.period)}&view=${this.activeView}&round=${this.selectedRoundNumber || ''}${alliance ? '&' + alliance : ''}` }
   },
   methods: {
     async fetchDetail(targetView) {

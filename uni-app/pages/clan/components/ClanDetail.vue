@@ -116,6 +116,7 @@
 
 <script>
 import { getClanOverviewDetail } from '@/utils/api.js'
+import { getCurrentAllianceId } from '@/utils/alliance.js'
 
 const detailCache = {}
 const COMBAT_CLAN_TAG = '#2QQ'
@@ -153,11 +154,13 @@ export default {
   methods: {
     load() {
       this.badgeLoadError = false
-      if (detailCache[this.clanTag]) { this.detail = detailCache[this.clanTag]; this.loading = false; this.$emit('loaded', this.detail) } else this.fetchData()
+      const cacheKey = `${getCurrentAllianceId() || 'public'}:${this.clanTag}`
+      if (detailCache[cacheKey]) { this.detail = detailCache[cacheKey]; this.loading = false; this.$emit('loaded', this.detail) } else this.fetchData()
     },
     async fetchData() {
       this.loading = true; this.error = ''; this.badgeLoadError = false
-      try { const detail = await getClanOverviewDetail(this.clanTag); detailCache[this.clanTag] = detail; this.detail = detail; this.$emit('loaded', detail) }
+      const cacheKey = `${getCurrentAllianceId() || 'public'}:${this.clanTag}`
+      try { const detail = await getClanOverviewDetail(this.clanTag); detailCache[cacheKey] = detail; this.detail = detail; this.$emit('loaded', detail) }
       catch (e) { this.error = e.message || '加载失败' }
       finally { this.loading = false }
     },

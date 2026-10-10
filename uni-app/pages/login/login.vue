@@ -42,6 +42,7 @@
 
 <script>
 import { wechatLogin } from '@/utils/api.js'
+import { loadAllianceContext } from '@/utils/alliance.js'
 
 export default {
   data() {
@@ -72,6 +73,7 @@ export default {
               uni.setStorageSync('privacyConsent', 'v1')
               getApp().globalData.isLoggedIn = true
               getApp().globalData.userInfo = res.user
+              loadAllianceContext(null, true).catch(() => {})
 
               uni.showToast({
                 title: '登录成功',

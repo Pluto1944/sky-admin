@@ -42,7 +42,10 @@
             </view>
           </view>
           <view class="clan-overview-sync">
-            <text>{{ clan.updated_at ? '同步于 ' + formatTime(clan.updated_at) : '等待首次同步' }}</text>
+            <view class="clan-overview-sync-meta">
+              <text>{{ clan.updated_at ? '同步于 ' + formatTime(clan.updated_at) : '等待首次同步' }}</text>
+              <text v-if="clan.verification_status && clan.verification_status !== 'verified'" class="clan-overview-verification">{{ verificationLabel(clan.verification_status) }}</text>
+            </view>
             <text class="clan-overview-detail-hint">查看详情</text>
           </view>
         </view>
@@ -54,8 +57,9 @@
 
 <script>
 import { getClanOverview } from '@/utils/api.js'
+import { getCurrentAllianceId } from '@/utils/alliance.js'
 
-let overviewCache = null
+const overviewCache = Object.create(null)
 
 export default {
   name: 'ClanOverview',
@@ -63,8 +67,9 @@ export default {
     return { loading: true, refreshing: false, error: '', clans: [], updatedAt: '' }
   },
   created() {
-    if (overviewCache) {
-      this.applyResponse(overviewCache)
+    const cache = overviewCache[getCurrentAllianceId() || 'public']
+    if (cache) {
+      this.applyResponse(cache)
       this.loading = false
       this.fetchData(false)
     } else {
@@ -81,12 +86,13 @@ export default {
     },
     async fetchData(showLoading = true) {
       if (this.refreshing) return
+      const cacheKey = getCurrentAllianceId() || 'public'
       this.refreshing = true
       if (showLoading && !this.clans.length) this.loading = true
       this.error = ''
       try {
         const res = await getClanOverview()
-        overviewCache = res
+        overviewCache[cacheKey] = res
         this.applyResponse(res)
       } catch (e) {
         this.error = e.message || '加载失败'
@@ -130,6 +136,9 @@ export default {
     },
     statusTone(type, value) {
       return this.statusMeta(type, value).highlighted ? 'is-highlighted' : 'is-muted'
+    },
+    verificationLabel(value) {
+      return ({ unverified: '未认证', pending: '认证中', disputed: '有争议' })[value] || '未认证'
     }
   }
 }
@@ -165,6 +174,8 @@ export default {
 .clan-overview-status-value.is-highlighted { color: #5fa8ff; }
 .clan-overview-status-value.is-muted { color: #7f8799; }
 .clan-overview-sync { display: flex; justify-content: space-between; padding-top: 16rpx; color: #5d6478; font-size: 21rpx; }
+.clan-overview-sync-meta { display: flex; align-items: center; min-width: 0; }
+.clan-overview-verification { flex-shrink: 0; margin-left: 10rpx; padding: 3rpx 9rpx; color: #c49a56; background: rgba(196, 154, 86, .10); border-radius: 7rpx; font-size: 18rpx; }
 .clan-overview-detail-hint { color: #5fa8ff; }
 .clan-overview-bottom { height: 32rpx; }
 </style>

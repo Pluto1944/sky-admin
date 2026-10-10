@@ -83,37 +83,47 @@
 <script>
 import TopBar from '@/components/TopBar.vue'
 import { getCurrentWar, getWarHistoryDetail } from '@/utils/api.js'
+import { ALLIANCE_CHANGED_EVENT, activateSharedAlliance, allianceQuery } from '@/utils/alliance.js'
 
 const CACHE_REFRESH_INTERVAL_MS = 60 * 1000
 
 export default {
   components: { TopBar },
   data() {
-    return { clanTag: '', warKey: '', war: null, renderedUpdatedAt: null, loading: true, loadError: '', nowMs: Date.now(), clockTimer: null, refreshTimer: null }
+    return { clanTag: '', warKey: '', war: null, renderedUpdatedAt: null, loading: true, loadError: '', nowMs: Date.now(), clockTimer: null, refreshTimer: null, allianceChangeHandler: null }
   },
   computed: {
     isHistory() { return !!this.warKey },
-    historyListFallback() { return this.isHistory ? `/pages/war/war?view=history&clan_tag=${encodeURIComponent(this.clanTag)}` : '/pages/war/war' }
+    historyListFallback() {
+      const base = this.isHistory ? `/pages/war/war?view=history&clan_tag=${encodeURIComponent(this.clanTag)}` : '/pages/war/war'
+      const alliance = allianceQuery()
+      return alliance ? `${base}${base.indexOf('?') >= 0 ? '&' : '?'}${alliance}` : base
+    }
   },
-  onLoad(options) {
+  async onLoad(options) {
     try { this.clanTag = decodeURIComponent((options && options.clan_tag) || '') } catch (e) { this.clanTag = (options && options.clan_tag) || '' }
     try { this.warKey = decodeURIComponent((options && options.war_key) || '') } catch (e) { this.warKey = (options && options.war_key) || '' }
+    try { await activateSharedAlliance(options) } catch (e) { this.loadError = e.message || '联盟切换失败' }
+    this.allianceChangeHandler = () => uni.switchTab({ url: '/pages/war/war' })
+    uni.$on(ALLIANCE_CHANGED_EVENT, this.allianceChangeHandler)
     this.fetchDetail()
   },
   onShow() { if (!this.isHistory) this.startTimers() },
   onHide() { this.stopTimers() },
-  onUnload() { this.stopTimers() },
+  onUnload() { this.stopTimers(); if (this.allianceChangeHandler) uni.$off(ALLIANCE_CHANGED_EVENT, this.allianceChangeHandler) },
   async onPullDownRefresh() {
     await this.fetchDetail()
     uni.stopPullDownRefresh()
   },
   onShareAppMessage() {
     const history = this.isHistory ? `&war_key=${encodeURIComponent(this.warKey)}` : ''
-    return { title: `苍穹联赛助手｜${this.war ? this.war.clan_name : (this.isHistory ? '历史部落战' : '当前部落战')}`, path: `/pages/war/current-detail?clan_tag=${encodeURIComponent(this.clanTag)}${history}` }
+    const alliance = allianceQuery()
+    return { title: `苍穹联赛助手｜${this.war ? this.war.clan_name : (this.isHistory ? '历史部落战' : '当前部落战')}`, path: `/pages/war/current-detail?clan_tag=${encodeURIComponent(this.clanTag)}${history}${alliance ? '&' + alliance : ''}` }
   },
   onShareTimeline() {
     const history = this.isHistory ? `&war_key=${encodeURIComponent(this.warKey)}` : ''
-    return { title: `苍穹联赛助手｜${this.war ? this.war.clan_name : (this.isHistory ? '历史部落战' : '当前部落战')}`, query: `clan_tag=${encodeURIComponent(this.clanTag)}${history}` }
+    const alliance = allianceQuery()
+    return { title: `苍穹联赛助手｜${this.war ? this.war.clan_name : (this.isHistory ? '历史部落战' : '当前部落战')}`, query: `clan_tag=${encodeURIComponent(this.clanTag)}${history}${alliance ? '&' + alliance : ''}` }
   },
   methods: {
     async fetchDetail() {

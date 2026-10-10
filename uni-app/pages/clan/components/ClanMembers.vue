@@ -69,6 +69,7 @@
 
 <script>
 import { getMembers } from '@/utils/api.js'
+import { getCurrentAllianceId } from '@/utils/alliance.js'
 
 const membersCache = Object.create(null)
 const MEMBER_PAGE_SIZE = 100
@@ -144,7 +145,7 @@ export default {
     },
     async fetchMembers() {
       const options = this.requestOptions()
-      const cacheKey = JSON.stringify(options)
+      const cacheKey = `${getCurrentAllianceId() || 'public'}:${JSON.stringify(options)}`
       const serial = ++this.requestSerial
       if (membersCache[cacheKey]) {
         this.applyResponse(membersCache[cacheKey])

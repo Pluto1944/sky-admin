@@ -3,9 +3,43 @@
  * 统一管理后端接口调用，自动携带 token
  */
 
+import {
+  clearCurrentAlliance,
+  getCurrentAllianceId as storedAllianceId,
+  getCurrentAllianceKey,
+  setCurrentAlliance
+} from './alliance-state.js'
+
 // 后端 API 基地址
 // 域名备案已通过，使用正式域名访问后端
 const BASE_URL = 'https://api.skycoc.cc'
+
+function currentAllianceId() {
+  return uni.getStorageSync('token') ? storedAllianceId() : 0
+}
+
+function scopedPath(suffix) {
+  const allianceId = currentAllianceId()
+  return allianceId ? `/api/alliances/${allianceId}${suffix}` : ''
+}
+
+function legacySkyRequest(path) {
+  const allianceKey = getCurrentAllianceKey()
+  const allianceId = currentAllianceId()
+  if (allianceId && allianceKey && allianceKey !== 'sky-internal') {
+    return Promise.reject(new Error('该联盟的此项功能将在后续阶段开放'))
+  }
+  if (allianceId && !allianceKey) {
+    return request('/api/me/alliances', 'GET', {}, true).then((response) => {
+      const alliance = (response.alliances || []).find(item => Number(item.id) === allianceId)
+      if (!alliance) throw new Error('当前联盟访问权限已失效')
+      setCurrentAlliance(alliance)
+      if (alliance.key !== 'sky-internal') throw new Error('该联盟的此项功能将在后续阶段开放')
+      return request(path)
+    })
+  }
+  return request(path)
+}
 
 /**
  * 通用请求方法
@@ -41,6 +75,7 @@ function request(url, method = 'GET', data = {}, needAuth = false) {
         } else if (res.statusCode === 401) {
           // token 过期，清除本地状态
           uni.removeStorageSync('token')
+          clearCurrentAlliance()
           getApp().globalData.isLoggedIn = false
           getApp().globalData.userInfo = null
           uni.switchTab({
@@ -86,6 +121,16 @@ export function getMyInfo() {
   return request('/api/wechat/me', 'GET', {}, true)
 }
 
+/** 获取当前用户可以访问的联盟。 */
+export function getMyAlliances() {
+  return request('/api/me/alliances', 'GET', {}, true)
+}
+
+/** 将联盟记录为当前用户最近选择的默认联盟。 */
+export function visitAlliance(allianceId) {
+  return request(`/api/me/alliances/${encodeURIComponent(allianceId)}/visit`, 'POST', {}, true)
+}
+
 /**
  * 绑定游戏账号
  * @param {string} accountName - 游戏内昵称
@@ -114,17 +159,22 @@ export function getMembers(options = {}) {
   ]
   if (options.clanTags && options.clanTags.length) query.push(`clan_tags=${encodeURIComponent(options.clanTags.join(','))}`)
   if (options.search) query.push(`search=${encodeURIComponent(options.search)}`)
-  return request(`/api/members?${query.join('&')}`)
+  const scoped = scopedPath('/members')
+  return request(`${scoped || '/api/members'}?${query.join('&')}`, 'GET', {}, Boolean(scoped))
 }
 
 /** 获取全部自有部落的概览卡片。 */
 export function getClanOverview() {
-  return request('/api/clan/overview')
+  const scoped = scopedPath('/clans')
+  return request(scoped || '/api/clan/overview', 'GET', {}, Boolean(scoped))
 }
 
 /** 获取单个自有部落的聚合详情。 */
 export function getClanOverviewDetail(clanTag) {
-  return request(`/api/clan/overview/${encodeURIComponent(clanTag)}`)
+  const scoped = scopedPath(`/clans/${encodeURIComponent(clanTag)}`)
+  return scoped
+    ? request(scoped, 'GET', {}, true)
+    : request(`/api/clan/overview/${encodeURIComponent(clanTag)}`)
 }
 
 /**
@@ -134,7 +184,7 @@ export function getClanOverviewDetail(clanTag) {
  */
 export function getLeagueStats(period) {
   const query = period ? `?period=${period}` : ''
-  return request(`/api/clan/league-stats${query}`)
+  return legacySkyRequest(`/api/clan/league-stats${query}`)
 }
 
 /**
@@ -144,7 +194,7 @@ export function getLeagueStats(period) {
  */
 export function getWarStats(clanTag) {
   const query = clanTag ? `?clan_tag=${encodeURIComponent(clanTag)}` : ''
-  return request(`/api/clan/war-stats${query}`)
+  return legacySkyRequest(`/api/clan/war-stats${query}`)
 }
 
 /**
@@ -152,49 +202,54 @@ export function getWarStats(clanTag) {
  * @returns {Promise} { clans: [{ clan_tag, realtime, despeed, replace_candidates, fill_accounts, inactive_members }] }
  */
 export function getFarmConfig() {
-  return request('/api/clan/farm-config')
+  return legacySkyRequest('/api/clan/farm-config')
 }
 
 /** 获取全部自有部落的当前战争摘要。 */
 export function getCurrentWars() {
-  return request('/api/clan/current-wars')
+  const scoped = scopedPath('/wars/current')
+  return request(scoped || '/api/clan/current-wars', 'GET', {}, Boolean(scoped))
 }
 
 /** 获取单个自有部落的当前战争详情。 */
 export function getCurrentWar(clanTag) {
-  return request(`/api/clan/current-wars/${encodeURIComponent(clanTag)}`)
+  const scoped = scopedPath(`/wars/current/${encodeURIComponent(clanTag)}`)
+  return scoped
+    ? request(scoped, 'GET', {}, true)
+    : request(`/api/clan/current-wars/${encodeURIComponent(clanTag)}`)
 }
 
 /** 获取全部自有部落最近 15 场已结束普通部落战摘要。 */
 export function getWarHistory(clanTag) {
   const query = clanTag ? `?clan_tag=${encodeURIComponent(clanTag)}` : ''
-  return request(`/api/clan/war-history${query}`)
+  return legacySkyRequest(`/api/clan/war-history${query}`)
 }
 
 /** 获取一场已归档普通部落战的完整详情。 */
 export function getWarHistoryDetail(clanTag, warKey) {
-  return request(`/api/clan/war-history/${encodeURIComponent(clanTag)}/${encodeURIComponent(warKey)}`)
+  return legacySkyRequest(`/api/clan/war-history/${encodeURIComponent(clanTag)}/${encodeURIComponent(warKey)}`)
 }
 
 /** 获取当前月份 CWL 参赛部落摘要。 */
 export function getCwlLive(period) {
   const query = period ? `?period=${encodeURIComponent(period)}` : ''
-  return request(`/api/clan/cwl-live${query}`)
+  const scoped = scopedPath('/cwl/live')
+  return request(`${scoped || '/api/clan/cwl-live'}${query}`, 'GET', {}, Boolean(scoped))
 }
 
 /** 获取当月各联赛队伍的当前战斗日未出刀成员及已结束场次漏刀记录。 */
 export function getCwlCheckIn() {
-  return request('/api/clan/cwl-check-in')
+  return legacySkyRequest('/api/clan/cwl-check-in')
 }
 
 /** 获取当月联赛正式名单与到位情况汇总。 */
 export function getCwlAssembly() {
-  return request('/api/clan/cwl-assembly')
+  return legacySkyRequest('/api/clan/cwl-assembly')
 }
 
 /** 获取单个联赛部落的集结检查详情。 */
 export function getCwlAssemblyDetail(clanTag) {
-  return request(`/api/clan/cwl-assembly/${encodeURIComponent(clanTag)}`)
+  return legacySkyRequest(`/api/clan/cwl-assembly/${encodeURIComponent(clanTag)}`)
 }
 
 /** 按需获取单个联赛部落的战斗日或联赛总览。 */
@@ -203,7 +258,11 @@ export function getCwlLiveDetail(clanTag, period, round, view) {
   if (period) query.push(`period=${encodeURIComponent(period)}`)
   if (round) query.push(`round=${encodeURIComponent(round)}`)
   if (view) query.push(`view=${encodeURIComponent(view)}`)
-  return request(`/api/clan/cwl-live/${encodeURIComponent(clanTag)}${query.length ? '?' + query.join('&') : ''}`)
+  const scoped = scopedPath(`/cwl/live/${encodeURIComponent(clanTag)}`)
+  return request(
+    `${scoped || '/api/clan/cwl-live/' + encodeURIComponent(clanTag)}${query.length ? '?' + query.join('&') : ''}`,
+    'GET', {}, Boolean(scoped)
+  )
 }
 
 export default {
@@ -211,6 +270,8 @@ export default {
   getSystemVersion,
   wechatLogin,
   getMyInfo,
+  getMyAlliances,
+  visitAlliance,
   bindAccount,
   getMembers,
   getClanOverview,

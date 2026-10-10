@@ -459,10 +459,29 @@ TabBar「设置」页
 |------|---------|---------|
 | `wechatLogin(code)` | `POST /api/wechat/login` | ❌ |
 | `getMyInfo()` | `GET /api/wechat/me` | ✅ |
+| `getMyAlliances()` | `GET /api/me/alliances` | ✅ |
+| `visitAlliance(id)` | `POST /api/me/alliances/{id}/visit` | ✅ |
 | `bindAccount(name, tag)` | `POST /api/wechat/bind` | ✅ |
 | `getMembers()` | `GET /api/members` | ❌ |
 | `getClanOverview()` | `GET /api/clan/overview` | ❌ |
 | `getClanOverviewDetail(tag)` | `GET /api/clan/overview/{clan_tag}` | ❌ |
+
+登录且已经解析出当前 `alliance_id` 时，`getMembers`、部落概览/详情、当前战争和 CWL
+汇总/详情自动改走 `/api/alliances/{alliance_id}/...`。未登录仍保留苍穹公开旧接口，且不会
+自动触发微信登录。尚未完成联盟版接口迁移的历史战争、战营、互刷和联赛点名只允许在
+`sky-internal` 使用；切到其他联盟时明确提示后续阶段开放，不能回退读取苍穹全局数据。
+
+## 联盟切换状态 (`utils/alliance.js`)
+
+- 顶部安全区、微信胶囊左侧固定显示“联盟名称（角色）”按钮；下拉层在屏幕中央，点击遮罩关闭；
+- 本地持久化只保存最近选择的 `currentAllianceId`，角色、套餐和认证状态必须从
+  `GET /api/me/alliances` 重新取得，不能把本地缓存当作权限依据；
+- 选择联盟后调用 `POST /api/me/alliances/{id}/visit`，再广播 `alliance-changed`；
+- 部落概览、成员和详情缓存使用 `alliance_id` 作为键，战斗页切换时清空当前展示，并丢弃
+  在旧联盟上下文中发出、切换后才返回的响应；
+- 部落页、战斗页、当前战争详情和 CWL 详情分享参数携带 `alliance_id`。接收者仍按自己的
+  服务端成员关系解析角色，分享者的管理员/首领权限不会写进链接；
+- Token 过期或退出登录时同步清理当前联盟 ID。冷启动和重新登录会重新校验联盟列表。
 
 ### 使用示例
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -22,6 +23,7 @@ from modules.coc_sync.current_war import current_war_summary
 from modules.coc_sync.official.mapper import normalize_tag
 from modules.player.member_stats import member_summary_map
 from shared.db.connection import Database
+from config import CLAN_CATEGORY_LABELS
 
 from . import routes as legacy_routes
 from .auth import require_user
@@ -29,6 +31,10 @@ from .deps import get_db
 
 
 router = APIRouter(prefix="/api")
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def _context(user: dict, alliance_id: int, db: Database) -> AllianceContext:
@@ -82,6 +88,7 @@ def _alliance_clan_overviews(db: Database, context: AllianceContext) -> list[dic
         for row in rows:
             grouped[normalize_tag(row["clan_tag"])].append(row)
 
+    war_status, capital_status = legacy_routes._clan_operating_status(db)
     result = []
     for clan in context.clans:
         members = grouped.get(clan.clan_tag, [])
@@ -90,8 +97,11 @@ def _alliance_clan_overviews(db: Database, context: AllianceContext) -> list[dic
         trophy_total = 0
         trophy_count = 0
         donations = 0
+        donations_received = 0
         leaders = []
         updated = []
+        town_halls: dict[int, int] = defaultdict(int)
+        roles: dict[str, int] = defaultdict(int)
         for member in members:
             town_hall = _number(member["town_hall_level"])
             trophies = _number(member["trophies"])
@@ -102,18 +112,38 @@ def _alliance_clan_overviews(db: Database, context: AllianceContext) -> list[dic
                 trophy_total += trophies
                 trophy_count += 1
             donations += _number(_safe_raw(member["coc_raw"]).get("donations"))
+            donations_received += _number(_safe_raw(member["coc_raw"]).get("donationsReceived"))
+            if town_hall:
+                town_halls[town_hall] += 1
+            if member["clan_role"]:
+                roles[member["clan_role"]] += 1
             if member["clan_role"] == "leader" and member["account_name"]:
                 leaders.append(member["account_name"])
             if member["last_synced_at"]:
                 updated.append(member["last_synced_at"])
         result.append({
             **clan.as_dict(),
+            "category_label": CLAN_CATEGORY_LABELS.get(clan.category, clan.category),
+            "config_order": clan.sort_order,
             "member_count": len(members),
             "capacity": 50,
             "leader_name": " / ".join(leaders) if leaders else None,
             "average_town_hall": round(th_total / th_count, 1) if th_count else 0,
             "average_trophies": round(trophy_total / trophy_count) if trophy_count else 0,
             "total_donations": donations,
+            "total_donations_received": donations_received,
+            "average_donations": round(donations / len(members), 1) if members else 0,
+            "town_hall_distribution": [
+                {"level": level, "count": town_halls[level]}
+                for level in sorted(town_halls, reverse=True)
+            ],
+            "role_distribution": {
+                role: roles[role]
+                for role in ("leader", "coLeader", "admin", "member")
+                if roles[role]
+            },
+            "war_status": war_status.get(clan.clan_tag),
+            "capital_status": capital_status.get(clan.clan_tag),
             "updated_at": max(updated) if updated else None,
         })
     return result
@@ -157,6 +187,32 @@ def alliance_detail(
     return {**context.as_dict(), "active_user_count": int(member_count)}
 
 
+@router.post("/me/alliances/{alliance_id}/visit")
+def visit_alliance(
+    alliance_id: int,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    """记录最近选择的联盟；访问记录不创建成员关系，也不授予权限。"""
+    context = _context(user, alliance_id, db)
+    now = _utc_now()
+    with db.conn:
+        db.conn.execute(
+            "UPDATE alliance_visits SET is_default = 0 WHERE user_id = ?",
+            (context.user_id,),
+        )
+        db.conn.execute(
+            """INSERT INTO alliance_visits
+               (alliance_id, user_id, is_default, first_visited_at, last_visited_at)
+               VALUES (?, ?, 1, ?, ?)
+               ON CONFLICT(alliance_id, user_id) DO UPDATE SET
+                   is_default = 1,
+                   last_visited_at = excluded.last_visited_at""",
+            (alliance_id, context.user_id, now, now),
+        )
+    return {**context.as_dict(include_clans=False), "is_default": True, "last_visited_at": now}
+
+
 @router.get("/alliances/{alliance_id}/clans")
 def alliance_clans(
     alliance_id: int,
@@ -175,28 +231,80 @@ def alliance_clans(
     }
 
 
+@router.get("/alliances/{alliance_id}/clans/{clan_tag}")
+def alliance_clan_detail(
+    alliance_id: int,
+    clan_tag: str,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    context = _context(user, alliance_id, db)
+    clan = _subscribed_clan(context, clan_tag)
+    item = next(
+        value for value in _alliance_clan_overviews(db, context)
+        if value["clan_tag"] == clan.clan_tag
+    )
+    profile_row = db.conn.execute(
+        """SELECT status, data_json, updated_at
+           FROM clan_profile_cache WHERE clan_tag = ?""",
+        (clan.clan_tag,),
+    ).fetchone()
+    profile = None
+    if profile_row and profile_row["data_json"]:
+        loaded = _safe_raw(profile_row["data_json"])
+        profile = loaded or None
+    item["profile"] = profile
+    item["profile_status"] = profile_row["status"] if profile_row else "pending"
+    item["profile_updated_at"] = profile_row["updated_at"] if profile_row else None
+    return item
+
+
 @router.get("/alliances/{alliance_id}/members")
 def alliance_members(
     alliance_id: int,
     page: int = 1,
     page_size: int = 100,
+    membership_status: str = "member",
     clan_tag: str = "",
+    clan_tags: str = "",
+    search: str = "",
+    sort_key: str = "town_hall_level",
+    sort_order: str = "desc",
     user: dict = Depends(require_user),
     db: Database = Depends(get_db),
 ):
     """返回联盟订阅部落中的游戏成员，按逐部落权限白名单输出字段。"""
     if page < 1 or page_size < 1 or page_size > 100:
         raise HTTPException(status_code=422, detail="page/page_size 超出允许范围")
+    if membership_status not in {"all", "member", "left"}:
+        raise HTTPException(status_code=422, detail="membership_status 仅支持 all/member/left")
+    if sort_key not in legacy_routes._MEMBER_SORT_KEYS:
+        raise HTTPException(status_code=422, detail="不支持的成员排序字段")
+    if sort_order not in {"asc", "desc"}:
+        raise HTTPException(status_code=422, detail="sort_order 仅支持 asc/desc")
     context = _context(user, alliance_id, db)
-    selected = normalize_tag(clan_tag) if clan_tag else None
-    if selected:
-        _subscribed_clan(context, selected)
-    selected_tags = [selected] if selected else [clan.clan_tag for clan in context.clans]
+    requested_tags = [
+        normalize_tag(value)
+        for value in (clan_tags or clan_tag).split(",")
+        if normalize_tag(value)
+    ]
+    for requested in requested_tags:
+        _subscribed_clan(context, requested)
+    selected_tags = requested_tags or [clan.clan_tag for clan in context.clans]
+    clan_options = [
+        {
+            "tag": clan.clan_tag,
+            "name": clan.clan_name,
+            "category": clan.category,
+            "category_label": CLAN_CATEGORY_LABELS.get(clan.category, clan.category),
+        }
+        for clan in context.clans
+    ]
     if not selected_tags:
         return {
             "alliance_id": alliance_id, "count": 0, "page": page,
             "page_size": page_size, "total_pages": 1, "members": [],
-            "updated_at": None,
+            "updated_at": None, "clans": clan_options,
         }
 
     placeholders = ",".join("?" for _ in selected_tags)
@@ -204,9 +312,9 @@ def alliance_members(
         f"""SELECT player_tag, account_name, town_hall_level, clan_tag, clan_role,
                    trophies, league_name, coc_raw, season_attack_wins,
                    last_activity_at, last_activity_reason, activity_observed_since,
-                   player_name, status, history_score, last_synced_at
+                   player_name, status, history_score, membership_status, last_synced_at
             FROM accounts
-            WHERE membership_status = 'member' AND clan_tag IN ({placeholders})
+            WHERE clan_tag IN ({placeholders})
             ORDER BY clan_tag, town_hall_level DESC, account_name, player_tag""",
         selected_tags,
     ).fetchall()
@@ -233,6 +341,7 @@ def alliance_members(
             "donations": _number(raw.get("donations")),
             "donations_received": _number(raw.get("donationsReceived")),
             "season_attack_wins": row["season_attack_wins"],
+            "membership_status": row["membership_status"],
             "last_synced_at": row["last_synced_at"],
             "data_level": access.effective_access,
         }
@@ -255,9 +364,25 @@ def alliance_members(
                 "clan_games": stats.get("clan_games"),
                 "combat_updated_at": stats.get("combat_updated_at"),
             }
+            item.update(item["management"])
         items.append(item)
 
-    count = len(items)
+    keyword = search.strip().casefold()
+    filtered = []
+    for item in items:
+        current_status = item.get("membership_status") or "member"
+        if membership_status != "all" and current_status != membership_status:
+            continue
+        if keyword:
+            searchable = (
+                item.get("account_name"), item.get("player_name"), item.get("player_tag"),
+                item.get("clan_tag"), item.get("clan_name"), item.get("league_name"),
+            )
+            if not any(keyword in str(value).casefold() for value in searchable if value):
+                continue
+        filtered.append(item)
+    filtered = legacy_routes._sort_member_items(filtered, sort_key, sort_order)
+    count = len(filtered)
     offset = (page - 1) * page_size
     return {
         "alliance_id": alliance_id,
@@ -265,7 +390,8 @@ def alliance_members(
         "page": page,
         "page_size": page_size,
         "total_pages": max(1, (count + page_size - 1) // page_size),
-        "members": items[offset:offset + page_size],
+        "members": filtered[offset:offset + page_size],
+        "clans": clan_options,
         "updated_at": max(
             (item["last_synced_at"] for item in items if item["last_synced_at"]), default=None
         ),
@@ -281,6 +407,8 @@ def alliance_current_wars(
     context = _context(user, alliance_id, db)
     cached = legacy_routes._cached_current_wars(db)
     items = []
+    categories = []
+    seen_categories = set()
     updated = []
     for clan in context.clans:
         configured = {
@@ -296,7 +424,18 @@ def alliance_current_wars(
         items.append(current_war_summary(item))
         if item.get("synced_at"):
             updated.append(item["synced_at"])
-    return {"alliance_id": alliance_id, "updated_at": max(updated) if updated else None, "clans": items}
+        if clan.category not in seen_categories:
+            seen_categories.add(clan.category)
+            categories.append({
+                "key": clan.category,
+                "label": CLAN_CATEGORY_LABELS.get(clan.category, clan.category),
+            })
+    return {
+        "alliance_id": alliance_id,
+        "updated_at": max(updated) if updated else None,
+        "categories": categories,
+        "clans": items,
+    }
 
 
 @router.get("/alliances/{alliance_id}/wars/current/{clan_tag}")

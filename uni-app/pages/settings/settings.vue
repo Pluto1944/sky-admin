@@ -128,6 +128,7 @@
 <script>
 import TopBar from '@/components/TopBar.vue'
 import { wechatLogin, getMyInfo, bindAccount, getServerInfo, getSystemVersion } from '@/utils/api.js'
+import { clearAllianceContext, loadAllianceContext } from '@/utils/alliance.js'
 import { APP_VERSION } from '@/config/release.js'
 
 export default {
@@ -204,6 +205,7 @@ export default {
               this.userInfo = res.user
               getApp().globalData.isLoggedIn = true
               getApp().globalData.userInfo = res.user
+              loadAllianceContext(null, true).catch(() => {})
               this.loginLoading = false
 
               uni.showToast({ title: '登录成功', icon: 'success', duration: 1500 })
@@ -341,6 +343,7 @@ export default {
         success: (res) => {
           if (res.confirm) {
             uni.removeStorageSync('token')
+            clearAllianceContext()
             this.isLoggedIn = false
             this.userInfo = null
             getApp().globalData.isLoggedIn = false

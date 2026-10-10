@@ -351,8 +351,10 @@ GET /api/wechat/me
 
 ```text
 GET /api/me/alliances
+POST /api/me/alliances/{alliance_id}/visit
 GET /api/alliances/{alliance_id}
 GET /api/alliances/{alliance_id}/clans
+GET /api/alliances/{alliance_id}/clans/{clan_tag}
 GET /api/alliances/{alliance_id}/members
 GET /api/alliances/{alliance_id}/wars/current
 GET /api/alliances/{alliance_id}/wars/current/{clan_tag}
@@ -361,15 +363,23 @@ GET /api/alliances/{alliance_id}/cwl/live/{clan_tag}
 ```
 
 `GET /api/me/alliances` 只列出有效成员关系；单纯存在 `alliance_visits` 不授予访问权。
+`POST /api/me/alliances/{alliance_id}/visit` 仅将已有有效成员关系对应的联盟记为最近访问和
+默认联盟，不会创建成员关系或提升角色。每个用户最多只有一个默认联盟。
 修改 URL 中的 `alliance_id` 或 `clan_tag` 不能越过当前用户的有效联盟和订阅部落范围，
 无权访问统一返回 `404`，避免枚举其他联盟。
 
 `GET /api/alliances/{alliance_id}/members` 默认每页 100 人，最多 100 人，可用
-`clan_tag` 过滤。基础成员、当前捐兵和赛季进攻数据属于 `member` 级别。只有当前用户在
+`clan_tag` 或逗号分隔的 `clan_tags` 过滤，并兼容现有成员表格的 `membership_status`、
+`search`、`sort_key` 和 `sort_order` 参数。基础成员、当前捐兵和赛季进攻数据属于
+`member` 级别。只有当前用户在
 联盟中是 `admin/leader` 且当前部落 `verification_status=verified` 时，响应才由后端显式
 组装 `management` 对象，包含归属人、活动观察、历史分、最近普通战、最近三月联赛、
 都城和竞赛趋势；这些历史摘要只统计当前联盟订阅部落，不能混入玩家在其他联盟部落的
-记录。未认证部落即使是管理员也只返回成员字段。
+记录。为兼容现有小程序表格，具备管理权限时这些已授权字段也会投影到成员对象顶层；
+未认证部落即使是管理员也只返回成员字段。
+
+部落列表、单部落详情和当前战争接口均返回联盟订阅顺序、类别及页面所需的筛选元数据。
+单部落详情只能读取当前联盟已订阅部落，并继续复用全局部落资料缓存。
 
 当前战争和当前月 CWL 属于协作数据，联盟成员可见。历史月份 CWL 属于评价数据：汇总
 接口要求全部订阅部落均具备管理权限，单部落详情要求当前部落具备管理权限。全部联盟

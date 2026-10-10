@@ -164,6 +164,34 @@ def test_visit_without_active_membership_does_not_grant_access(db):
     assert resolve_alliance_context(db.conn, "visitor", sky_id) is None
 
 
+def test_visit_switches_default_only_for_active_membership(db):
+    apply_sky_migration(db.conn, CLANS, now=NOW)
+    user_id = _user(db, "switcher")
+    sky_id = _sky_id(db)
+    ensure_sky_admin_membership(db.conn, "switcher", now=NOW)
+    paid_id = _paid_alliance(db)
+    _membership(db, paid_id, user_id, "member")
+    db.conn.commit()
+
+    result = alliance_routes.visit_alliance(
+        paid_id, user={"openid": "switcher"}, db=db,
+    )
+    defaults = db.conn.execute(
+        "SELECT alliance_id FROM alliance_visits WHERE user_id=? AND is_default=1",
+        (user_id,),
+    ).fetchall()
+    assert result["id"] == paid_id
+    assert result["is_default"] is True
+    assert [row["alliance_id"] for row in defaults] == [paid_id]
+
+    outsider_id = _paid_alliance(db, key="paid-b", name="B联盟")
+    with pytest.raises(HTTPException) as exc:
+        alliance_routes.visit_alliance(
+            outsider_id, user={"openid": "switcher"}, db=db,
+        )
+    assert exc.value.status_code == 404
+
+
 def test_members_endpoint_whitelists_management_fields_per_clan(db):
     apply_sky_migration(db.conn, CLANS, now=NOW)
     admin_id = _user(db, "admin")
@@ -193,6 +221,7 @@ def test_members_endpoint_whitelists_management_fields_per_clan(db):
 
     assert admin["data_level"] == "management"
     assert admin["management"]["player_name"] == "归属人"
+    assert admin["player_name"] == "归属人"
     assert ordinary["data_level"] == "member"
     assert "management" not in ordinary
     assert "player_name" not in ordinary
