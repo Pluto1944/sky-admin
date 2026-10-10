@@ -1,7 +1,8 @@
 <template>
   <view class="clan-page">
     <TopBar title="部落" :buttons="topButtons" @onSection="switchSection" />
-    <ClanOverview v-if="activeSection === 'overview'" :key="'overview-' + allianceVersion" ref="overview" class="clan-section" @open-detail="openDetail" />
+    <view v-if="!contextReady" class="context-loading"><text>正在加载联盟...</text></view>
+    <ClanOverview v-else-if="activeSection === 'overview'" :key="'overview-' + allianceVersion" ref="overview" class="clan-section" @open-detail="openDetail" />
     <ClanMembers v-else-if="activeSection === 'members'" :key="'members-' + allianceVersion" class="clan-section" :initial-clan-tag="memberClanTag" />
     <ClanStats v-else-if="activeSection === 'stats'" :key="'stats-' + allianceVersion" class="clan-section" />
     <ClanFarm v-else-if="activeSection === 'farm'" :key="'farm-' + allianceVersion" class="clan-section" />
@@ -33,7 +34,7 @@ const VALID_SECTIONS = ['overview', 'members', 'stats', 'farm', 'clan-detail']
 export default {
   components: { TopBar, ClanOverview, ClanMembers, ClanStats, ClanFarm, ClanDetail },
   data() {
-    return { activeSection: 'overview', selectedClanTag: '', selectedClanName: '', memberClanTag: '', allianceVersion: 0, allianceChangeHandler: null }
+    return { activeSection: 'overview', selectedClanTag: '', selectedClanName: '', memberClanTag: '', allianceVersion: 0, allianceChangeHandler: null, contextReady: false }
   },
   computed: {
     topButtons() {
@@ -46,8 +47,12 @@ export default {
       ]
     }
   },
-  onLoad(options) {
-    activateSharedAlliance(options).catch(e => uni.showToast({ title: e.message || '联盟切换失败', icon: 'none' }))
+  async onLoad(options) {
+    try {
+      await activateSharedAlliance(options)
+    } catch (e) {
+      uni.showToast({ title: e.message || '联盟切换失败', icon: 'none' })
+    }
     this.allianceChangeHandler = () => {
       this.allianceVersion += 1
       this.selectedClanTag = ''
@@ -56,16 +61,18 @@ export default {
       this.activeSection = 'overview'
     }
     uni.$on(ALLIANCE_CHANGED_EVENT, this.allianceChangeHandler)
-    const section = options && options.section
-    if (!VALID_SECTIONS.includes(section)) return
+    const requestedSection = options && options.section
+    const section = VALID_SECTIONS.includes(requestedSection) ? requestedSection : 'overview'
     if (section === 'clan-detail') {
       const clanTag = options.clan_tag ? decodeURIComponent(options.clan_tag) : ''
-      if (!clanTag) return
-      this.selectedClanTag = clanTag
+      if (clanTag) this.selectedClanTag = clanTag
+      else this.activeSection = 'overview'
     }
-    this.activeSection = section
+    if (section !== 'clan-detail' || this.selectedClanTag) this.activeSection = section
+    this.contextReady = true
   },
   onShow() {
+    if (!this.contextReady) return
     this.$nextTick(() => {
       if (this.activeSection === 'overview' && this.$refs.overview) this.$refs.overview.refresh()
     })
@@ -104,4 +111,5 @@ export default {
 <style>
 .clan-page { height: 100vh; display: flex; flex-direction: column; background: #0f0f23; }
 .clan-section { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.context-loading { flex: 1; display: flex; align-items: center; justify-content: center; color: #69728a; font-size: 25rpx; }
 </style>

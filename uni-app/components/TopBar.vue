@@ -139,6 +139,7 @@ export default {
     },
     closeAlliancePicker() { this.alliancePickerVisible = false },
     async chooseAlliance(item) {
+      if (this.allianceLoading) return
       if (!item || (this.currentAlliance && Number(item.id) === Number(this.currentAlliance.id))) {
         this.closeAlliancePicker()
         return

@@ -51,8 +51,9 @@ export async function selectAlliance(allianceId) {
 
 export async function activateSharedAlliance(options) {
   const value = options && Number(options.alliance_id)
-  if (!value || !tokenExists()) return loadAllianceContext()
-  const loaded = await loadAllianceContext(value)
+  if (!value || !tokenExists()) return loadAllianceContext(null, true)
+  // 分享页进入时必须通知 TopBar 和已挂载组件，否则页面数据已切换而顶部仍显示旧联盟。
+  const loaded = await loadAllianceContext(value, true)
   if (!loaded.current || Number(loaded.current.id) !== value) {
     throw new Error('你还不是该联盟成员')
   }

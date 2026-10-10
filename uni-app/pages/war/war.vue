@@ -300,6 +300,7 @@ export default {
       clockTimer: null,
       refreshTimer: null,
       allianceChangeHandler: null,
+      contextReady: false,
       statusOptions: [
         { key: 'all', label: '全部' }, { key: 'in_war', label: '战斗日' },
         { key: 'preparation', label: '准备日' }, { key: 'war_ended', label: '已结束' },
@@ -375,8 +376,12 @@ export default {
     leaguePeriodLabel() { const item = this.leaguePeriods[this.leaguePeriodIndex]; return item ? item.label : (this.leaguePeriod || '-') },
     isCurrentLeaguePeriod() { return !this.leaguePeriod || this.leaguePeriod === currentBusinessPeriod() }
   },
-  onLoad(options) {
-    activateSharedAlliance(options).catch(e => uni.showToast({ title: e.message || '联盟切换失败', icon: 'none' }))
+  async onLoad(options) {
+    try {
+      await activateSharedAlliance(options)
+    } catch (e) {
+      uni.showToast({ title: e.message || '联盟切换失败', icon: 'none' })
+    }
     this.allianceChangeHandler = () => this.resetForAlliance()
     uni.$on(ALLIANCE_CHANGED_EVENT, this.allianceChangeHandler)
     if (options && ['league', 'check-in'].indexOf(options.tab) >= 0) this.activeTopTab = options.tab
@@ -386,12 +391,15 @@ export default {
       try { this.selectedHistoryClanTag = decodeURIComponent(options.clan_tag || '') } catch (e) { this.selectedHistoryClanTag = options.clan_tag || '' }
     }
     if (options && options.period) this.leaguePeriod = options.period
+    this.contextReady = true
     if (this.activeTopTab === 'league') this.fetchCwlLive(this.leaguePeriod)
-    else if (this.activeTopTab === 'check-in') return
+    else if (this.activeTopTab === 'check-in') this.$nextTick(() => { if (this.$refs.checkIn) this.$refs.checkIn.startTimers() })
     else if (this.warView === 'history') this.fetchWarHistory()
     else this.fetchCurrentWars()
+    this.startTimers()
   },
   onShow() {
+    if (!this.contextReady) return
     const returnTab = consumeReturnTopTab()
     if (['clan-war', 'league', 'check-in'].indexOf(returnTab) >= 0) this.activeTopTab = returnTab
     this.startTimers()
