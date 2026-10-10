@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from shared.config.env_loader import load_env
 from shared.runtime_identity import capture_runtime_identity
 from .routes import router
+from .alliance_routes import router as alliance_router
 
 # 加载 .env 到 os.environ（必须在 create_app 之前）
 load_env()
@@ -48,6 +49,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(router)
+    app.include_router(alliance_router)
 
     return app
 

@@ -15,10 +15,11 @@
 
 ```
 api_server/
-├── app.py      # FastAPI 应用工厂（CORS、路由挂载）
-├── auth.py     # JWT 认证工具（生成/解析 token、require_user 依赖）
-├── deps.py     # 依赖注入（Database、PlayerRepository 单例）
-├── routes.py   # 路由定义（全部 API 端点）
+├── app.py             # FastAPI 应用工厂（CORS、路由挂载）
+├── auth.py            # JWT 认证工具（生成/解析 token、require_user 依赖）
+├── deps.py            # 依赖注入（Database、PlayerRepository 单例）
+├── routes.py          # 迁移期遗留单联盟 API
+├── alliance_routes.py # M2 带联盟上下文和字段权限的新 API
 └── __init__.py
 ```
 
@@ -342,7 +343,50 @@ GET /api/wechat/me
 
 ---
 
-### 5. 绑定游戏账号
+### 5. 联盟上下文与权限接口（M2）
+
+以下接口必须携带 JWT。JWT 中遗留的全局 `role` 只作旧接口兼容，新接口每次按
+`openid` 从 `alliance_members`、`alliances`、`alliance_plans` 和 `alliance_clans`
+重新读取当前权限：
+
+```text
+GET /api/me/alliances
+GET /api/alliances/{alliance_id}
+GET /api/alliances/{alliance_id}/clans
+GET /api/alliances/{alliance_id}/members
+GET /api/alliances/{alliance_id}/wars/current
+GET /api/alliances/{alliance_id}/wars/current/{clan_tag}
+GET /api/alliances/{alliance_id}/cwl/live
+GET /api/alliances/{alliance_id}/cwl/live/{clan_tag}
+```
+
+`GET /api/me/alliances` 只列出有效成员关系；单纯存在 `alliance_visits` 不授予访问权。
+修改 URL 中的 `alliance_id` 或 `clan_tag` 不能越过当前用户的有效联盟和订阅部落范围，
+无权访问统一返回 `404`，避免枚举其他联盟。
+
+`GET /api/alliances/{alliance_id}/members` 默认每页 100 人，最多 100 人，可用
+`clan_tag` 过滤。基础成员、当前捐兵和赛季进攻数据属于 `member` 级别。只有当前用户在
+联盟中是 `admin/leader` 且当前部落 `verification_status=verified` 时，响应才由后端显式
+组装 `management` 对象，包含归属人、活动观察、历史分、最近普通战、最近三月联赛、
+都城和竞赛趋势；这些历史摘要只统计当前联盟订阅部落，不能混入玩家在其他联盟部落的
+记录。未认证部落即使是管理员也只返回成员字段。
+
+当前战争和当前月 CWL 属于协作数据，联盟成员可见。历史月份 CWL 属于评价数据：汇总
+接口要求全部订阅部落均具备管理权限，单部落详情要求当前部落具备管理权限。全部联盟
+接口只读 SQLite 缓存，不在请求路径调用 COC。
+
+苍穹迁移期有一条已确认兼容规则：登录用户若在固定 `sky-internal` 尚无任何成员记录，
+自动新增为管理员并记录审计；已有成员、降级、移除或封禁记录绝不覆盖或自动恢复。该
+特殊规则不适用于其他免费或付费联盟。
+
+**错误码**：
+
+- `401` — 未登录或 Token 无效；
+- `403` — 请求历史/管理数据，但角色或逐部落认证不足；
+- `404` — 联盟、成员关系或订阅部落不在当前用户范围；
+- `422` — 分页或查询参数不合法。
+
+### 6. 绑定游戏账号
 
 ```
 POST /api/wechat/bind

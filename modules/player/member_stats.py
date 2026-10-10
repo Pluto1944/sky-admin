@@ -279,12 +279,24 @@ def _rate(numerator: int, denominator: int) -> float | None:
     return round(numerator * 100 / denominator, 1) if denominator else None
 
 
-def member_summary_map(conn: sqlite3.Connection, player_tags: list[str]) -> dict[str, dict]:
-    """批量派生成员页四类摘要；不依赖可过期的战斗摘要缓存。"""
+def member_summary_map(
+    conn: sqlite3.Connection,
+    player_tags: list[str],
+    *,
+    clan_tags: list[str] | None = None,
+) -> dict[str, dict]:
+    """批量派生成员页四类摘要；可限制到指定联盟的订阅部落。"""
     if not player_tags:
         return {}
     result = {tag: {} for tag in player_tags}
     placeholders = ",".join("?" for _ in player_tags)
+    scoped_clans = sorted({normalize_tag(tag) for tag in (clan_tags or []) if normalize_tag(tag)})
+    scope_sql = ""
+    if clan_tags is not None:
+        if not scoped_clans:
+            return result
+        scope_placeholders = ",".join("?" for _ in scoped_clans)
+        scope_sql = f" AND {{alias}}.clan_tag IN ({scope_placeholders})"
 
     now = datetime.now(timezone.utc)
     cutoff = (now - timedelta(days=90)).isoformat(timespec="seconds")
@@ -298,8 +310,9 @@ def member_summary_map(conn: sqlite3.Connection, player_tags: list[str]) -> dict
             WHERE facts.player_tag IN ({placeholders})
               AND facts.status = 'war_ended' AND history.status = 'war_ended'
               AND facts.end_time >= ? AND facts.end_time <= ?
+              {scope_sql.format(alias='facts') if scope_sql else ''}
             ORDER BY facts.player_tag, facts.end_time DESC, facts.war_key DESC""",
-        (*player_tags, cutoff, timestamp),
+        (*player_tags, cutoff, timestamp, *scoped_clans),
     ).fetchall()
     wars_by_player: dict[str, list[sqlite3.Row]] = defaultdict(list)
     for row in war_rows:
@@ -322,11 +335,12 @@ def member_summary_map(conn: sqlite3.Connection, player_tags: list[str]) -> dict
                        lr.missed_attacks, lr.fetched_at
                 FROM league_results lr
                 WHERE lr.player_tag IN ({placeholders}) AND lr.period IN ({period_placeholders})
+                  {scope_sql.format(alias='lr') if scope_sql else ''}
                   AND EXISTS (
                       SELECT 1 FROM league_teams teams
                       WHERE teams.period = lr.period AND teams.clan_tag = lr.clan_tag
                   )""",
-            (*player_tags, *periods),
+            (*player_tags, *periods, *scoped_clans),
         ).fetchall()
         for row in cwl_rows:
             entry = cwl_by_player[row["player_tag"]]
@@ -370,8 +384,9 @@ def member_summary_map(conn: sqlite3.Connection, player_tags: list[str]) -> dict
     capital_rows = conn.execute(
         f"""SELECT * FROM capital_raid_member_results
             WHERE player_tag IN ({placeholders})
+              {scope_sql.format(alias='capital_raid_member_results') if scope_sql else ''}
             ORDER BY player_tag, start_time DESC""",
-        player_tags,
+        (*player_tags, *scoped_clans),
     ).fetchall()
     capital: dict[str, dict[str, dict[str, int]]] = defaultdict(lambda: defaultdict(lambda: {
         "attacks": 0, "available": 0, "looted": 0,
@@ -394,8 +409,9 @@ def member_summary_map(conn: sqlite3.Connection, player_tags: list[str]) -> dict
     game_rows = conn.execute(
         f"""SELECT * FROM clan_games_member_snapshots
             WHERE player_tag IN ({placeholders})
+              {scope_sql.format(alias='clan_games_member_snapshots') if scope_sql else ''}
             ORDER BY player_tag, period DESC""",
-        player_tags,
+        (*player_tags, *scoped_clans),
     ).fetchall()
     games: dict[str, list] = defaultdict(list)
     for row in game_rows:

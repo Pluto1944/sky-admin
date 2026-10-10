@@ -79,6 +79,19 @@ def test_cross_clan_war_and_cwl_summary_uses_player_tag(db):
     assert summaries["#P1"]["cwl_recent_3m"]["one_star_rate"] == 40.0
     assert summaries["#P1"]["cwl_recent_3m"]["three_star_rate"] == 80.0
 
+    scoped = member_summary_map(
+        db.conn, ["#P1", "#P2"], clan_tags=["#OWN1", "#CWL1"],
+    )
+    assert scoped["#P1"]["war_recent_15"]["war_count"] == 1
+    assert scoped["#P1"]["war_recent_15"]["attacks"] == 1
+    assert scoped["#P1"]["cwl_recent_3m"]["attacks"] == 5
+
+    other_alliance = member_summary_map(
+        db.conn, ["#P1"], clan_tags=["#OWN2"],
+    )["#P1"]
+    assert other_alliance["war_recent_15"]["war_count"] == 1
+    assert other_alliance["cwl_recent_3m"]["attacks"] == 0
+
 
 def test_war_fact_changes_distinguish_first_archive_and_new_attack(db):
     _seed_accounts(db)
@@ -206,8 +219,9 @@ def test_capital_and_games_summary(db):
     )
     db.conn.execute(
         """INSERT INTO clan_games_member_snapshots
-           (period, player_tag, cumulative_value, points, complete, fetched_at)
-           VALUES ('2026-09', '#P1', 8000, 4000, 1, '2026-09-29T00:00:00+00:00')"""
+           (period, player_tag, clan_tag, cumulative_value, points, complete, fetched_at)
+           VALUES ('2026-09', '#P1', '#OWN1', 8000, 4000, 1,
+                   '2026-09-29T00:00:00+00:00')"""
     )
     db.conn.commit()
     summary = member_summary_map(db.conn, ["#P1"])["#P1"]
@@ -215,6 +229,12 @@ def test_capital_and_games_summary(db):
     assert summary["capital_recent_4w"]["loot_per_attack"] == 15000.0
     assert summary["clan_games"]["points"] == 4000
     assert summary["clan_games"]["average_3"] == 4000.0
+    scoped = member_summary_map(db.conn, ["#P1"], clan_tags=["#OWN1"])["#P1"]
+    assert scoped["capital_recent_4w"]["looted"] == 90000
+    assert scoped["clan_games"]["points"] == 4000
+    excluded = member_summary_map(db.conn, ["#P1"], clan_tags=["#OTHER"])["#P1"]
+    assert "capital_recent_4w" not in excluded
+    assert "clan_games" not in excluded
 
 
 def test_cwl_activity_counts_only_self_owned_sides():

@@ -24,6 +24,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from modules.player.repository import PlayerRepository
+from modules.alliance.access import ensure_sky_admin_membership
 from modules.player.farm_management import canonical_tag, farm_management_by_clan
 from modules.coc_sync.current_war import current_war_summary
 from modules.coc_sync.cwl_live import build_cwl_attack_reminder, build_cwl_dashboard, group_war_tags
@@ -1424,6 +1425,7 @@ def wechat_login(payload: dict, db: Database = Depends(get_db)):
     row = conn.execute("SELECT * FROM wechat_users WHERE openid = ?", (openid,)).fetchone()
 
     if row:
+        ensure_sky_admin_membership(conn, openid)
         token = create_token(openid, row["role"])
         return {
             "token": token,
@@ -1444,6 +1446,8 @@ def wechat_login(payload: dict, db: Database = Depends(get_db)):
         (openid, now, now),
     )
     conn.commit()
+
+    ensure_sky_admin_membership(conn, openid)
 
     token = create_token(openid, "member")
     return {
