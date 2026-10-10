@@ -190,9 +190,14 @@ Sheet 显式导入后不再定时访问在线表格；当前部落归属只认 `
 - `updated_at`：数据最后刷新时间，前端展示"数据更新于 MM-DD HH:mm"
 - `clans` 按配置文件中的部落顺序排列（一营 → 八营）
 
+多联盟登录态使用 `GET /api/alliances/{alliance_id}/farm-config`。它只返回当前联盟中
+`category=farm` 的订阅部落，并保持联盟内的 `sort_order` 顺序；若当前联盟没有互刷部落则返回
+空 `clans`，前端“部落 / 成员”两个子页统一显示“当前联盟无互刷部落”。前端缓存必须按
+`alliance_id` 隔离，禁止复用其他联盟（尤其是苍穹）的互刷名单。
+
 ### 4.2 API 实现文件
 
-- 路由定义：`api_server/routes.py` — 从 `farm_stats` 表直接读取，毫秒级响应
+- 路由定义：`api_server/routes.py`、`api_server/alliance_routes.py` — 从 `farm_stats` 表直接读取，毫秒级响应
 - 业务逻辑：`modules/coc_sync/clashking/farm_stats.py` — 去速本算法和统计逻辑
 - 数据缓存：`shared/db/connection.py` — `farm_stats` 表 DDL + 迁移
 - 定时同步：`scripts/sync_farm_stats.py` — 从 COC API 拉取数据写入缓存表

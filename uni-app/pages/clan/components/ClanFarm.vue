@@ -3,7 +3,7 @@
     <view class="clan-farm-tabs"><view class="clan-farm-tab" :class="{ active: tab === 'clans' }" @tap="tab = 'clans'">部落</view><view class="clan-farm-tab" :class="{ active: tab === 'members' }" @tap="tab = 'members'">成员</view></view>
     <view v-if="loading" class="clan-farm-state"><text>加载中...</text></view>
     <view v-else-if="error" class="clan-farm-state"><text class="clan-farm-error">{{ error }}</text><text class="clan-farm-retry" @tap="fetchData">点击重试</text></view>
-    <view v-else-if="tab === 'clans' && !clans.length" class="clan-farm-state"><text>暂无互刷部落</text></view>
+    <view v-else-if="!clans.length" class="clan-farm-state"><text>当前联盟无互刷部落</text></view>
     <scroll-view v-else scroll-y class="clan-farm-scroll">
       <view class="clan-farm-inner">
         <view class="clan-farm-update"><text v-if="displayUpdatedAt">数据更新于 {{ displayUpdatedAt }}</text><text v-if="tab === 'members'" class="clan-farm-threshold">速本阈值：&gt; {{ rushedDegreeThreshold }} · 不活跃名单仅供清退参考</text></view>
@@ -42,9 +42,10 @@
 
 <script>
 import { getFarmConfig } from '@/utils/api.js'
+import { getCurrentAllianceId } from '@/utils/alliance.js'
 
 const RUSHED_DEGREE_THRESHOLD = 1
-let farmCache = null
+const farmCache = {}
 
 export default {
   name: 'ClanFarm',
@@ -63,10 +64,24 @@ export default {
       })
     }
   },
-  created() { if (farmCache) { this.applyResponse(farmCache); this.loading = false } else this.fetchData() },
+  created() {
+    const cached = farmCache[getCurrentAllianceId() || 0]
+    if (cached) { this.applyResponse(cached); this.loading = false } else this.fetchData()
+  },
   methods: {
     applyResponse(response) { this.clans = response.clans || []; this.updatedAt = response.updated_at ? this.formatTime(response.updated_at) : ''; this.memberUpdatedAt = response.member_updated_at ? this.formatTime(response.member_updated_at) : '' },
-    async fetchData() { this.loading = true; this.error = ''; try { const response = await getFarmConfig(); farmCache = response; this.applyResponse(response) } catch (e) { this.error = e.message || '加载失败' } finally { this.loading = false } },
+    async fetchData() {
+      const allianceId = getCurrentAllianceId() || 0
+      this.loading = true
+      this.error = ''
+      try {
+        const response = await getFarmConfig()
+        if (allianceId !== (getCurrentAllianceId() || 0)) return
+        farmCache[allianceId] = response
+        this.applyResponse(response)
+      } catch (e) { this.error = e.message || '加载失败' }
+      finally { this.loading = false }
+    },
     formatTime(value) { if (!value) return ''; const date = new Date(value.replace('+00:00', 'Z')); if (isNaN(date.getTime())) return value; return `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}` },
     otherCount(distribution) { return (distribution['10'] || 0) + (distribution.below_10 || 0) },
     formatRole(value) { return ({ leader: '首领', coLeader: '副首领', admin: '长老', member: '成员' }[value] || value || '-') },

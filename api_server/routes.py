@@ -1316,19 +1316,9 @@ def war_stats(
 # ── 互刷部落配置 ──────────────────────────────────────────────
 
 
-@router.get("/clan/farm-config")
-def farm_config(db: Database = Depends(get_db)):
-    """获取所有互刷部落的配置及清退辅助名单。
-
-    战争配置从 farm_stats 缓存读取；填坑号和不活跃名单只读本地事实表。
-    请求路径不访问腾讯文档或 COC。
-    返回每个 farm 类别部落的：
-    - 部落实时配置（从部落成员统计各 TH 分布）
-    - 部落去速本后实时配置（从部落战数据用阶段归类法统计）
-    - updated_at 数据更新时间
-    """
+def _farm_config_for_clans(db: Database, configured_clans: list[dict]) -> dict:
+    """从本地缓存组装指定互刷部落，供旧接口和联盟范围接口复用。"""
     conn = db.conn
-    configured_clans = get_farm_clans()
     rows = conn.execute(
         "SELECT clan_tag, clan_name, category, member_count, stats_json, updated_at "
         "FROM farm_stats"
@@ -1348,9 +1338,10 @@ def farm_config(db: Database = Depends(get_db)):
                 stats = {}
         else:
             stats = {}
-        stats.setdefault("clan_tag", clan_tag)
-        stats.setdefault("clan_name", clan.get("name") or clan_tag)
-        stats.setdefault("category", "farm")
+        # 联盟订阅关系是名称和分类的当前权威来源，缓存只能补充统计字段。
+        stats["clan_tag"] = clan_tag
+        stats["clan_name"] = clan.get("name") or clan_tag
+        stats["category"] = "farm"
         stats.setdefault("member_count", int(row["member_count"] or 0) if row else 0)
         stats.setdefault("realtime", {"avg_th": 0, "distribution": {}})
         stats.setdefault(
@@ -1362,21 +1353,58 @@ def farm_config(db: Database = Depends(get_db)):
         stats["inactive_members"] = lists["inactive_members"]
         clans.append(stats)
 
-    fill_updated = conn.execute(
-        "SELECT MAX(updated_at) FROM farm_fill_accounts WHERE status = 'active'"
-    ).fetchone()[0]
-    member_updated = conn.execute(
-        "SELECT MAX(last_synced_at) FROM accounts WHERE COALESCE(membership_status, 'member') = 'member'"
-    ).fetchone()[0]
+    has_fill_accounts = any(item["fill_accounts"] for item in management.values())
+    fill_updated = None
+    if has_fill_accounts:
+        fill_updated = conn.execute(
+            "SELECT MAX(updated_at) FROM farm_fill_accounts WHERE status = 'active'"
+        ).fetchone()[0]
+    configured_keys = {
+        canonical_tag(clan["tag"])
+        for clan in configured_clans
+        if canonical_tag(clan["tag"])
+    }
+    member_updated = max(
+        (
+            row["last_synced_at"]
+            for row in conn.execute(
+                """SELECT clan_tag, last_synced_at FROM accounts
+                   WHERE COALESCE(membership_status, 'member') = 'member'"""
+            ).fetchall()
+            if canonical_tag(row["clan_tag"]) in configured_keys
+            and row["last_synced_at"]
+        ),
+        default=None,
+    )
     return {
         "clans": clans,
         "updated_at": max(
-            (row["updated_at"] for row in rows if row["updated_at"]), default=None
+            (
+                row["updated_at"]
+                for clan in configured_clans
+                if (row := rows_by_tag.get(canonical_tag(clan["tag"])))
+                and row["updated_at"]
+            ),
+            default=None,
         ),
         "member_updated_at": max(
             (value for value in (fill_updated, member_updated) if value), default=None
         ),
     }
+
+
+@router.get("/clan/farm-config")
+def farm_config(db: Database = Depends(get_db)):
+    """获取所有互刷部落的配置及清退辅助名单。
+
+    战争配置从 farm_stats 缓存读取；填坑号和不活跃名单只读本地事实表。
+    请求路径不访问腾讯文档或 COC。
+    返回每个 farm 类别部落的：
+    - 部落实时配置（从部落成员统计各 TH 分布）
+    - 部落去速本后实时配置（从部落战数据用阶段归类法统计）
+    - updated_at 数据更新时间
+    """
+    return _farm_config_for_clans(db, get_farm_clans())
 
 
 # ── 微信小程序接口 ──────────────────────────────────────────────

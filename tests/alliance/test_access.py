@@ -55,14 +55,15 @@ def _membership(db, alliance_id: int, user_id: int, role: str, status: str = "ac
 
 
 def _clan(
-    db, alliance_id: int, tag: str, *, verification: str = "unverified", order: int = 0,
+    db, alliance_id: int, tag: str, *, category: str = "combat",
+    verification: str = "unverified", order: int = 0,
 ):
     db.conn.execute(
         """INSERT INTO alliance_clans
            (alliance_id, clan_tag, clan_name, category, sort_order, status,
             verification_status, source, created_at, updated_at)
-           VALUES (?, ?, ?, 'combat', ?, 'active', ?, 'manual', ?, ?)""",
-        (alliance_id, tag, f"部落{tag}", order, verification, NOW, NOW),
+           VALUES (?, ?, ?, ?, ?, 'active', ?, 'manual', ?, ?)""",
+        (alliance_id, tag, f"部落{tag}", category, order, verification, NOW, NOW),
     )
 
 
@@ -268,6 +269,48 @@ def test_current_wars_are_scoped_to_subscribed_clans(db):
             paid_id, "#AAA", user={"openid": "paid-user"}, db=db,
         )
     assert exc.value.status_code == 404
+
+
+def test_farm_config_only_returns_current_alliance_farm_clans(db):
+    apply_sky_migration(db.conn, CLANS, now=NOW)
+    user_id = _user(db, "farm-user")
+    paid_id = _paid_alliance(db)
+    _membership(db, paid_id, user_id, "member")
+    _clan(db, paid_id, "#FARM", category="farm", order=1)
+    _clan(db, paid_id, "#COMBAT", category="combat", order=2)
+    db.conn.executemany(
+        """INSERT INTO farm_stats
+           (clan_tag, clan_name, category, member_count, stats_json, updated_at)
+           VALUES (?, ?, 'farm', ?, ?, ?)""",
+        [
+            ("#FARM", "联盟互刷部落", 40, '{"member_count": 40}', NOW),
+            ("#OUTSIDE", "联盟外部落", 50, '{"member_count": 50}', NOW),
+        ],
+    )
+    db.conn.commit()
+
+    result = alliance_routes.alliance_farm_config(
+        paid_id, user={"openid": "farm-user"}, db=db,
+    )
+
+    assert result["alliance_id"] == paid_id
+    assert [item["clan_tag"] for item in result["clans"]] == ["#FARM"]
+    assert result["clans"][0]["clan_name"] == "部落#FARM"
+
+
+def test_farm_config_returns_empty_when_alliance_has_no_farm_clan(db):
+    apply_sky_migration(db.conn, CLANS, now=NOW)
+    user_id = _user(db, "no-farm-user")
+    paid_id = _paid_alliance(db)
+    _membership(db, paid_id, user_id, "member")
+    _clan(db, paid_id, "#COMBAT")
+    db.conn.commit()
+
+    result = alliance_routes.alliance_farm_config(
+        paid_id, user={"openid": "no-farm-user"}, db=db,
+    )
+
+    assert result["clans"] == []
 
 
 def test_sky_cwl_keeps_legacy_shell_teams_while_other_alliances_stay_scoped(db):

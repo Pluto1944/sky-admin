@@ -9,6 +9,12 @@ import {
 
 export { ALLIANCE_CHANGED_EVENT, getCurrentAlliance, getCurrentAllianceId }
 
+export function isSkyAlliance() {
+  const current = getCurrentAlliance()
+  // 无联盟上下文时保留旧版默认行为；已选择联盟后严格按 key 判断。
+  return !current || current.key === 'sky-internal'
+}
+
 function tokenExists() {
   return Boolean(uni.getStorageSync('token'))
 }

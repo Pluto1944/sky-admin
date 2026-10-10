@@ -202,7 +202,8 @@ export function getWarStats(clanTag) {
  * @returns {Promise} { clans: [{ clan_tag, realtime, despeed, replace_candidates, fill_accounts, inactive_members }] }
  */
 export function getFarmConfig() {
-  return legacySkyRequest('/api/clan/farm-config')
+  const scoped = scopedPath('/farm-config')
+  return request(scoped || '/api/clan/farm-config', 'GET', {}, Boolean(scoped))
 }
 
 /** 获取全部自有部落的当前战争摘要。 */

@@ -118,6 +118,10 @@
       </scroll-view>
     </view>
 
+    <view v-else-if="activeTopTab === 'league' && !skyAlliance" class="state-box league-unavailable">
+      <text class="state-text">当前无数据，联系管理员</text>
+    </view>
+
     <view v-else-if="activeTopTab === 'league'" class="war-pane">
       <view class="war-toolbar">
         <view class="toolbar-title-wrap">
@@ -186,6 +190,10 @@
       </scroll-view>
     </view>
 
+    <view v-else-if="!skyAlliance" class="state-box league-unavailable">
+      <text class="state-text">当前无数据，联系管理员</text>
+    </view>
+
     <CwlCheckIn
       v-else
       ref="checkIn"
@@ -229,7 +237,7 @@
 import TopBar from '@/components/TopBar.vue'
 import CwlCheckIn from './check-in.vue'
 import { getCurrentWars, getWarHistory, getCwlLive } from '@/utils/api.js'
-import { ALLIANCE_CHANGED_EVENT, activateSharedAlliance, allianceQuery, getCurrentAllianceId } from '@/utils/alliance.js'
+import { ALLIANCE_CHANGED_EVENT, activateSharedAlliance, allianceQuery, getCurrentAllianceId, isSkyAlliance } from '@/utils/alliance.js'
 
 const CACHE_REFRESH_INTERVAL_MS = 60 * 1000
 const BUSINESS_TIMEZONE_OFFSET_MS = 8 * 60 * 60 * 1000
@@ -301,6 +309,7 @@ export default {
       refreshTimer: null,
       allianceChangeHandler: null,
       contextReady: false,
+      skyAlliance: true,
       statusOptions: [
         { key: 'all', label: '全部' }, { key: 'in_war', label: '战斗日' },
         { key: 'preparation', label: '准备日' }, { key: 'war_ended', label: '已结束' },
@@ -382,7 +391,11 @@ export default {
     } catch (e) {
       uni.showToast({ title: e.message || '联盟切换失败', icon: 'none' })
     }
-    this.allianceChangeHandler = () => this.resetForAlliance()
+    this.skyAlliance = isSkyAlliance()
+    this.allianceChangeHandler = () => {
+      this.skyAlliance = isSkyAlliance()
+      this.resetForAlliance()
+    }
     uni.$on(ALLIANCE_CHANGED_EVENT, this.allianceChangeHandler)
     if (options && ['league', 'check-in'].indexOf(options.tab) >= 0) this.activeTopTab = options.tab
     if (options && options.check_in_view === 'arrival') this.checkInView = 'arrival'
@@ -392,8 +405,8 @@ export default {
     }
     if (options && options.period) this.leaguePeriod = options.period
     this.contextReady = true
-    if (this.activeTopTab === 'league') this.fetchCwlLive(this.leaguePeriod)
-    else if (this.activeTopTab === 'check-in') this.$nextTick(() => { if (this.$refs.checkIn) this.$refs.checkIn.startTimers() })
+    if (this.activeTopTab === 'league' && this.skyAlliance) this.fetchCwlLive(this.leaguePeriod)
+    else if (this.activeTopTab === 'check-in' && this.skyAlliance) this.$nextTick(() => { if (this.$refs.checkIn) this.$refs.checkIn.startTimers() })
     else if (this.warView === 'history') this.fetchWarHistory()
     else this.fetchCurrentWars()
     this.startTimers()
@@ -403,8 +416,8 @@ export default {
     const returnTab = consumeReturnTopTab()
     if (['clan-war', 'league', 'check-in'].indexOf(returnTab) >= 0) this.activeTopTab = returnTab
     this.startTimers()
-    if (this.activeTopTab === 'check-in') this.$nextTick(() => { if (this.$refs.checkIn) this.$refs.checkIn.startTimers() })
-    if (this.activeTopTab === 'league' && this.leagueClans.length && this.isCurrentLeaguePeriod) this.fetchCwlLive(this.leaguePeriod)
+    if (this.activeTopTab === 'check-in' && this.skyAlliance) this.$nextTick(() => { if (this.$refs.checkIn) this.$refs.checkIn.startTimers() })
+    if (this.activeTopTab === 'league' && this.skyAlliance && this.leagueClans.length && this.isCurrentLeaguePeriod) this.fetchCwlLive(this.leaguePeriod)
     else if (this.activeTopTab === 'clan-war' && this.warView === 'current' && this.clans.length) this.fetchCurrentWars()
   },
   onHide() {
@@ -459,7 +472,7 @@ export default {
     onTopTab(tab) {
       this.activeTopTab = tab
       this.filterVisible = false
-      if (tab === 'league' && !this.leagueClans.length) this.fetchCwlLive()
+      if (tab === 'league' && this.skyAlliance && !this.leagueClans.length) this.fetchCwlLive()
       if (tab === 'clan-war' && this.warView === 'history' && !this.historyWars.length) this.fetchWarHistory()
       if (tab === 'clan-war' && this.warView === 'current') this.fetchCurrentWars()
     },
@@ -522,6 +535,10 @@ export default {
       } finally { this.historyLoading = false }
     },
     async fetchCwlLive(period) {
+      if (!this.skyAlliance) {
+        this.leagueLoading = false
+        return
+      }
       const allianceId = getCurrentAllianceId()
       const selected = typeof period === 'string' ? period : this.leaguePeriod
       if (!this.leagueClans.length) this.leagueLoading = true
@@ -539,6 +556,7 @@ export default {
       } finally { this.leagueLoading = false }
     },
     onLeaguePeriodChange(event) {
+      if (!this.skyAlliance) return
       const selected = this.leaguePeriods[Number(event.detail.value)]
       if (!selected || selected.period === this.leaguePeriod) return
       this.leaguePeriod = selected.period
@@ -550,7 +568,7 @@ export default {
       this.nowMs = Date.now()
       this.clockTimer = setInterval(() => { this.nowMs = Date.now() }, 1000)
       this.refreshTimer = setInterval(() => {
-        if (this.activeTopTab === 'league') {
+        if (this.activeTopTab === 'league' && this.skyAlliance) {
           if (this.isCurrentLeaguePeriod) this.fetchCwlLive(this.leaguePeriod)
         } else if (this.activeTopTab === 'clan-war' && this.warView === 'current') this.fetchCurrentWars()
       }, CACHE_REFRESH_INTERVAL_MS)

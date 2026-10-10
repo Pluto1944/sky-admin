@@ -259,6 +259,29 @@ def alliance_clan_detail(
     return item
 
 
+@router.get("/alliances/{alliance_id}/farm-config")
+def alliance_farm_config(
+    alliance_id: int,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    """返回当前联盟中标记为 ``farm`` 的部落及其本地互刷缓存。"""
+    context = _context(user, alliance_id, db)
+    configured_clans = [
+        {
+            "tag": clan.clan_tag,
+            "name": clan.clan_name,
+            "category": clan.category,
+            "enabled": True,
+        }
+        for clan in context.clans
+        if clan.category == "farm"
+    ]
+    result = legacy_routes._farm_config_for_clans(db, configured_clans)
+    result["alliance_id"] = alliance_id
+    return result
+
+
 @router.get("/alliances/{alliance_id}/members")
 def alliance_members(
     alliance_id: int,
