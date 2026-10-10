@@ -19,6 +19,16 @@
           </view>
         </view>
 
+        <view v-if="userInfo && userInfo.openid" class="openid-card">
+          <view class="openid-header">
+            <view>
+              <text class="openid-label">当前用户 OpenID</text>
+              <text class="openid-tip">用于向运营方确认当前账号，请勿公开分享</text>
+            </view>
+            <button class="openid-copy" size="mini" @tap="copyOpenId">复制 OpenID</button>
+          </view>
+        </view>
+
         <!-- 设置项 -->
         <view class="menu-section">
           <view class="menu-title">账号</view>
@@ -291,6 +301,23 @@ export default {
         })
     },
 
+    copyOpenId() {
+      const openid = this.userInfo && this.userInfo.openid
+      if (!openid) {
+        uni.showToast({ title: '暂未获取到 OpenID', icon: 'none' })
+        return
+      }
+      uni.setClipboardData({
+        data: openid,
+        success: () => {
+          uni.showToast({ title: 'OpenID 已复制', icon: 'success' })
+        },
+        fail: () => {
+          uni.showToast({ title: '复制失败，请稍后重试', icon: 'none' })
+        }
+      })
+    },
+
     async showAbout() {
       let serverVersion = '获取失败'
       let serviceStatus = '暂不可用'
@@ -415,6 +442,51 @@ export default {
   display: flex;
   flex-wrap: wrap;
   gap: 16rpx;
+}
+
+.openid-card {
+  padding: 26rpx 24rpx;
+  margin-bottom: 30rpx;
+  background: #17172b;
+  border: 1rpx solid #2a2a4a;
+  border-radius: 16rpx;
+}
+
+.openid-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+}
+
+.openid-label {
+  display: block;
+  color: #c9ceda;
+  font-size: 27rpx;
+  font-weight: 600;
+}
+
+.openid-tip {
+  display: block;
+  margin-top: 6rpx;
+  color: #677087;
+  font-size: 21rpx;
+}
+
+.openid-copy {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0 22rpx;
+  color: #67aef5;
+  background: #222743;
+  border: 1rpx solid #343c62;
+  border-radius: 10rpx;
+  font-size: 24rpx;
+  line-height: 58rpx;
+}
+
+.openid-copy::after {
+  border: 0;
 }
 
 /* 菜单 */

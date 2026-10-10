@@ -1,8 +1,11 @@
 <template>
-  <view class="top-bar" :style="{ paddingTop: topPadding + 'px' }">
-    <view class="alliance-switch" :style="allianceButtonStyle" @tap="openAlliancePicker">
-      <text class="alliance-switch-name">{{ allianceButtonLabel }}</text>
-      <text class="alliance-switch-arrow">⌄</text>
+  <view class="top-bar">
+    <view class="top-safe-area" :style="{ height: topPadding + 'px' }">
+      <view class="alliance-switch" :style="allianceButtonStyle" @tap="openAlliancePicker">
+        <text class="alliance-switch-name">{{ currentAlliance ? currentAlliance.name : '苍穹联盟' }}</text>
+        <text v-if="currentAlliance" class="alliance-switch-role">{{ allianceRoleLabel(currentAlliance) }}</text>
+        <text class="alliance-switch-arrow">⌄</text>
+      </view>
     </view>
     <view class="top-bar-content">
       <view class="top-bar-left">
@@ -79,10 +82,6 @@ export default {
     }
   },
   computed: {
-    allianceButtonLabel() {
-      if (!this.currentAlliance) return '苍穹联盟'
-      return `${this.currentAlliance.name}（${this.allianceRoleLabel(this.currentAlliance)}）`
-    },
     allianceListStyle() {
       const rows = this.allianceLoading ? 1 : Math.max(this.alliances.length, 1)
       return { height: `${Math.min(rows * 104, 624)}rpx` }
@@ -99,12 +98,7 @@ export default {
     const menuBottom = menuButton.bottom || menuTop + menuHeight
     const menuLeft = menuButton.left || (info.windowWidth || 375) - 100
     this.topPadding = menuBottom
-    this.allianceButtonStyle = {
-      top: `${menuTop}px`,
-      left: '12px',
-      width: `${Math.max(120, menuLeft - 24)}px`,
-      height: `${menuHeight}px`
-    }
+    this.allianceButtonStyle = `width:${Math.max(120, menuLeft - 24)}px;height:${menuHeight}px;`
     this.allianceChangeHandler = alliance => { this.currentAlliance = alliance }
     uni.$on(ALLIANCE_CHANGED_EVENT, this.allianceChangeHandler)
     this.refreshAlliances()
@@ -173,28 +167,32 @@ export default {
 
 <style>
 .top-bar {
-  position: relative;
   width: 100%;
   background: #1a1a2e;
   border-bottom: 1rpx solid #2a2a4a;
 }
 
+.top-safe-area {
+  display: flex;
+  width: 100%;
+  box-sizing: border-box;
+  align-items: flex-end;
+  padding-left: 12px;
+}
+
 .alliance-switch {
-  position: absolute;
-  z-index: 20;
   display: flex;
   align-items: center;
   box-sizing: border-box;
-  padding: 0 18rpx;
+  padding: 0;
   color: #d9deea;
-  background: #20203a;
-  border: 1rpx solid #303052;
-  border-radius: 28rpx;
+  background: transparent;
 }
 
-.alliance-switch:active { background: #292947; }
-.alliance-switch-name { min-width: 0; overflow: hidden; font-size: 23rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.alliance-switch-arrow { flex-shrink: 0; margin-left: 8rpx; color: #5fa8ff; font-size: 22rpx; }
+.alliance-switch:active { opacity: .68; }
+.alliance-switch-name { min-width: 0; overflow: hidden; color: #ffffff; font-size: 35rpx; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.alliance-switch-role { flex-shrink: 0; margin-left: 10rpx; color: #73809a; font-size: 20rpx; white-space: nowrap; }
+.alliance-switch-arrow { flex-shrink: 0; margin-left: 7rpx; color: #5fa8ff; font-size: 21rpx; }
 
 .top-bar-content {
   height: 88rpx;

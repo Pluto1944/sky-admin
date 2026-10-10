@@ -5,6 +5,9 @@
   "versionName": "1.4.0",
   "versionCode": "10400",
   "transformPx": false,
+  "uniStatistics": {
+    "enable": false
+  },
   "mp-weixin": {
     "appid": "wx6a46dda85a013a34",
     "setting": {
