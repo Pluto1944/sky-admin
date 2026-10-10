@@ -239,3 +239,44 @@ def test_current_wars_are_scoped_to_subscribed_clans(db):
             paid_id, "#AAA", user={"openid": "paid-user"}, db=db,
         )
     assert exc.value.status_code == 404
+
+
+def test_sky_cwl_keeps_legacy_shell_teams_while_other_alliances_stay_scoped(db):
+    apply_sky_migration(db.conn, CLANS, now=NOW)
+    sky_user = _user(db, "sky-cwl")
+    ensure_sky_admin_membership(db.conn, "sky-cwl", now=NOW)
+    sky_id = _sky_id(db)
+    paid_user = _user(db, "paid-cwl")
+    paid_id = _paid_alliance(db)
+    _membership(db, paid_id, paid_user, "member")
+    _clan(db, paid_id, "#BBB")
+    period = legacy_routes._current_cwl_live_period()
+    db.conn.executemany(
+        """INSERT INTO league_teams
+           (period, team_index, team_alias, team_name, clan_tag, category, member_count)
+           VALUES (?, ?, ?, ?, ?, ?, 15)""",
+        [
+            (period, 0, "苍穹壳", "苍穹临时壳", "#CWLX", "shell"),
+            (period, 1, "外部队", "外部队", "#BBB", "combat"),
+        ],
+    )
+    db.conn.commit()
+
+    sky = alliance_routes.alliance_cwl_live(
+        sky_id, user={"openid": "sky-cwl"}, db=db,
+    )
+    assert {item["clan_tag"] for item in sky["clans"]} == {"#CWLX", "#BBB"}
+    detail = alliance_routes.alliance_cwl_live_detail(
+        sky_id, "#CWLX", user={"openid": "sky-cwl"}, db=db,
+    )
+    assert detail["summary"]["clan_tag"] == "#CWLX"
+
+    paid = alliance_routes.alliance_cwl_live(
+        paid_id, user={"openid": "paid-cwl"}, db=db,
+    )
+    assert [item["clan_tag"] for item in paid["clans"]] == ["#BBB"]
+    with pytest.raises(HTTPException) as exc:
+        alliance_routes.alliance_cwl_live_detail(
+            paid_id, "#CWLX", user={"openid": "paid-cwl"}, db=db,
+        )
+    assert exc.value.status_code == 404

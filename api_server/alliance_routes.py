@@ -17,6 +17,7 @@ from modules.alliance.access import (
     list_alliance_contexts,
     resolve_alliance_context,
 )
+from modules.alliance.migration import SKY_ALLIANCE_KEY
 from modules.coc_sync.current_war import current_war_summary
 from modules.coc_sync.official.mapper import normalize_tag
 from modules.player.member_stats import member_summary_map
@@ -320,8 +321,32 @@ def alliance_current_war_detail(
 def _historical_cwl_allowed(context: AllianceContext, period: str) -> None:
     if period == legacy_routes._current_cwl_live_period():
         return
+    if context.alliance_key == SKY_ALLIANCE_KEY:
+        if context.role not in {"admin", "leader"}:
+            raise HTTPException(status_code=403, detail="历史联赛数据需要管理权限")
+        return
     if any(not clan.management_allowed for clan in context.clans):
         raise HTTPException(status_code=403, detail="历史联赛数据需要全部相关部落的管理权限")
+
+
+def _cwl_allowed_tags(
+    context: AllianceContext,
+    db: Database,
+    period: str,
+) -> frozenset[str]:
+    """返回当前联盟可见的 CWL 队伍标签。
+
+    苍穹现有 CWL 队伍包含临时壳子部落，未必出现在固定 12 个日常订阅部落中；
+    迁移期 ``league_teams`` 中的存量数据全部属于苍穹，因此按月份完整复用。其他
+    联盟仍只能看到其订阅部落，直到后续阶段为 CWL 队伍快照增加联盟归属。
+    """
+    if context.alliance_key == SKY_ALLIANCE_KEY:
+        return frozenset(
+            normalize_tag(team.get("clan_tag"))
+            for team in legacy_routes._cwl_live_teams(db, period)
+            if normalize_tag(team.get("clan_tag"))
+        )
+    return context.clan_tags
 
 
 @router.get("/alliances/{alliance_id}/cwl/live")
@@ -337,10 +362,11 @@ def alliance_cwl_live(
         raise HTTPException(status_code=400, detail="period 必须为 YYYY-MM")
     _historical_cwl_allowed(context, selected_period)
     result = legacy_routes._build_cwl_live_summary(db, selected_period)
+    allowed_tags = _cwl_allowed_tags(context, db, selected_period)
     result["alliance_id"] = alliance_id
     result["clans"] = [
         item for item in result["clans"]
-        if normalize_tag(item.get("clan_tag")) in context.clan_tags
+        if normalize_tag(item.get("clan_tag")) in allowed_tags
     ]
     result["updated_at"] = max(
         (item.get("synced_at") for item in result["clans"] if item.get("synced_at")),
@@ -360,16 +386,23 @@ def alliance_cwl_live_detail(
     db: Database = Depends(get_db),
 ):
     context = _context(user, alliance_id, db)
-    clan = _subscribed_clan(context, clan_tag)
     selected_period = period or legacy_routes._current_cwl_live_period()
+    normalized = normalize_tag(clan_tag)
+    if normalized not in _cwl_allowed_tags(context, db, selected_period):
+        raise HTTPException(status_code=404, detail="部落不在当前联盟联赛队伍范围内")
     if selected_period != legacy_routes._current_cwl_live_period():
-        _management_required(context, clan.clan_tag)
+        if context.alliance_key == SKY_ALLIANCE_KEY:
+            if context.role not in {"admin", "leader"}:
+                raise HTTPException(status_code=403, detail="历史联赛数据需要管理权限")
+        else:
+            _management_required(context, normalized)
     result = legacy_routes.cwl_live_detail(
-        clan.clan_tag, period=period, round=round, db=db, view=view,
+        normalized, period=period, round=round, db=db, view=view,
     )
+    allowed_tags = _cwl_allowed_tags(context, db, selected_period)
     result["alliance_id"] = alliance_id
     result["available_teams"] = [
         item for item in result.get("available_teams", [])
-        if normalize_tag(item.get("clan_tag")) in context.clan_tags
+        if normalize_tag(item.get("clan_tag")) in allowed_tags
     ]
     return result
