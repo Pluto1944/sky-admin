@@ -41,6 +41,10 @@ venv/bin/python scripts/observability_report.py --hours 24
 M4.0 没有注册真实任务执行器，`current_wars`、`cwl_live`、`coc_sync` 等仍由原调度路径唯一执行。
 发生异常时保持影子任务关闭即可，不需要切换或回滚业务事实。
 
+2026-10-11 生产已完成手工影子验收：111 条有效需求合并为 48 个全局目标，生成
+48 个 `shadowed` 任务；相同状态立即再规划时新增 0 个任务。该过程没有产生
+`sync_attempts` 或外部 API 请求，生产 `sync_shadow_plan` 仍保持 `enabled=0`。
+
 ## 普通战归档
 
 `current_wars` 先写当前缓存。只有确认普通战为完整 `war_ended` 后，才在同一事务：
