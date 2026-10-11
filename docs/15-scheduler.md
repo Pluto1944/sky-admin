@@ -14,7 +14,7 @@
 | `cwl_assembly` | 月初窗口每 5 分钟 | 名单 revision、集结核对 | 开赛或截止后冻结，不重绑已冻结 revision |
 | `farm_stats` | 30 分钟 | `farm_stats` | API 只读缓存，不在请求内批量访问 COC |
 | `coc_sync` | 6 小时 | `accounts`、部落资料 | COC 身份和当前归属权威同步 |
-| `player_details` | 每天 | 账号详情/活动观察 | 只更新账号领域允许的字段 |
+| `player_details` | 每天 | 账号详情/活动观察 | 只扫描 high/internal 套餐（及苍穹兼容配置）部落；免费独占部落不逐成员扫描 |
 | `member_combat_stats` | 每天 | `member_war_facts` | 仅补齐旧档案的新版事实 |
 | `capital_raid_status` | 每 10 分钟检查 | `capital_raid_status_cache` | 只重试尚未开启/失败部落，已开启后停拉；结束后收口最终状态 |
 | `capital_member_stats` | 每 6 小时检查业务窗口 | 都城成员事实 | 周二至周三结果窗口内运行 |
@@ -73,6 +73,16 @@ Worker 并发度默认为 3，最大限制为 8；任务使用租约、心跳、
 2026-10-11 生产已按上述顺序完成四类接管和一次 `clan_profile` 回滚/再接管演练。
 四类新旧目标均为 12/12，无 missing/extra；周期 Planner 和第二轮自动战斗日任务均已验收，
 生产仍保留按资源类型回滚的 systemd 环境开关。
+
+## M5 免费联盟任务
+
+免费部落由同一 Planner 映射为 `sync_tier=low`：资料和成员默认 24 小时、当前战争保底 6 小时。
+首次订阅和手动刷新通过 API 插入 `interactive` live 任务，开放任务与冷却均按公共资源键共享；
+`realtime` 始终高于 `interactive`，免费积压不会插到苍穹活跃战争之前。免费联盟配置月度 CWL 队伍后，
+沿用 M3.1 月度目标并使用低频 CWL 策略。
+
+每日 `player_details` 只选择 high/internal 套餐（以及迁移期苍穹固定配置）中的当前成员。只被免费
+联盟订阅的部落不执行逐成员详情扫描；若同一 Tag 同时被高质量套餐订阅，则仍按最高质量采集一次。
 
 ## 普通战归档
 

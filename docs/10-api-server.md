@@ -450,6 +450,12 @@ POST /api/alliances/{alliance_id}/cwl/seasons/{period}/teams/{team_id}/correct-t
 POST /api/alliances/{alliance_id}/cwl/seasons/{period}/confirm
 GET /api/alliances/{alliance_id}/cwl/live
 GET /api/alliances/{alliance_id}/cwl/live/{clan_tag}
+POST /api/me/alliances
+PATCH /api/alliances/{alliance_id}
+GET /api/alliances/{alliance_id}/subscription
+PUT /api/alliances/{alliance_id}/subscription
+POST /api/alliances/{alliance_id}/subscription/refresh
+DELETE /api/alliances/{alliance_id}
 ```
 
 `GET /api/me/alliances` 只列出有效成员关系；单纯存在 `alliance_visits` 不授予访问权。
@@ -457,6 +463,16 @@ GET /api/alliances/{alliance_id}/cwl/live/{clan_tag}
 默认联盟，不会创建成员关系或提升角色。每个用户最多只有一个默认联盟。
 修改 URL 中的 `alliance_id` 或 `clan_tag` 不能越过当前用户的有效联盟和订阅部落范围，
 无权访问统一返回 `404`，避免枚举其他联盟。
+
+M5 免费联盟写接口由 `M5_FREE_ALLIANCE_ENABLED=true` 与
+`M5_FREE_ALLIANCE_OPENIDS` 双重控制；未进入内部白名单的登录用户不会得到创建能力。创建者是联盟
+首领，但新订阅部落固定为 `unverified`，因此业务数据权限仍封顶为成员。免费联盟最多一个部落，
+首版只允许修改同一部落的 `normal / combat / farm / flat` 标签，不允许在原联盟中自由替换 Tag。
+删除为可审计软删除，不清理公共缓存或历史。
+
+订阅接口在关系提交后只向 M4 队列提交部落资料、成员列表和当前战争初始化任务；已有新鲜公共缓存
+直接复用。刷新接口默认只提交 `current_war`，返回 `202`、任务/缓存状态和共享冷却结果，不在 HTTP
+请求中调用 COC。`pending / running / retry_wait / ready / partial / failed` 均表示真实异步状态。
 
 `GET /api/alliances/{alliance_id}/members` 默认每页 100 人，最多 100 人，可用
 `clan_tag` 或逗号分隔的 `clan_tags` 过滤，并兼容现有成员表格的 `membership_status`、
@@ -477,7 +493,8 @@ GET /api/alliances/{alliance_id}/cwl/live/{clan_tag}
 该接口与普通战历史接口都只读 `war_history_cache`、`member_war_facts` 和成员快照。
 
 当前战争和当前月 CWL 属于协作数据，联盟成员可见。历史月份 CWL 和滚动联赛统计属于评价数据，
-要求联盟管理员或首领权限。全部联盟接口只读 SQLite 缓存，不在请求路径调用 COC。
+要求联盟管理员或首领权限。联盟查询接口只读 SQLite 缓存；M5 写接口只写联盟关系、审计和持久化
+队列，也不在请求路径调用 COC。
 
 月度 CWL 队伍来自 `alliance_cwl_seasons`、`alliance_cwl_teams`，不要求出现在日常
 `alliance_clans`，也不要求部落认证。联盟管理员和首领可配置当前月、下月；普通成员只读已确认
@@ -497,6 +514,7 @@ GET /api/alliances/{alliance_id}/cwl/live/{clan_tag}
 - `401` — 未登录或 Token 无效；
 - `403` — 请求历史/管理数据，但角色或逐部落认证不足；
 - `404` — 联盟、成员关系或订阅部落不在当前用户范围；
+- `409` — 免费联盟配额、生命周期或不允许的部落替换发生冲突；
 - `422` — 分页或查询参数不合法。
 
 ### 6. 绑定游戏账号

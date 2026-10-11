@@ -53,7 +53,7 @@
 
 `capital_raid_status_cache` 与都城成员贡献事实分离：它每个自有部落只保留一行最近周末状态，服务概览卡片的开启提醒，不保存成员明细。同步失败只更新错误与尝试时间，已有同周状态不会被空结果覆盖。
 
-## 联盟租户底座（M1–M3）
+## 联盟租户底座（M1–M5）
 
 M1 数据模型、M2 后端访问控制和 M3 小程序联盟切换均已实现。`config/settings.yaml` 继续作为苍穹
 遗留任务与编排流程的兼容来源；登录后的联盟页面以 `alliance_members`、`alliance_clans` 和联盟月度
@@ -67,6 +67,11 @@ CWL 配置作为范围与权限依据。公共 COC 事实仍按全局 Tag 保存
 - 部落数量约束由 SQLite trigger 执行，新增部落、重新启用部落、切换套餐或降低套餐配额都不能绕过；
 - `alliance_visits` 只记录入口和默认选择，不能替代 `alliance_members`；
 - `alliance_audit_events.event_key` 用于让同一份迁移清单重复应用时不产生重复审计。
+
+M5 不新增一套“免费部落事实表”。免费联盟继续写上述核心表：创建者写为唯一有效 `leader`，
+订阅部落写入 `alliance_clans` 且保持 `unverified`，创建、改名、订阅/改标签、手动刷新和软删除均写
+`alliance_audit_events`。删除采用 `alliances.status=archived`，同时停用订阅和成员关系，不物理删除
+联盟审计，也不删除 `clan_profile_cache`、`current_war_cache`、战争档案或其他公共事实。
 
 迁移命令为 `scripts/migrate_alliance_m1.py`。默认只读预览；写入必须显式使用 `--apply --yes`，
 并在写入前创建 SQLite 一致性备份。迁移工具默认把执行迁移时已有的全部 `wechat_users` 映射为
@@ -96,6 +101,11 @@ M4.0 在 SQLite 中新增 `sync_interests → sync_targets → sync_tasks → sy
 任务由独立 Worker 原子领取，每次尝试使用租约、心跳、指数退避和最大尝试次数。目标从 live
 切回 shadow 时，待执行和等待重试的 live 任务会被取消，已开始的任务由租约所有者收口。
 影子记录默认保留 7 天；队列聚合状态由 `scripts/observability_report.py` 只读输出，不展示资源 Tag。
+
+M5 手动刷新复用同一 `sync_targets` 和 `sync_tasks`：按 `resource_type + resource_key` 查询全局目标，
+优先复用开放任务，并按部落资源共享冷却。交互任务使用 `interactive` 优先级，低于战斗期
+`realtime`；相同部落被多个联盟订阅时仍只有一个目标。首次订阅若缓存满足新鲜度则不建任务，
+否则只为部落资料、成员列表和当前战争分别提交异步任务。
 
 ## 互刷系统独立认证底座（F1）
 

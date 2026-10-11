@@ -79,15 +79,42 @@ def _raise_on_failure(result: dict) -> dict:
     return result
 
 
+def _refresh_subscription_names(clan_tag: str) -> None:
+    """Replace the temporary Tag display name after profile initialization."""
+    tag = normalize_tag(clan_tag)
+    if not tag:
+        return
+    db = Database(config.DB_PATH)
+    db.init_schema()
+    try:
+        profile = db.conn.execute(
+            """SELECT clan_name, updated_at FROM clan_profile_cache
+               WHERE clan_tag=? AND data_json IS NOT NULL""",
+            (tag,),
+        ).fetchone()
+        if profile and profile["clan_name"]:
+            with db.conn:
+                db.conn.execute(
+                    """UPDATE alliance_clans SET clan_name=?, updated_at=?
+                       WHERE clan_tag=? AND status='active'
+                         AND (clan_name IS NULL OR clan_name='' OR clan_name=clan_tag)""",
+                    (profile["clan_name"], profile["updated_at"], tag),
+                )
+    finally:
+        db.close()
+
+
 def execute_resource_task(resource_type: str, resource_key: str) -> dict:
     """Execute exactly one globally deduplicated resource target."""
     from scripts.scheduler import _run_coc_sync, _run_current_wars, _run_cwl_live
 
     if resource_type == "clan_profile":
         clan = _clan_context(resource_key)
-        return _raise_on_failure(_run_coc_sync(
+        result = _raise_on_failure(_run_coc_sync(
             clans=[clan], sync_members=False, sync_profiles=True,
         ))
+        _refresh_subscription_names(resource_key)
+        return result
     if resource_type == "clan_members":
         clan = _clan_context(resource_key)
         return _raise_on_failure(_run_coc_sync(

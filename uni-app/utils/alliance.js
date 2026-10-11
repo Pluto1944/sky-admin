@@ -45,7 +45,7 @@ export async function loadAllianceContext(preferredId, emitChange = false) {
     alliances.find(item => item.is_default) || alliances[0] || null
   if (current) rememberAlliance(current, emitChange)
   else clearAllianceContext()
-  return { alliances, current }
+  return { alliances, current, features: response.features || {} }
 }
 
 export async function selectAlliance(allianceId) {

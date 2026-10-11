@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from modules.alliance.access import (
     AllianceContext,
@@ -30,6 +30,20 @@ from modules.alliance.cwl_config import (
     list_seasons,
     season_payload,
     update_team,
+)
+from modules.alliance.free_alliance import (
+    FREE_CATEGORIES,
+    FREE_CATEGORY_LABELS,
+    FreeAllianceError,
+    archive_free_alliance,
+    create_free_alliance,
+    enqueue_initialization,
+    free_alliance_capability,
+    reconcile_sync_targets,
+    rename_free_alliance,
+    request_manual_refresh,
+    subscribe_free_clan,
+    subscription_status,
 )
 from modules.coc_sync.current_war import current_war_summary
 from modules.coc_sync.official.mapper import normalize_tag
@@ -58,6 +72,24 @@ class CwlTagCorrectionInput(BaseModel):
     reason: str
 
 
+class FreeAllianceCreateInput(BaseModel):
+    name: str | None = None
+
+
+class FreeAllianceRenameInput(BaseModel):
+    name: str
+
+
+class FreeClanSubscriptionInput(BaseModel):
+    clan_tag: str
+    category: str
+    clan_name: str | None = None
+
+
+class FreeRefreshInput(BaseModel):
+    resource_types: list[str] = Field(default_factory=lambda: ["current_war"])
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -68,6 +100,10 @@ def _context(user: dict, alliance_id: int, db: Database) -> AllianceContext:
         # 统一返回 404，避免枚举其他联盟是否存在。
         raise HTTPException(status_code=404, detail="联盟不存在或当前用户无权访问")
     return context
+
+
+def _free_error(exc: FreeAllianceError) -> HTTPException:
+    return HTTPException(status_code=exc.status_code, detail=str(exc))
 
 
 def _subscribed_clan(context: AllianceContext, clan_tag: str):
@@ -194,7 +230,155 @@ def my_alliances(user: dict = Depends(require_user), db: Database = Depends(get_
         item["is_default"] = bool(visit and visit["is_default"])
         item["last_visited_at"] = visit["last_visited_at"] if visit else None
         items.append(item)
-    return {"count": len(items), "alliances": items}
+    return {
+        "count": len(items),
+        "alliances": items,
+        "features": {
+            "free_alliance": free_alliance_capability(db.conn, user["openid"]),
+        },
+    }
+
+
+@router.post("/me/alliances", status_code=201)
+def create_my_free_alliance(
+    payload: FreeAllianceCreateInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    """Create the current user's one internal-gray free alliance."""
+    try:
+        alliance_id = create_free_alliance(
+            db.conn, user["openid"], name=payload.name,
+        )
+    except FreeAllianceError as exc:
+        raise _free_error(exc) from exc
+    context = _context(user, alliance_id, db)
+    return {**context.as_dict(), "is_default": True}
+
+
+@router.patch("/alliances/{alliance_id}")
+def rename_my_free_alliance(
+    alliance_id: int,
+    payload: FreeAllianceRenameInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        rename_free_alliance(
+            db.conn, user["openid"], alliance_id, payload.name,
+        )
+    except FreeAllianceError as exc:
+        raise _free_error(exc) from exc
+    return _context(user, alliance_id, db).as_dict()
+
+
+@router.get("/alliances/{alliance_id}/subscription")
+def free_subscription(
+    alliance_id: int,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    context = _context(user, alliance_id, db)
+    if context.plan_code != "free":
+        raise HTTPException(status_code=409, detail="该接口仅适用于免费联盟")
+    clan = context.clans[0] if context.clans else None
+    return {
+        "alliance": context.as_dict(include_clans=False),
+        "clan": clan.as_dict() if clan else None,
+        "categories": [
+            {"key": item, "label": FREE_CATEGORY_LABELS[item]}
+            for item in FREE_CATEGORIES
+        ],
+        "sync": subscription_status(db.conn, alliance_id, clan.clan_tag) if clan else [],
+    }
+
+
+@router.put("/alliances/{alliance_id}/subscription")
+def save_free_subscription(
+    alliance_id: int,
+    payload: FreeClanSubscriptionInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        clan = subscribe_free_clan(
+            db.conn,
+            user["openid"],
+            alliance_id,
+            clan_tag=payload.clan_tag,
+            category=payload.category,
+            clan_name=payload.clan_name,
+        )
+    except FreeAllianceError as exc:
+        raise _free_error(exc) from exc
+    context = _context(user, alliance_id, db)
+    try:
+        initialization = enqueue_initialization(
+            db.conn,
+            alliance_id=alliance_id,
+            clan_tag=clan["clan_tag"],
+            actor_user_id=context.user_id,
+        )
+    except Exception:  # noqa: BLE001 - subscription is durable; scheduler will converge
+        initialization = [
+            {"resource_type": item, "accepted": False, "reason": "planner_pending"}
+            for item in ("clan_profile", "clan_members", "current_war")
+        ]
+    return {
+        "alliance": _context(user, alliance_id, db).as_dict(include_clans=False),
+        "clan": clan,
+        "initialization": initialization,
+        "sync": subscription_status(db.conn, alliance_id, clan["clan_tag"]),
+    }
+
+
+@router.post("/alliances/{alliance_id}/subscription/refresh", status_code=202)
+def refresh_free_subscription(
+    alliance_id: int,
+    payload: FreeRefreshInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    context = _context(user, alliance_id, db)
+    if context.plan_code != "free" or not context.clans:
+        raise HTTPException(status_code=409, detail="当前免费联盟尚未订阅部落")
+    clan = context.clans[0]
+    try:
+        results = request_manual_refresh(
+            db.conn,
+            user["openid"],
+            alliance_id,
+            clan.clan_tag,
+            resource_types=payload.resource_types,
+        )
+    except FreeAllianceError as exc:
+        raise _free_error(exc) from exc
+    return {
+        "alliance_id": alliance_id,
+        "clan_tag": clan.clan_tag,
+        "results": results,
+        "sync": subscription_status(db.conn, alliance_id, clan.clan_tag),
+    }
+
+
+@router.delete("/alliances/{alliance_id}")
+def delete_my_free_alliance(
+    alliance_id: int,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        archive_free_alliance(db.conn, user["openid"], alliance_id)
+    except FreeAllianceError as exc:
+        raise _free_error(exc) from exc
+    # Reconciliation is local-only.  If it races with the scheduler, the next
+    # minute's planner will converge to the same target set.
+    try:
+        reconcile_sync_targets(db.conn)
+        sync_reconcile = "complete"
+    except Exception:  # noqa: BLE001 - lifecycle mutation already committed
+        sync_reconcile = "pending"
+    return {"success": True, "alliance_id": alliance_id, "sync_reconcile": sync_reconcile}
 
 
 @router.get("/alliances/{alliance_id}")

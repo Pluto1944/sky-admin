@@ -354,6 +354,113 @@ class SyncQueueRepository:
                     created.append(dict(task))
         return created
 
+    def enqueue_interactive_task(
+        self,
+        resource_type: str,
+        resource_key: str,
+        *,
+        cooldown_seconds: int,
+        now: datetime | None = None,
+        max_attempts: int = 3,
+        payload: Mapping[str, object] | None = None,
+    ) -> dict:
+        """Queue one user-triggered live task with global dedupe and cooldown.
+
+        The cooldown is resource-scoped rather than user-scoped, so multiple
+        alliances subscribing to the same clan cannot multiply official API
+        traffic.  Existing open work always wins.  A realtime target keeps its
+        higher priority; a low-tier scheduled target is temporarily promoted
+        only for this one task.
+        """
+        if cooldown_seconds <= 0 or max_attempts <= 0:
+            raise ValueError("cooldown_seconds and max_attempts must be positive")
+        current = _as_utc(now)
+        timestamp = _iso(current)
+        cutoff = _iso(current - timedelta(seconds=cooldown_seconds))
+        _begin_immediate(self.conn)
+        try:
+            target = self.conn.execute(
+                """SELECT * FROM sync_targets
+                   WHERE resource_type = ? AND resource_key = ? AND status = 'active'""",
+                (str(resource_type), str(resource_key)),
+            ).fetchone()
+            if target is None:
+                raise SyncQueueError("同步目标尚未建立")
+            if target["planning_mode"] != "live":
+                raise SyncQueueError("同步目标尚未进入 live 模式")
+
+            open_task = self.conn.execute(
+                """SELECT * FROM sync_tasks
+                   WHERE target_id = ? AND mode = 'live'
+                     AND status IN ('pending', 'running', 'retry_wait')
+                   ORDER BY id DESC LIMIT 1""",
+                (target["id"],),
+            ).fetchone()
+            if open_task is not None:
+                self.conn.commit()
+                return {"accepted": False, "reason": "deduplicated", "task": dict(open_task)}
+
+            recent = self.conn.execute(
+                """SELECT * FROM sync_tasks
+                   WHERE target_id = ? AND mode = 'live' AND created_at > ?
+                   ORDER BY created_at DESC, id DESC LIMIT 1""",
+                (target["id"], cutoff),
+            ).fetchone()
+            if recent is not None:
+                self.conn.commit()
+                return {"accepted": False, "reason": "cooldown", "task": dict(recent)}
+
+            priority = (
+                target["priority"]
+                if int(target["priority_rank"]) >= PRIORITY_RANK["interactive"]
+                else "interactive"
+            )
+            priority_rank = PRIORITY_RANK[priority]
+            bucket = int(current.timestamp()) // cooldown_seconds
+            idempotency_key = (
+                f"live:interactive:{resource_type}:{resource_key}:{bucket}"
+            )
+            task_payload = {
+                "target_id": int(target["id"]),
+                "target_metadata": json.loads(target["metadata_json"] or "{}"),
+                "trigger": "interactive",
+                **dict(payload or {}),
+            }
+            cursor = self.conn.execute(
+                """INSERT OR IGNORE INTO sync_tasks
+                   (target_id, task_type, resource_type, resource_key, priority,
+                    priority_rank, mode, status, idempotency_key, due_at,
+                    available_at, max_attempts, payload_json, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, 'live', 'pending', ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    target["id"], resource_type, resource_type, resource_key,
+                    priority, priority_rank, idempotency_key, timestamp, timestamp,
+                    max_attempts, _json(task_payload), timestamp, timestamp,
+                ),
+            )
+            row = self.conn.execute(
+                "SELECT * FROM sync_tasks WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+            next_due = _iso(
+                current + timedelta(seconds=int(target["desired_interval_seconds"]))
+            )
+            self.conn.execute(
+                """UPDATE sync_targets
+                   SET last_planned_at = ?, next_due_at = ?, updated_at = ?
+                   WHERE id = ?""",
+                (timestamp, next_due, timestamp, target["id"]),
+            )
+            self.conn.commit()
+            return {
+                "accepted": bool(cursor.rowcount),
+                "reason": "queued" if cursor.rowcount else "deduplicated",
+                "task": dict(row),
+            }
+        except Exception:
+            self.conn.rollback()
+            raise
+
     def set_target_modes(
         self,
         live_resource_types: Sequence[str],

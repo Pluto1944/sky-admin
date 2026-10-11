@@ -1040,6 +1040,29 @@ def _run_coc_sync(
     return {"status": "success", "reason": reason}
 
 
+def _player_detail_clan_tags(db: Database) -> set[str]:
+    """Return clans eligible for the expensive daily per-player scan."""
+    from modules.coc_sync.official.mapper import normalize_tag
+
+    result = {
+        row["clan_tag"]
+        for row in db.conn.execute(
+            """SELECT DISTINCT clans.clan_tag
+               FROM alliance_clans AS clans
+               JOIN alliances ON alliances.id=clans.alliance_id AND alliances.status='active'
+               JOIN alliance_plans AS plans
+                 ON plans.plan_code=alliances.plan_code AND plans.status='active'
+               WHERE clans.status='active' AND plans.sync_tier IN ('high','internal')"""
+        ).fetchall()
+    }
+    result.update(
+        normalize_tag(item.get("tag"))
+        for item in config.CLANS if item.get("enabled", True)
+    )
+    result.discard(None)
+    return result
+
+
 def _run_player_details() -> dict:
     """每日补齐玩家详情，用于赛季进攻数和最近数据活动估算。"""
     from modules.coc_sync.official.mapper import map_player
@@ -1052,9 +1075,19 @@ def _run_player_details() -> dict:
     repo = PlayerRepository(db.conn)
     player_service = PlayerService(repo)
     service = CocSyncService(api_client=None)
-    rows = db.conn.execute(
-        "SELECT player_tag FROM accounts WHERE membership_status = 'member' ORDER BY player_tag"
-    ).fetchall()
+    # M5 免费联盟只同步部落成员列表，不加入每日逐玩家详情扫描。若同一部落
+    # 也被 high/internal 套餐订阅，则它仍按最高质量需求采集一次。
+    high_quality_tags = _player_detail_clan_tags(db)
+    if high_quality_tags:
+        placeholders = ",".join("?" for _ in high_quality_tags)
+        rows = db.conn.execute(
+            f"""SELECT player_tag FROM accounts
+                WHERE membership_status='member' AND clan_tag IN ({placeholders})
+                ORDER BY player_tag""",
+            sorted(high_quality_tags),
+        ).fetchall()
+    else:
+        rows = []
     success = 0
     failed = 0
     for row in rows:

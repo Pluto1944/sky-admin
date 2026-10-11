@@ -234,17 +234,15 @@ class SyncPlanner:
             for name in expected
         }
 
-    def run(
+    def reconcile_targets(
         self,
         *,
         now: datetime | None = None,
-        task_limit: int = 1000,
-        shadow_retention_days: int = 7,
         live_resource_types: tuple[str, ...] | list[str] = (),
     ) -> dict:
+        """Refresh interests and globally deduplicated targets without planning work."""
         current = _as_utc(now)
         live_types = parse_resource_types(live_resource_types)
-        shadow_types = tuple(item for item in RESOURCE_TYPES if item not in live_types)
         interests = self._clan_interests(current) + self._cwl_interests(current)
         interest_result = self.queue.reconcile_interests(
             interests,
@@ -254,6 +252,30 @@ class SyncPlanner:
         target_result = self.queue.rebuild_targets(now=current)
         comparison = self._legacy_comparison(current)
         mode_changes = self.queue.set_target_modes(live_types, now=current)
+        return {
+            "current": current,
+            "live_resource_types": live_types,
+            "interests": interest_result,
+            "targets": target_result,
+            "legacy_comparison": comparison,
+            "mode_changes": mode_changes,
+        }
+
+    def run(
+        self,
+        *,
+        now: datetime | None = None,
+        task_limit: int = 1000,
+        shadow_retention_days: int = 7,
+        live_resource_types: tuple[str, ...] | list[str] = (),
+    ) -> dict:
+        current = _as_utc(now)
+        reconciled = self.reconcile_targets(
+            now=current,
+            live_resource_types=live_resource_types,
+        )
+        live_types = reconciled["live_resource_types"]
+        shadow_types = tuple(item for item in RESOURCE_TYPES if item not in live_types)
         live_tasks = self.queue.plan_due_tasks(
             mode="live", now=current, limit=task_limit, resource_types=live_types,
         ) if live_types else []
@@ -271,10 +293,10 @@ class SyncPlanner:
             "mode": "mixed" if live_types and shadow_types else ("live" if live_types else "shadow"),
             "live_resource_types": list(live_types),
             "shadow_resource_types": list(shadow_types),
-            "mode_changes": mode_changes,
-            "interests": interest_result,
-            "targets": target_result,
-            "legacy_comparison": comparison,
+            "mode_changes": reconciled["mode_changes"],
+            "interests": reconciled["interests"],
+            "targets": reconciled["targets"],
+            "legacy_comparison": reconciled["legacy_comparison"],
             "tasks_planned": len(tasks),
             "live_tasks_planned": len(live_tasks),
             "shadow_tasks_planned": len(shadow_tasks),

@@ -258,6 +258,36 @@ export function visitAlliance(allianceId) {
   return request(`/api/me/alliances/${encodeURIComponent(allianceId)}/visit`, 'POST', {}, true)
 }
 
+/** M5 内部灰度：创建当前用户的免费单部落联盟。 */
+export function createFreeAlliance(name) {
+  return request('/api/me/alliances', 'POST', { name: name || undefined }, true)
+}
+
+export function renameFreeAlliance(allianceId, name) {
+  return request(`/api/alliances/${encodeURIComponent(allianceId)}`, 'PATCH', { name }, true)
+}
+
+export function getFreeAllianceSubscription(allianceId) {
+  return request(`/api/alliances/${encodeURIComponent(allianceId)}/subscription`, 'GET', {}, true)
+}
+
+export function saveFreeAllianceSubscription(allianceId, payload) {
+  return request(`/api/alliances/${encodeURIComponent(allianceId)}/subscription`, 'PUT', payload, true)
+}
+
+export function refreshFreeAllianceSubscription(allianceId, resourceTypes = ['current_war']) {
+  return request(
+    `/api/alliances/${encodeURIComponent(allianceId)}/subscription/refresh`,
+    'POST',
+    { resource_types: resourceTypes },
+    true
+  )
+}
+
+export function archiveFreeAlliance(allianceId) {
+  return request(`/api/alliances/${encodeURIComponent(allianceId)}`, 'DELETE', {}, true)
+}
+
 /**
  * 绑定游戏账号
  * @param {string} accountName - 游戏内昵称
