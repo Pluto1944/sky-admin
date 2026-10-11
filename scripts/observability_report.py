@@ -144,6 +144,65 @@ def _freshness(conn: sqlite3.Connection) -> dict[str, list[dict]]:
     return result
 
 
+def _sync_queue_summary(
+    conn: sqlite3.Connection,
+    *,
+    now: str,
+    since: str,
+) -> dict:
+    required = {"sync_interests", "sync_targets", "sync_tasks", "sync_attempts"}
+    if not all(_table_exists(conn, table) for table in required):
+        return {"available": False}
+    interests = {
+        row["status"]: int(row["count"])
+        for row in conn.execute(
+            "SELECT status, COUNT(*) AS count FROM sync_interests GROUP BY status"
+        ).fetchall()
+    }
+    targets = {
+        f"{row['priority']}:{row['status']}": int(row["count"])
+        for row in conn.execute(
+            """SELECT priority, status, COUNT(*) AS count
+               FROM sync_targets GROUP BY priority, status"""
+        ).fetchall()
+    }
+    tasks = {
+        f"{row['mode']}:{row['status']}": int(row["count"])
+        for row in conn.execute(
+            """SELECT mode, status, COUNT(*) AS count
+               FROM sync_tasks GROUP BY mode, status"""
+        ).fetchall()
+    }
+    overdue_targets = conn.execute(
+        """SELECT COUNT(*) FROM sync_targets
+           WHERE status = 'active' AND (next_due_at IS NULL OR next_due_at <= ?)""",
+        (now,),
+    ).fetchone()[0]
+    expired_leases = conn.execute(
+        """SELECT COUNT(*) FROM sync_tasks
+           WHERE mode = 'live' AND status = 'running'
+             AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?""",
+        (now,),
+    ).fetchone()[0]
+    recent_attempts = {
+        row["status"]: int(row["count"])
+        for row in conn.execute(
+            """SELECT status, COUNT(*) AS count FROM sync_attempts
+               WHERE started_at >= ? GROUP BY status""",
+            (since,),
+        ).fetchall()
+    }
+    return {
+        "available": True,
+        "interests": interests,
+        "targets": targets,
+        "tasks": tasks,
+        "overdue_targets": int(overdue_targets),
+        "expired_leases": int(expired_leases),
+        "recent_attempts": recent_attempts,
+    }
+
+
 def build_report(
     conn: sqlite3.Connection,
     *,
@@ -164,6 +223,11 @@ def build_report(
         "requests": _request_summary(conn, since),
         "jobs": _job_summary(conn, since),
         "freshness": _freshness(conn),
+        "sync_queue": _sync_queue_summary(
+            conn,
+            now=current.isoformat(timespec="seconds"),
+            since=since,
+        ),
     }
 
 
@@ -188,6 +252,20 @@ def _print_text(report: dict) -> None:
             f"中断 {item['interrupted_runs']}，"
             f"未完成 {item['running_runs']}，"
             f"外部请求 {item['external_requests']}，p95 {item['p95_duration_ms']}ms"
+        )
+
+    print("\nM4 同步队列")
+    queue = report["sync_queue"]
+    if not queue["available"]:
+        print("  尚未建立 M4 队列表")
+    else:
+        print(
+            f"  interests={queue['interests']} targets={queue['targets']} "
+            f"tasks={queue['tasks']}"
+        )
+        print(
+            f"  已到期目标 {queue['overdue_targets']}，过期租约 {queue['expired_leases']}，"
+            f"窗口内 attempts={queue['recent_attempts']}"
         )
 
     print("\n数据新鲜度")

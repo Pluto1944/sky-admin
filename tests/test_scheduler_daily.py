@@ -18,6 +18,12 @@ def test_current_wars_refreshes_every_two_minutes():
     assert JOBS["current_wars"]["interval"] == 2
 
 
+def test_sync_shadow_planner_is_inert_by_default():
+    job = JOBS["sync_shadow_plan"]
+    assert job["enabled_default"] is False
+    assert job["include_in_all"] is False
+
+
 def test_next_run_parser_honors_persisted_timestamp():
     expected = datetime(2026, 9, 23, 1, 0, tzinfo=timezone.utc).timestamp()
     assert _parse_next_run_at({"next_run_at": "2026-09-23T01:00:00+00:00"}) == expected

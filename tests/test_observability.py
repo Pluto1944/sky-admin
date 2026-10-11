@@ -3,6 +3,7 @@ from urllib.error import HTTPError
 
 from scripts.observability_report import build_report
 from scripts.scheduler import JOBS, _ensure_rows, run_one
+from modules.sync_queue.repository import SyncQueueRepository
 from shared.db.connection import Database
 from shared.observability import (
     capture_external_requests,
@@ -274,6 +275,45 @@ def test_report_summarizes_requests_jobs_and_freshness():
     assert report["jobs"][0]["external_requests"] == 1
     assert report["jobs"][0]["interrupted_runs"] == 0
     assert report["freshness"]["current_wars"][0]["clan_tag"] == "#2QQ"
+    assert report["sync_queue"] == {
+        "available": True,
+        "interests": {},
+        "targets": {},
+        "tasks": {},
+        "overdue_targets": 0,
+        "expired_leases": 0,
+        "recent_attempts": {},
+    }
+    db.close()
+
+
+def test_report_summarizes_shadow_queue_without_resource_keys():
+    db = Database(":memory:")
+    db.init_schema()
+    repo = SyncQueueRepository(db.conn)
+    now = datetime(2026, 10, 7, 1, tzinfo=timezone.utc)
+    repo.reconcile_interests(
+        [{
+            "source_type": "test",
+            "source_key": "one",
+            "alliance_id": None,
+            "resource_type": "current_war",
+            "resource_key": "#SECRET",
+            "priority": "realtime",
+            "desired_interval_seconds": 120,
+        }],
+        managed_source_types=("test",),
+        now=now,
+    )
+    repo.rebuild_targets(now=now)
+    repo.plan_due_tasks(mode="shadow", now=now)
+
+    report = build_report(db.conn, hours=24, now=now)
+
+    assert report["sync_queue"]["interests"] == {"active": 1}
+    assert report["sync_queue"]["targets"] == {"realtime:active": 1}
+    assert report["sync_queue"]["tasks"] == {"shadow:shadowed": 1}
+    assert "#SECRET" not in str(report["sync_queue"])
     db.close()
 
 

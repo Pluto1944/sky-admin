@@ -213,5 +213,10 @@ CLI 仍可能运行时提前删表。
 `service_runtime`；`war_layout` 固定在北京时间每天 09:00 运行，其余任务使用间隔或业务窗口调度。
 其中 `cwl_live` 仅在北京时间每月 1～12 日访问官方联赛接口。
 
+M4.0 增加默认关闭的 `sync_shadow_plan`。它只根据本地联盟订阅和缓存生成去重后的影子任务，不访问
+外部 API、不写业务缓存，也不接管现有任务。手工对照可运行
+`venv/bin/python scripts/scheduler.py --once sync_shadow_plan`，队列聚合结果由
+`venv/bin/python scripts/observability_report.py --hours 24` 只读查看。
+
 - **运维命令 / CLI 用法**：见 [`../deploy/README.md`](../deploy/README.md)「四、运维命令速查 → 2. sky-scheduler 服务管理」
 - **设计文档**：见 [`../docs/15-scheduler.md`](../docs/15-scheduler.md)

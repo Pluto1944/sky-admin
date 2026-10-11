@@ -14,6 +14,7 @@
     capital_raid_status 都城突袭开启状态（每10分钟检查，已开启部落自动停拉）
     capital_member_stats 都城成员贡献（每6小时检查业务窗口）
     clan_games_stats 竞赛贡献（每6小时检查业务窗口）
+    sync_shadow_plan M4 同步队列影子规划（默认关闭，不调用外部 API）
     war_layout  公众号阵型群发（每天北京时间 09:00）
 
 用法：
@@ -72,6 +73,9 @@ PLAYER_DETAIL_REQUEST_DELAY_SECONDS = max(
 )
 OBSERVABILITY_RETENTION_DAYS = max(
     1, int(os.getenv("OBSERVABILITY_RETENTION_DAYS", "30"))
+)
+SYNC_QUEUE_SHADOW_INTERVAL_MINUTES = max(
+    1, int(os.getenv("SYNC_QUEUE_SHADOW_INTERVAL_MINUTES", "5"))
 )
 _last_observability_prune_date: str | None = None
 
@@ -1643,6 +1647,23 @@ def _run_war_layout() -> dict:
     return {**result, "reason": reason}
 
 
+def _run_sync_shadow_plan() -> dict:
+    """Build M4 shadow tasks from local subscriptions without external I/O."""
+    from modules.sync_queue.planner import ShadowSyncPlanner, format_planner_reason
+
+    db = Database(config.DB_PATH)
+    db.init_schema()
+    try:
+        result = ShadowSyncPlanner(db.conn).run()
+    finally:
+        db.close()
+    return {
+        "status": "success",
+        "reason": format_planner_reason(result),
+        "planner": result,
+    }
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # 任务注册表
 # ═══════════════════════════════════════════════════════════════════════
@@ -1705,6 +1726,14 @@ JOBS = {
         "name": "CWL联赛战绩",
         "interval": 1440,
         "run": _run_cwl,
+    },
+    "sync_shadow_plan": {
+        "name": "M4同步影子规划",
+        "interval": SYNC_QUEUE_SHADOW_INTERVAL_MINUTES,
+        "enabled_default": os.getenv("SYNC_QUEUE_SHADOW_ENABLED", "false").strip().lower()
+        in ("1", "true", "yes", "on"),
+        "include_in_all": False,
+        "run": _run_sync_shadow_plan,
     },
     "war_layout": {
         "name": "公众号阵型更新",

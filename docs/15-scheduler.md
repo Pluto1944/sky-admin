@@ -19,7 +19,27 @@
 | `capital_member_stats` | 每 6 小时检查业务窗口 | 都城成员事实 | 周二至周三结果窗口内运行 |
 | `clan_games_stats` | 每 6 小时检查业务窗口 | 竞赛快照 | 月末窗口内运行 |
 | `cwl` | 每天，规则允许日期 | `league_results` | 只从本地完整 CWL 原始档案重建投影 |
+| `sync_shadow_plan` | 默认关闭；启用后默认每 5 分钟 | `sync_interests`、`sync_targets`、影子 `sync_tasks` | 只读本地联盟配置和缓存；不访问外部 API、不写业务事实、不接管旧任务 |
 | `war_layout` | 北京时间固定时刻 | 独立运行库、公众号草稿 | 默认仅草稿；群发硬开关不可绕过 |
+
+## M4.0 影子规划
+
+`sync_shadow_plan` 将有效 `alliance_clans` 映射为部落资料、成员列表和当前战争需求，并将当月已确认
+的 `alliance_cwl_teams` 映射为 CWL 实时需求。多个联盟订阅相同 Tag 时，`sync_targets` 只保留一个
+公共目标，并采用最高优先级和最短周期。免费套餐保持低频计划；内部或付费部落的活跃战争采用实时
+优先级。当前战争的 2/30 分钟状态规则和错误退避只用于生成对照计划，不改变旧调度器。
+
+功能开关 `SYNC_QUEUE_SHADOW_ENABLED` 默认是 `false`，周期可用
+`SYNC_QUEUE_SHADOW_INTERVAL_MINUTES` 调整。关闭时仅建表，不生成影子数据；手工验证可执行：
+
+```bash
+source scripts/load_env.sh
+venv/bin/python scripts/scheduler.py --once sync_shadow_plan
+venv/bin/python scripts/observability_report.py --hours 24
+```
+
+M4.0 没有注册真实任务执行器，`current_wars`、`cwl_live`、`coc_sync` 等仍由原调度路径唯一执行。
+发生异常时保持影子任务关闭即可，不需要切换或回滚业务事实。
 
 ## 普通战归档
 
@@ -91,5 +111,6 @@ venv/bin/python scripts/observability_report.py --hours 24
 venv/bin/python scripts/observability_report.py --hours 168 --json
 ```
 
-报告包含任务运行次数、失败数、中断数、仍在运行数、外部请求量、429、成功率、平均/P95/最大耗时，以及当前战争、部落
-资料、成员资料和当月 CWL 的数据新鲜度。该命令以 SQLite `mode=ro` 打开数据库，不执行迁移或写入。
+报告包含任务运行次数、失败数、中断数、仍在运行数、外部请求量、429、成功率、平均/P95/最大耗时，
+当前战争、部落资料、成员资料和当月 CWL 的数据新鲜度，以及 M4 需求、目标、任务、过期租约的聚合
+计数。该命令以 SQLite `mode=ro` 打开数据库，不执行迁移或写入，也不输出同步资源 Tag。

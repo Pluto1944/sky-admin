@@ -885,6 +885,117 @@ CREATE TABLE IF NOT EXISTS service_runtime (
 );
 """
 
+# M4 同步控制底座。M4.0 只由影子 Planner 写入计划，不接管现有调度任务；
+# 表结构提前包含 live Worker 所需的领取、租约、重试和逐次执行记录。
+_SYNC_QUEUE_DDL = """
+CREATE TABLE IF NOT EXISTS sync_interests (
+    id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_type              TEXT NOT NULL,
+    source_key               TEXT NOT NULL,
+    alliance_id              INTEGER,
+    resource_type            TEXT NOT NULL,
+    resource_key             TEXT NOT NULL,
+    priority                 TEXT NOT NULL
+                             CHECK(priority IN ('realtime', 'interactive', 'scheduled', 'backfill')),
+    desired_interval_seconds INTEGER NOT NULL CHECK(desired_interval_seconds > 0),
+    status                   TEXT NOT NULL DEFAULT 'active'
+                             CHECK(status IN ('active', 'inactive')),
+    expires_at               TEXT,
+    metadata_json            TEXT NOT NULL DEFAULT '{}',
+    created_at               TEXT NOT NULL,
+    updated_at               TEXT NOT NULL,
+    UNIQUE(source_type, source_key, resource_type, resource_key),
+    FOREIGN KEY(alliance_id) REFERENCES alliances(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_interests_resource_status
+ON sync_interests(resource_type, resource_key, status);
+
+CREATE INDEX IF NOT EXISTS idx_sync_interests_alliance_status
+ON sync_interests(alliance_id, status);
+
+CREATE TABLE IF NOT EXISTS sync_targets (
+    id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+    resource_type            TEXT NOT NULL,
+    resource_key             TEXT NOT NULL,
+    priority                 TEXT NOT NULL
+                             CHECK(priority IN ('realtime', 'interactive', 'scheduled', 'backfill')),
+    priority_rank            INTEGER NOT NULL,
+    desired_interval_seconds INTEGER NOT NULL CHECK(desired_interval_seconds > 0),
+    interest_count           INTEGER NOT NULL DEFAULT 0 CHECK(interest_count >= 0),
+    alliance_count           INTEGER NOT NULL DEFAULT 0 CHECK(alliance_count >= 0),
+    status                   TEXT NOT NULL DEFAULT 'active'
+                             CHECK(status IN ('active', 'inactive')),
+    metadata_json            TEXT NOT NULL DEFAULT '{}',
+    last_planned_at          TEXT,
+    next_due_at              TEXT,
+    created_at               TEXT NOT NULL,
+    updated_at               TEXT NOT NULL,
+    UNIQUE(resource_type, resource_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_targets_due
+ON sync_targets(status, priority_rank DESC, next_due_at);
+
+CREATE TABLE IF NOT EXISTS sync_tasks (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    target_id         INTEGER NOT NULL,
+    task_type         TEXT NOT NULL,
+    resource_type     TEXT NOT NULL,
+    resource_key      TEXT NOT NULL,
+    priority          TEXT NOT NULL
+                      CHECK(priority IN ('realtime', 'interactive', 'scheduled', 'backfill')),
+    priority_rank     INTEGER NOT NULL,
+    mode              TEXT NOT NULL DEFAULT 'shadow'
+                      CHECK(mode IN ('shadow', 'live')),
+    status            TEXT NOT NULL
+                      CHECK(status IN ('shadowed', 'pending', 'running', 'retry_wait',
+                                       'succeeded', 'failed', 'dead', 'cancelled')),
+    idempotency_key   TEXT NOT NULL UNIQUE,
+    due_at            TEXT NOT NULL,
+    available_at      TEXT NOT NULL,
+    attempt_count     INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
+    max_attempts      INTEGER NOT NULL DEFAULT 3 CHECK(max_attempts > 0),
+    lease_owner       TEXT,
+    lease_expires_at  TEXT,
+    payload_json      TEXT NOT NULL DEFAULT '{}',
+    result_json       TEXT,
+    last_error        TEXT,
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL,
+    started_at        TEXT,
+    finished_at       TEXT,
+    FOREIGN KEY(target_id) REFERENCES sync_targets(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_tasks_claim
+ON sync_tasks(mode, status, priority_rank DESC, available_at, due_at);
+
+CREATE INDEX IF NOT EXISTS idx_sync_tasks_target_created
+ON sync_tasks(target_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS sync_attempts (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id                INTEGER NOT NULL,
+    attempt_no             INTEGER NOT NULL CHECK(attempt_no > 0),
+    worker_id              TEXT NOT NULL,
+    status                 TEXT NOT NULL
+                           CHECK(status IN ('running', 'succeeded', 'failed', 'interrupted')),
+    started_at             TEXT NOT NULL,
+    finished_at            TEXT,
+    duration_ms            INTEGER,
+    error_type             TEXT,
+    error_message          TEXT,
+    external_request_count INTEGER NOT NULL DEFAULT 0 CHECK(external_request_count >= 0),
+    result_json            TEXT,
+    UNIQUE(task_id, attempt_no),
+    FOREIGN KEY(task_id) REFERENCES sync_tasks(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_attempts_task_started
+ON sync_attempts(task_id, started_at DESC);
+"""
+
 _CHILDREN_DDL = (
     _REGISTRATIONS_DDL.format(table="registrations")
     + _LEAGUE_TEAMS_DDL
@@ -908,6 +1019,7 @@ _CHILDREN_DDL = (
     + _SYNC_JOBS_DDL
     + _SYNC_JOB_RUNS_DDL
     + _SERVICE_RUNTIME_DDL
+    + _SYNC_QUEUE_DDL
 )
 
 _SCHEMA = _ACCOUNTS_DDL.format(table="accounts") + _CHILDREN_DDL
@@ -1302,6 +1414,7 @@ class Database:
         """清空并重建所有业务表（历史数据清零）。"""
         self.conn.execute("PRAGMA foreign_keys = OFF")
         for table in (
+            "sync_attempts", "sync_tasks", "sync_targets", "sync_interests",
             "farm_auth_events",
             "farm_registration_attempts", "farm_score_ledger", "farm_matches",
             "farm_round_clans", "farm_rounds",
