@@ -94,6 +94,133 @@ function request(url, method = 'GET', data = {}, needAuth = false) {
   })
 }
 
+/** 互刷系统请求使用独立 farm_token，绝不读写微信 token。 */
+function farmRequest(url, method = 'GET', data = {}, needAuth = true) {
+  return new Promise((resolve, reject) => {
+    const header = { 'Content-Type': 'application/json' }
+    if (needAuth) {
+      const token = uni.getStorageSync('farm_token')
+      if (token) header.Authorization = 'Bearer ' + token
+    }
+    uni.request({
+      url: BASE_URL + url,
+      method,
+      data: method === 'GET' ? undefined : data,
+      header,
+      timeout: 15000,
+      success: (res) => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(res.data)
+          return
+        }
+        const msg = res.data && res.data.detail ? res.data.detail : '请求失败'
+        if (res.statusCode === 401 && needAuth) {
+          uni.removeStorageSync('farm_token')
+          uni.removeStorageSync('farm_account')
+          uni.redirectTo({ url: '/pages/farm/login' })
+        }
+        reject(new Error(msg))
+      },
+      fail: () => reject(new Error('网络请求失败，请检查网络连接'))
+    })
+  })
+}
+
+export function farmLogin(username, password) {
+  return farmRequest('/api/farm-system/auth/login', 'POST', { username, password }, false)
+}
+
+export function farmLogout() {
+  return farmRequest('/api/farm-system/auth/logout', 'POST')
+}
+
+export function getFarmMe() {
+  return farmRequest('/api/farm-system/me')
+}
+
+export function getFarmClans() {
+  return farmRequest('/api/farm-system/clans')
+}
+
+export function getFarmAdminAccounts() {
+  return farmRequest('/api/farm-system/admin/accounts')
+}
+
+export function createFarmAccount(payload) {
+  return farmRequest('/api/farm-system/admin/accounts', 'POST', payload)
+}
+
+export function updateFarmAccount(accountId, payload) {
+  return farmRequest(`/api/farm-system/admin/accounts/${encodeURIComponent(accountId)}`, 'PATCH', payload)
+}
+
+export function getFarmAdminClans() {
+  return farmRequest('/api/farm-system/admin/clans')
+}
+
+export function createFarmClan(payload) {
+  return farmRequest('/api/farm-system/admin/clans', 'POST', payload)
+}
+
+export function updateFarmClan(clanTag, payload) {
+  return farmRequest(`/api/farm-system/admin/clans/${encodeURIComponent(clanTag)}`, 'PATCH', payload)
+}
+
+export function transferFarmClan(clanTag, accountId) {
+  return farmRequest(
+    `/api/farm-system/admin/clans/${encodeURIComponent(clanTag)}/transfer`,
+    'POST',
+    { account_id: accountId }
+  )
+}
+
+export function getFarmDashboard() {
+  return farmRequest('/api/farm-system/dashboard')
+}
+
+export function createFarmRound(payload) {
+  return farmRequest('/api/farm-system/admin/rounds', 'POST', payload)
+}
+
+export function updateFarmRound(roundId, payload) {
+  return farmRequest(`/api/farm-system/admin/rounds/${encodeURIComponent(roundId)}`, 'PATCH', payload)
+}
+
+export function getFarmRoundResults(roundId) {
+  return farmRequest(`/api/farm-system/admin/rounds/${encodeURIComponent(roundId)}/results`)
+}
+
+export function registerFarmClan(roundId, clanTag) {
+  return farmRequest(
+    `/api/farm-system/rounds/${encodeURIComponent(roundId)}/clans/${encodeURIComponent(clanTag)}/register`,
+    'POST'
+  )
+}
+
+export function revokeFarmMatch(matchId, reason) {
+  return farmRequest(
+    `/api/farm-system/creator/matches/${encodeURIComponent(matchId)}/revoke`,
+    'POST',
+    { reason }
+  )
+}
+
+export function cancelFarmRound(roundId, reason) {
+  return farmRequest(
+    `/api/farm-system/creator/rounds/${encodeURIComponent(roundId)}/cancel`,
+    'POST',
+    { reason }
+  )
+}
+
+export function resetFarmAccountPassword(accountId, newPassword) {
+  return farmRequest(
+    `/api/farm-system/creator/accounts/${encodeURIComponent(accountId)}/reset-password`,
+    'POST',
+    { new_password: newPassword }
+  )
+}
+
 /** 获取公开的服务健康状态及已部署版本。 */
 export function getServerInfo() {
   return request('/api/ping')

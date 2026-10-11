@@ -42,7 +42,7 @@
 
         <view class="farm-system-entry">
           <text class="farm-system-title">互刷联盟系统</text>
-          <text class="farm-system-desc">查看开战时间、匹配结果与积分</text>
+          <text class="farm-system-desc">查看开始搜战时间、匹配结果与积分</text>
           <button class="farm-system-btn" @tap="openFarmSystem">
             <text>进入系统</text><text class="farm-system-arrow">→</text>
           </button>
@@ -166,7 +166,7 @@
         <view class="farm-system-entry farm-system-entry-login">
           <text class="farm-system-badge">独立账号</text>
           <text class="farm-system-title">互刷联盟系统</text>
-          <text class="farm-system-desc">查看开战时间、匹配结果与积分</text>
+          <text class="farm-system-desc">查看开始搜战时间、匹配结果与积分</text>
           <button class="farm-system-btn" @tap="openFarmSystem">
             <text>进入系统</text><text class="farm-system-arrow">→</text>
           </button>
@@ -305,7 +305,10 @@ export default {
     },
 
     openFarmSystem() {
-      uni.showToast({ title: '互刷系统暂未开放', icon: 'none' })
+      const target = uni.getStorageSync('farm_token')
+        ? '/pages/farm/home'
+        : '/pages/farm/login'
+      uni.navigateTo({ url: target })
     },
 
     // ====== 绑定 ======

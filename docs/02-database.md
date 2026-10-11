@@ -20,6 +20,15 @@
 | 普通战事实投影 | `member_war_facts` | `(clan_tag, war_key, player_tag)` | 可重建的逐玩家进攻/防守查询事实 |
 | 互刷统计 | `farm_stats` | `clan_tag` | 互刷部落配置与去速本统计缓存 |
 | 互刷填坑号 | `farm_fill_accounts` | `account_number` | 一次性导入的长期保护身份；`player_tag` 可重复且无 accounts 外键 |
+| 互刷独立账号 | `farm_auth_accounts` | `id` / `username` | 互刷系统独立登录、角色、状态和令牌版本 |
+| 互刷部落归属 | `farm_clans` | `id` / `clan_tag_key` | 部落联盟账号与互刷部落的归属；积分初始为 0 |
+| 互刷管理审计 | `farm_audit_logs` | `id` | 账号创建、密码和状态变更等受控操作审计 |
+| 互刷场次 | `farm_rounds` | `id` | 全联盟统一时间、场次状态和时间锁定 |
+| 互刷场次部落 | `farm_round_clans` | `(round_id, clan_id)` | 创建场次时的部落、归属和积分快照及登记状态 |
+| 互刷匹配 | `farm_matches` | `id` / `(round_id, pair_key)` | 内部匹配或外部匹配失败及一次性平分随机结果 |
+| 互刷积分流水 | `farm_score_ledger` | `id` | 胜负积分前后余额和后续反向冲销事实 |
+| 互刷登记尝试 | `farm_registration_attempts` | `id` | 每次手工登记的状态、时间校验和排障摘要 |
+| 互刷登录观测 | `farm_auth_events` | `id` | 不含用户名和凭证的登录结果计数 |
 | 账号外部身份 | `wechat_users` | `openid` | 微信登录和账号绑定 |
 | 联盟套餐 | `alliance_plans` | `plan_code` | `free / paid / internal` 的部落配额、同步等级和权益快照 |
 | 联盟主体 | `alliances` | `id` / `alliance_key` | 联盟稳定身份、名称、状态、套餐与创建者；名称不是业务键 |
@@ -71,6 +80,30 @@ M1 只建立联盟数据模型与苍穹映射，不改变现有 API、前端或�
 外键级联删除。默认保留 30 天，可通过 `OBSERVABILITY_RETENTION_DAYS` 调整。观测表是可丢弃的
 运行数据，不是业务事实；观测写入或清理失败不得改变同步任务结果。调度器进程启动时会把上一进程
 遗留的 `running` 记录收口为 `interrupted`，保留发现中断的时间和原因，不伪造完整耗时或请求计数。
+
+## 互刷系统独立认证底座（F1）
+
+`farm_auth_accounts` 与 `wechat_users` 完全分离。账号统一使用邮箱登录，邮箱规范化后唯一，角色只允许
+`creator / admin / member`，状态只允许 `active / disabled`；部分唯一索引保证同一时刻最多一个
+有效创建者。密码只保存带随机盐的 `scrypt-v1` 哈希。修改或重置密码、启停账号都会递增
+`token_version`，使全部旧互刷令牌失效。
+
+`farm_clans` 从 F1 起预留账号与部落归属，使用 `clan_tag_key` 比较规范化标签并兼容 COC 标签中的
+`O / 0` 易混写法；F1 不开放部落管理接口，也不迁移现有 `farm_stats`。`farm_audit_logs` 不保存密码、
+哈希或令牌。三张表由 `shared/db/connection.py` 幂等创建，功能开关关闭时不会改变现有微信登录和页面。
+
+F3 新增 `farm_rounds` 与 `farm_round_clans`。部分唯一索引保证最多一个
+`scheduled / open / partially_registered` 场次；创建场次时只复制启用账号下的启用部落，并保存当时
+归属、标签、名称和积分。后续转移部落不会改变历史快照。统一时间以 UTC 保存，API 同时返回
+`Asia/Shanghai` 展示值。业务统一时间固定为“开始搜战时间”，`business_time_kind` 只允许
+`preparation_start`，登记时校验 COC 官方 `preparationStartTime`。
+
+F4 的 `farm_matches`、`farm_score_ledger` 和 `farm_registration_attempts` 分离最终事实、积分事实与
+可重试观测。一个场次的同一规范化部落对最多一条有效匹配，同一匹配同一部落最多一条基础胜负流水。
+内部双方结果、两笔流水、物化积分和场次状态在同一事务提交；失败全部回滚。登记尝试只保存必要的
+官方状态、时间和对手摘要，不保存成员宽表、API Token 或授权头。
+`farm_auth_events` 只记录账号 ID（可空）、结果和时间，用于统计成功、无效凭证、停用、限流和未进入
+灰度范围；它不保存提交的用户名、密码、令牌或客户端授权头。
 
 ## 普通部落战
 
@@ -137,6 +170,9 @@ M1 只建立联盟数据模型与苍穹映射，不改变现有 API、前端或�
 | `league_results` | 从完整 `cwl_live_group_cache` + `cwl_live_war_cache` 运行 `scripts/fetch_cwl_data.py --period YYYY-MM` |
 | `farm_stats` / 部落资料缓存 | 对应调度任务重新抓取 |
 | `farm_fill_accounts` | 不可由 COC 重建；从一致性备份恢复，或由已确认来源显式重新导入 |
+| `farm_auth_accounts` / `farm_clans` / `farm_rounds` / `farm_round_clans` / `farm_matches` / `farm_score_ledger` / `farm_audit_logs` | 私有管理事实，不可由 COC 重建；从一致性备份恢复 |
+| `farm_registration_attempts` | 可丢弃观测记录；不作为匹配或积分事实 |
+| `farm_auth_events` | 可丢弃认证观测记录；不作为账号或授权事实 |
 | `cwl_assembly_cache` 未冻结记录 | 由月初检查窗口重新核对；冻结结果不可用重算值替换 |
 
 恢复 COS SQLite 快照后须运行 `PRAGMA integrity_check`、重启 `sky-admin.service` 与

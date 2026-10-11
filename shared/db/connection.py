@@ -376,6 +376,223 @@ CREATE INDEX IF NOT EXISTS idx_farm_fill_accounts_player_tag
 ON farm_fill_accounts(player_tag);
 """
 
+_FARM_SYSTEM_CORE_DDL = """
+CREATE TABLE IF NOT EXISTS farm_auth_accounts (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    username      TEXT NOT NULL UNIQUE,
+    display_name  TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    role          TEXT NOT NULL DEFAULT 'member'
+                  CHECK(role IN ('creator', 'admin', 'member')),
+    status        TEXT NOT NULL DEFAULT 'active'
+                  CHECK(status IN ('active', 'disabled')),
+    token_version INTEGER NOT NULL DEFAULT 1 CHECK(token_version >= 1),
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    last_login_at TEXT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_farm_auth_active_creator
+ON farm_auth_accounts(role)
+WHERE role = 'creator' AND status = 'active';
+
+CREATE INDEX IF NOT EXISTS idx_farm_auth_accounts_status_role
+ON farm_auth_accounts(status, role);
+
+CREATE TABLE IF NOT EXISTS farm_clans (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    clan_tag     TEXT NOT NULL,
+    clan_tag_key TEXT NOT NULL UNIQUE,
+    clan_name    TEXT NOT NULL,
+    account_id   INTEGER NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'active'
+                 CHECK(status IN ('active', 'disabled')),
+    score        INTEGER NOT NULL DEFAULT 0,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL,
+    FOREIGN KEY(account_id) REFERENCES farm_auth_accounts(id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS idx_farm_clans_account_status
+ON farm_clans(account_id, status);
+
+CREATE TABLE IF NOT EXISTS farm_audit_logs (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    actor_account_id INTEGER,
+    action           TEXT NOT NULL,
+    entity_type      TEXT NOT NULL,
+    entity_id        TEXT,
+    before_json      TEXT,
+    after_json       TEXT,
+    created_at       TEXT NOT NULL,
+    FOREIGN KEY(actor_account_id) REFERENCES farm_auth_accounts(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_farm_audit_entity_created
+ON farm_audit_logs(entity_type, entity_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_farm_audit_actor_created
+ON farm_audit_logs(actor_account_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS farm_rounds (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    scheduled_at       TEXT NOT NULL,
+    business_time_kind TEXT NOT NULL DEFAULT 'preparation_start'
+                       CHECK(business_time_kind = 'preparation_start'),
+    status             TEXT NOT NULL DEFAULT 'scheduled'
+                       CHECK(status IN ('scheduled', 'open', 'partially_registered', 'completed', 'cancelled')),
+    time_locked_at     TEXT,
+    created_by         INTEGER NOT NULL,
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL,
+    cancelled_at       TEXT,
+    cancelled_by       INTEGER,
+    cancel_reason      TEXT,
+    FOREIGN KEY(created_by) REFERENCES farm_auth_accounts(id) ON DELETE RESTRICT,
+    FOREIGN KEY(cancelled_by) REFERENCES farm_auth_accounts(id) ON DELETE RESTRICT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_farm_rounds_one_current
+ON farm_rounds((1))
+WHERE status IN ('scheduled', 'open', 'partially_registered');
+
+CREATE TABLE IF NOT EXISTS farm_round_clans (
+    round_id             INTEGER NOT NULL,
+    clan_id              INTEGER NOT NULL,
+    account_id_snapshot  INTEGER NOT NULL,
+    clan_tag_snapshot    TEXT NOT NULL,
+    clan_name_snapshot   TEXT NOT NULL,
+    score_before         INTEGER NOT NULL,
+    registration_status TEXT NOT NULL DEFAULT 'not_registered'
+                        CHECK(registration_status IN (
+                            'not_registered', 'registering', 'not_in_war', 'war_mismatch',
+                            'fetch_failed', 'internal_matched', 'match_failed', 'revoked'
+                        )),
+    match_id              INTEGER,
+    opponent_tag          TEXT,
+    opponent_name         TEXT,
+    result                TEXT CHECK(result IS NULL OR result IN ('win', 'loss', 'match_failed')),
+    score_after           INTEGER,
+    registered_at         TEXT,
+    registered_by         INTEGER,
+    last_attempt_at       TEXT,
+    last_error            TEXT,
+    created_at            TEXT NOT NULL,
+    updated_at            TEXT NOT NULL,
+    PRIMARY KEY(round_id, clan_id),
+    FOREIGN KEY(round_id) REFERENCES farm_rounds(id) ON DELETE RESTRICT,
+    FOREIGN KEY(clan_id) REFERENCES farm_clans(id) ON DELETE RESTRICT,
+    FOREIGN KEY(account_id_snapshot) REFERENCES farm_auth_accounts(id) ON DELETE RESTRICT,
+    FOREIGN KEY(registered_by) REFERENCES farm_auth_accounts(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_farm_round_clans_account_status
+ON farm_round_clans(round_id, account_id_snapshot, registration_status);
+
+CREATE TABLE IF NOT EXISTS farm_matches (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    round_id          INTEGER NOT NULL,
+    match_type        TEXT NOT NULL CHECK(match_type IN ('internal', 'failed_external')),
+    pair_key          TEXT NOT NULL,
+    clan_a_id         INTEGER NOT NULL,
+    clan_b_id         INTEGER,
+    opponent_tag      TEXT,
+    opponent_name     TEXT,
+    winner_clan_id    INTEGER,
+    loser_clan_id     INTEGER,
+    score_a_before    INTEGER NOT NULL,
+    score_b_before    INTEGER,
+    tie_break_used    INTEGER NOT NULL DEFAULT 0 CHECK(tie_break_used IN (0, 1)),
+    tie_break_value   TEXT,
+    status            TEXT NOT NULL DEFAULT 'settled' CHECK(status IN ('settled', 'revoked')),
+    settled_at        TEXT NOT NULL,
+    settled_by        INTEGER NOT NULL,
+    revoked_at        TEXT,
+    revoked_by        INTEGER,
+    revoke_reason     TEXT,
+    FOREIGN KEY(round_id) REFERENCES farm_rounds(id) ON DELETE RESTRICT,
+    FOREIGN KEY(clan_a_id) REFERENCES farm_clans(id) ON DELETE RESTRICT,
+    FOREIGN KEY(clan_b_id) REFERENCES farm_clans(id) ON DELETE RESTRICT,
+    FOREIGN KEY(winner_clan_id) REFERENCES farm_clans(id) ON DELETE RESTRICT,
+    FOREIGN KEY(loser_clan_id) REFERENCES farm_clans(id) ON DELETE RESTRICT,
+    FOREIGN KEY(settled_by) REFERENCES farm_auth_accounts(id) ON DELETE RESTRICT,
+    FOREIGN KEY(revoked_by) REFERENCES farm_auth_accounts(id) ON DELETE RESTRICT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_farm_matches_active_pair
+ON farm_matches(round_id, pair_key)
+WHERE status = 'settled';
+
+CREATE TABLE IF NOT EXISTS farm_score_ledger (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    clan_id           INTEGER NOT NULL,
+    round_id          INTEGER NOT NULL,
+    match_id          INTEGER NOT NULL,
+    entry_type        TEXT NOT NULL
+                      CHECK(entry_type IN ('initial', 'win', 'loss', 'reversal', 'manual_adjustment')),
+    delta             INTEGER NOT NULL,
+    balance_before    INTEGER NOT NULL,
+    balance_after     INTEGER NOT NULL,
+    reason            TEXT,
+    created_by        INTEGER NOT NULL,
+    created_at        TEXT NOT NULL,
+    reverses_entry_id INTEGER,
+    FOREIGN KEY(clan_id) REFERENCES farm_clans(id) ON DELETE RESTRICT,
+    FOREIGN KEY(round_id) REFERENCES farm_rounds(id) ON DELETE RESTRICT,
+    FOREIGN KEY(match_id) REFERENCES farm_matches(id) ON DELETE RESTRICT,
+    FOREIGN KEY(created_by) REFERENCES farm_auth_accounts(id) ON DELETE RESTRICT,
+    FOREIGN KEY(reverses_entry_id) REFERENCES farm_score_ledger(id) ON DELETE RESTRICT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_farm_score_base_entry
+ON farm_score_ledger(match_id, clan_id)
+WHERE entry_type IN ('win', 'loss');
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_farm_score_reversal
+ON farm_score_ledger(reverses_entry_id)
+WHERE entry_type = 'reversal';
+
+CREATE INDEX IF NOT EXISTS idx_farm_score_ledger_clan_created
+ON farm_score_ledger(clan_id, created_at, id);
+
+CREATE TABLE IF NOT EXISTS farm_registration_attempts (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    round_id            INTEGER NOT NULL,
+    clan_id             INTEGER NOT NULL,
+    requested_by        INTEGER NOT NULL,
+    outcome             TEXT NOT NULL,
+    official_state      TEXT,
+    official_war_type   TEXT,
+    official_time_kind  TEXT,
+    official_time       TEXT,
+    opponent_tag        TEXT,
+    opponent_name       TEXT,
+    error_code          TEXT,
+    error_message       TEXT,
+    duration_ms         INTEGER NOT NULL DEFAULT 0,
+    summary_json        TEXT,
+    created_at          TEXT NOT NULL,
+    FOREIGN KEY(round_id) REFERENCES farm_rounds(id) ON DELETE RESTRICT,
+    FOREIGN KEY(clan_id) REFERENCES farm_clans(id) ON DELETE RESTRICT,
+    FOREIGN KEY(requested_by) REFERENCES farm_auth_accounts(id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS idx_farm_registration_attempts_round_clan
+ON farm_registration_attempts(round_id, clan_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS farm_auth_events (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER,
+    outcome    TEXT NOT NULL
+               CHECK(outcome IN ('success', 'invalid', 'disabled', 'rate_limited', 'not_allowed')),
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(account_id) REFERENCES farm_auth_accounts(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_farm_auth_events_created_outcome
+ON farm_auth_events(created_at, outcome);
+"""
+
 _CURRENT_WAR_CACHE_DDL = """
 CREATE TABLE IF NOT EXISTS current_war_cache (
     clan_tag     TEXT PRIMARY KEY,
@@ -676,6 +893,7 @@ _CHILDREN_DDL = (
     + _ALLIANCE_CORE_DDL
     + _FARM_STATS_DDL
     + _FARM_FILL_ACCOUNTS_DDL
+    + _FARM_SYSTEM_CORE_DDL
     + _CURRENT_WAR_CACHE_DDL
     + _WAR_HISTORY_CACHE_DDL
     + _MEMBER_WAR_FACTS_DDL
@@ -1084,6 +1302,10 @@ class Database:
         """清空并重建所有业务表（历史数据清零）。"""
         self.conn.execute("PRAGMA foreign_keys = OFF")
         for table in (
+            "farm_auth_events",
+            "farm_registration_attempts", "farm_score_ledger", "farm_matches",
+            "farm_round_clans", "farm_rounds",
+            "farm_audit_logs", "farm_clans", "farm_auth_accounts",
             "alliance_cwl_teams", "alliance_cwl_seasons",
             "alliance_audit_events", "alliance_visits", "alliance_clans",
             "alliance_members", "alliances", "alliance_plans",

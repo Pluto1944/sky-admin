@@ -6,7 +6,7 @@
 
 - **线上地址**: `https://api.skycoc.cc`
 - **框架**: FastAPI
-- **认证**: JWT (HS256, 30 天有效期)
+- **认证**: 微信 JWT 与互刷系统 JWT（均为 HS256、30 天有效期，受众和校验依赖隔离）
 - **数据库**: SQLite（与主项目共用 `data/` 下的 db 文件）
 
 ---
@@ -17,6 +17,8 @@
 api_server/
 ├── app.py             # FastAPI 应用工厂（CORS、路由挂载）
 ├── auth.py            # JWT 认证工具（生成/解析 token、require_user 依赖）
+├── farm_system_auth.py   # 互刷系统独立 JWT 与账号状态复核
+├── farm_system_routes.py # 互刷系统独立认证 API（默认关闭）
 ├── deps.py            # 依赖注入（Database、PlayerRepository 单例）
 ├── routes.py          # 迁移期遗留单联盟 API
 ├── alliance_routes.py # M2 带联盟上下文和字段权限的新 API
@@ -51,6 +53,11 @@ sudo systemctl start sky-admin
 | `WECHAT_APPID` | 微信小程序 AppID | `wx6a46dda85a013a34` |
 | `WECHAT_SECRET` | 微信小程序 AppSecret | （32 位字符串） |
 | `JWT_SECRET` | JWT 签名密钥 | （64 位随机字符串） |
+| `FARM_JWT_SECRET` | 互刷 JWT 独立签名密钥；未设时回退 `JWT_SECRET` | （64 位随机字符串） |
+| `FARM_SYSTEM_ENABLED` | 是否开放互刷认证路由；默认 `false` | `false` |
+| `FARM_SYSTEM_REGISTRATION_ENABLED` | 是否开放单部落登记；默认 `false`，必须独立于系统入口启用 | `false` |
+| `FARM_SYSTEM_TIME_TOLERANCE_SECONDS` | 人工统一时间与官方战争时间最大误差；限制 60–7200 秒 | `2700` |
+| `FARM_SYSTEM_ALLOWED_ACCOUNT_IDS` | 可选灰度账号 ID 白名单，逗号分隔；未设置表示不按账号限制 | `1,2` |
 
 ---
 
@@ -351,6 +358,65 @@ GET /api/wechat/me
 - `401` — Token 无效或已过期
 - `404` — 用户不存在
 
+### 4.1 互刷系统独立认证（F1）
+
+```text
+POST /api/farm-system/auth/login
+POST /api/farm-system/auth/logout
+POST /api/farm-system/auth/change-password
+GET  /api/farm-system/me
+GET  /api/farm-system/clans
+GET  /api/farm-system/admin/accounts
+POST /api/farm-system/admin/accounts
+PATCH /api/farm-system/admin/accounts/{account_id}
+GET  /api/farm-system/admin/clans
+POST /api/farm-system/admin/clans
+PATCH /api/farm-system/admin/clans/{clan_tag}
+POST /api/farm-system/admin/clans/{clan_tag}/transfer
+GET  /api/farm-system/dashboard
+POST /api/farm-system/admin/rounds
+PATCH /api/farm-system/admin/rounds/{round_id}
+GET  /api/farm-system/admin/rounds/{round_id}/results
+POST /api/farm-system/rounds/{round_id}/clans/{clan_tag}/register
+POST /api/farm-system/creator/matches/{match_id}/revoke
+POST /api/farm-system/creator/rounds/{round_id}/cancel
+POST /api/farm-system/creator/accounts/{account_id}/reset-password
+```
+
+互刷账号不复用微信 `openid`。令牌受众固定为 `farm-system`，载荷包含账号 ID（`sub`）、
+`role` 和 `token_version`；每次访问均回查账号状态和当前令牌版本。微信 JWT 不能访问这些接口，
+互刷 JWT 也不能通过微信 JWT 校验。互刷账号统一使用邮箱登录；登录失败按规范化邮箱执行进程内基础限流，邮箱不存在和密码错误
+统一返回 `401`。密码变更返回新令牌并立即废止旧令牌。
+
+全部接口受 `FARM_SYSTEM_ENABLED` 控制，未启用时返回 `404`。F1 不提供公开注册；账号通过
+`scripts/manage_farm_account.py create` 受控创建，也可用同一脚本执行 `reset-password`、`enable` 和
+`disable`。密码必须交互输入，不能作为命令行参数或写入日志。
+
+`GET /clans` 始终按当前互刷账号 ID 过滤。`/admin/*` 需要 `admin` 或 `creator`；管理员不能
+修改创建者，也不能提升账号角色，创建者可以在 `member / admin` 间调整角色。唯一创建者的初始化、
+停用或转移不在页面 API 中完成。新增部落只接受 `clan_profile_cache` 中已由受控任务同步成功或保留
+为 stale 的官方资料，HTTP 请求路径不会为了添加部落直接调用 COC API。转移部落仅改变当前归属，
+原积分不清零。
+
+`dashboard` 只返回当前账号在当前场次快照中的部落；管理员结果接口返回全联盟快照。创建场次时把
+带时区的北京时间转换为 UTC，并复制全部启用参与部落。统一时间固定为“开始搜战时间”，
+`business_time_kind` 只允许 `preparation_start`，登记时与官方 `preparationStartTime` 比较。
+
+单部落登记接口额外受 `FARM_SYSTEM_REGISTRATION_ENABLED` 控制。它是用户显式写操作：读取官方
+当前战争后校验普通战状态、统一时间和本轮快照，对内部对手原子写入双方结果与两笔积分流水；外部
+对手写 `match_failed` 且积分不变。`not_in_war / war_mismatch / fetch_failed` 均可重试且不改积分。
+重复登记直接返回已保存结果，不再次请求 COC 或重新随机。
+
+一键登记第一版不新增批次 API：小程序只在当前账号范围内串行调用同一个单部落登记接口，逐项刷新，
+单个失败不会终止后续部落。后端幂等和权限规则与单个登记完全一致。
+
+`/creator/*` 只接受数据库实时角色为 `creator` 的互刷令牌。撤销匹配和整场取消必须填写原因，
+通过反向积分流水恢复余额，不覆盖或删除原始流水；整场取消在单一事务中完成。密码重置递增
+`token_version`，目标账号全部旧令牌立即失效。
+
+灰度期间设置 `FARM_SYSTEM_ALLOWED_ACCOUNT_IDS` 后，登录和每次令牌复核都会检查当前账号 ID；移除账号
+后已有令牌也立即失去访问权。该白名单不能替代两个功能开关。
+
 ---
 
 ### 5. 联盟上下文与权限接口（M2）
@@ -478,6 +544,9 @@ POST /api/wechat/bind
 - **Payload**: `{ openid, role, exp, iat }`
 - **传递方式**: `Authorization: Bearer <token>`
 
+互刷令牌使用独立的 `aud=farm-system` 和 `require_farm_account` 依赖；即使签名密钥暂时回退为
+`JWT_SECRET`，两类令牌也不能互换。生产环境应显式配置强 `JWT_SECRET` 和 `FARM_JWT_SECRET`。
+
 ### 保护接口
 
 在路由中使用 `Depends(require_user)` 即可保护接口：
@@ -506,6 +575,9 @@ def me(user: dict = Depends(require_user)):
 | `player_tag` | TEXT | 绑定的玩家标签 |
 | `created_at` | TEXT | 创建时间 (ISO 8601) |
 | `updated_at` | TEXT | 更新时间 (ISO 8601) |
+
+互刷认证相关的 `farm_auth_accounts`、`farm_clans` 和 `farm_audit_logs` 见
+[`02-database.md`](02-database.md#互刷系统独立认证底座f1)。
 
 ---
 

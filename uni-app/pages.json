@@ -42,6 +42,34 @@
       }
     },
     {
+      "path": "pages/farm/login",
+      "style": {
+        "navigationBarTitleText": "互刷系统登录",
+        "navigationBarBackgroundColor": "#1a1a2e",
+        "navigationBarTextStyle": "white",
+        "backgroundColor": "#0f0f23"
+      }
+    },
+    {
+      "path": "pages/farm/admin",
+      "style": {
+        "navigationBarTitleText": "互刷联盟系统",
+        "navigationBarBackgroundColor": "#1a1a2e",
+        "navigationBarTextStyle": "white",
+        "backgroundColor": "#0f0f23"
+      }
+    },
+    {
+      "path": "pages/farm/home",
+      "style": {
+        "navigationBarTitleText": "互刷联盟系统",
+        "navigationBarBackgroundColor": "#1a1a2e",
+        "navigationBarTextStyle": "white",
+        "backgroundColor": "#0f0f23",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
       "path": "pages/legal/user-agreement",
       "style": {
         "navigationBarTitleText": "用户协议"
