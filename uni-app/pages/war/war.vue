@@ -323,14 +323,11 @@ export default {
   },
   computed: {
     topButtons() {
-      const buttons = [
+      return [
         { key: 'clan-war', icon: '⚔️', text: '部落战', action: 'onTopTab', active: this.activeTopTab === 'clan-war' },
-        { key: 'league', icon: '🏆', text: '联赛数据', action: 'onTopTab', active: this.activeTopTab === 'league' }
+        { key: 'league', icon: '🏆', text: '联赛数据', action: 'onTopTab', active: this.activeTopTab === 'league' },
+        { key: 'check-in', icon: '📋', text: '联赛点名', action: 'onTopTab', active: this.activeTopTab === 'check-in' }
       ]
-      if (this.skyAlliance) {
-        buttons.push({ key: 'check-in', icon: '📋', text: '联赛点名', action: 'onTopTab', active: this.activeTopTab === 'check-in' })
-      }
-      return buttons
     },
     filteredClans() {
       return this.clans
@@ -406,7 +403,7 @@ export default {
     }
     uni.$on(ALLIANCE_CHANGED_EVENT, this.allianceChangeHandler)
     if (options && options.tab === 'league') this.activeTopTab = 'league'
-    else if (options && options.tab === 'check-in' && this.skyAlliance) this.activeTopTab = 'check-in'
+    else if (options && options.tab === 'check-in') this.activeTopTab = 'check-in'
     if (options && options.check_in_view === 'arrival') this.checkInView = 'arrival'
     if (options && options.view === 'history') {
       this.warView = 'history'
@@ -423,7 +420,7 @@ export default {
   onShow() {
     if (!this.contextReady) return
     const returnTab = consumeReturnTopTab()
-    if (['clan-war', 'league'].indexOf(returnTab) >= 0 || (returnTab === 'check-in' && this.skyAlliance)) this.activeTopTab = returnTab
+    if (['clan-war', 'league', 'check-in'].indexOf(returnTab) >= 0) this.activeTopTab = returnTab
     this.startTimers()
     if (this.activeTopTab === 'check-in' && this.skyAlliance) this.$nextTick(() => { if (this.$refs.checkIn) this.$refs.checkIn.startTimers() })
     if (this.activeTopTab === 'league' && this.leagueClans.length && this.isCurrentLeaguePeriod) this.fetchCwlLive(this.leaguePeriod)
