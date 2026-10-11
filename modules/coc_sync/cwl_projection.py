@@ -109,12 +109,13 @@ def rebuild_league_results(
     rows = build_league_result_rows(group, wars, team)
     period = team.get("period")
     team_index = team.get("team_index")
-    if not period or team_index is None:
-        raise ValueError("联赛队伍缺少 period 或 team_index")
+    clan_tag = normalize_tag(team.get("clan_tag"))
+    if not period or team_index is None or not clan_tag:
+        raise ValueError("联赛队伍缺少 period、team_index 或 clan_tag")
     timestamp = rebuilt_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
     conn.execute(
-        "DELETE FROM league_results WHERE period = ? AND team_index = ?",
-        (period, team_index),
+        "DELETE FROM league_results WHERE period = ? AND clan_tag = ?",
+        (period, clan_tag),
     )
     written = skipped = 0
     for row in rows:
@@ -133,7 +134,7 @@ def rebuild_league_results(
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 period, team_index, team.get("team_alias") or str(team_index),
-                team.get("team_name"), normalize_tag(team.get("clan_tag")),
+                team.get("team_name"), clan_tag,
                 team.get("category") or "combat", row["player_tag"], row["account_name"],
                 row["total_stars"], row["attacks"], row["appearances"],
                 row["missed_attacks"], row["offense_1stars"], row["offense_3stars"],

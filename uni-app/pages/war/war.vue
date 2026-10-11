@@ -118,10 +118,6 @@
       </scroll-view>
     </view>
 
-    <view v-else-if="activeTopTab === 'league' && !skyAlliance" class="state-box league-unavailable">
-      <text class="state-text">当前无数据，联系管理员</text>
-    </view>
-
     <view v-else-if="activeTopTab === 'league'" class="war-pane">
       <view class="war-toolbar">
         <view class="toolbar-title-wrap">
@@ -142,7 +138,8 @@
       <scroll-view v-else scroll-y class="war-list-scroll">
         <view class="war-list-inner">
           <view v-if="leagueUpdatedAt" class="update-time">数据更新于 {{ formatTime(leagueUpdatedAt) }}</view>
-          <view v-if="!leagueClans.length" class="empty-list">该月尚未生成联赛队伍</view>
+          <view v-if="leagueWaitingText" class="league-waiting-notice">{{ leagueWaitingText }}</view>
+          <view v-if="!leagueClans.length" class="empty-list">当前联盟本月暂无联赛队伍</view>
 
           <view v-for="clan in leagueClans" :key="clan.team_index" class="war-card league-card" @tap="openLeagueDetail(clan)">
             <view class="card-header">
@@ -296,6 +293,8 @@ export default {
       leaguePeriod: '',
       leagueUpdatedAt: '',
       leaguePeriods: [],
+      leagueConfiguredCount: 0,
+      leagueEmptyReason: '',
       selectedCategories: [],
       selectedClans: [],
       statusFilter: 'all',
@@ -324,11 +323,14 @@ export default {
   },
   computed: {
     topButtons() {
-      return [
+      const buttons = [
         { key: 'clan-war', icon: '⚔️', text: '部落战', action: 'onTopTab', active: this.activeTopTab === 'clan-war' },
-        { key: 'league', icon: '🏆', text: '联赛数据', action: 'onTopTab', active: this.activeTopTab === 'league' },
-        { key: 'check-in', icon: '📋', text: '联赛点名', action: 'onTopTab', active: this.activeTopTab === 'check-in' }
+        { key: 'league', icon: '🏆', text: '联赛数据', action: 'onTopTab', active: this.activeTopTab === 'league' }
       ]
+      if (this.skyAlliance) {
+        buttons.push({ key: 'check-in', icon: '📋', text: '联赛点名', action: 'onTopTab', active: this.activeTopTab === 'check-in' })
+      }
+      return buttons
     },
     filteredClans() {
       return this.clans
@@ -383,7 +385,13 @@ export default {
     },
     leaguePeriodIndex() { const index = this.leaguePeriods.findIndex(item => item.period === this.leaguePeriod); return index < 0 ? 0 : index },
     leaguePeriodLabel() { const item = this.leaguePeriods[this.leaguePeriodIndex]; return item ? item.label : (this.leaguePeriod || '-') },
-    isCurrentLeaguePeriod() { return !this.leaguePeriod || this.leaguePeriod === currentBusinessPeriod() }
+    isCurrentLeaguePeriod() { return !this.leaguePeriod || this.leaguePeriod === currentBusinessPeriod() },
+    leagueWaitingText() {
+      if (!this.leagueConfiguredCount || !this.leagueClans.length) return ''
+      return this.leagueClans.every(item => item.status === 'waiting')
+        ? `本月已配置 ${this.leagueConfiguredCount} 支联赛队伍，等待官方联赛数据`
+        : ''
+    }
   },
   async onLoad(options) {
     try {
@@ -397,7 +405,8 @@ export default {
       this.resetForAlliance()
     }
     uni.$on(ALLIANCE_CHANGED_EVENT, this.allianceChangeHandler)
-    if (options && ['league', 'check-in'].indexOf(options.tab) >= 0) this.activeTopTab = options.tab
+    if (options && options.tab === 'league') this.activeTopTab = 'league'
+    else if (options && options.tab === 'check-in' && this.skyAlliance) this.activeTopTab = 'check-in'
     if (options && options.check_in_view === 'arrival') this.checkInView = 'arrival'
     if (options && options.view === 'history') {
       this.warView = 'history'
@@ -405,7 +414,7 @@ export default {
     }
     if (options && options.period) this.leaguePeriod = options.period
     this.contextReady = true
-    if (this.activeTopTab === 'league' && this.skyAlliance) this.fetchCwlLive(this.leaguePeriod)
+    if (this.activeTopTab === 'league') this.fetchCwlLive(this.leaguePeriod)
     else if (this.activeTopTab === 'check-in' && this.skyAlliance) this.$nextTick(() => { if (this.$refs.checkIn) this.$refs.checkIn.startTimers() })
     else if (this.warView === 'history') this.fetchWarHistory()
     else this.fetchCurrentWars()
@@ -414,10 +423,10 @@ export default {
   onShow() {
     if (!this.contextReady) return
     const returnTab = consumeReturnTopTab()
-    if (['clan-war', 'league', 'check-in'].indexOf(returnTab) >= 0) this.activeTopTab = returnTab
+    if (['clan-war', 'league'].indexOf(returnTab) >= 0 || (returnTab === 'check-in' && this.skyAlliance)) this.activeTopTab = returnTab
     this.startTimers()
     if (this.activeTopTab === 'check-in' && this.skyAlliance) this.$nextTick(() => { if (this.$refs.checkIn) this.$refs.checkIn.startTimers() })
-    if (this.activeTopTab === 'league' && this.skyAlliance && this.leagueClans.length && this.isCurrentLeaguePeriod) this.fetchCwlLive(this.leaguePeriod)
+    if (this.activeTopTab === 'league' && this.leagueClans.length && this.isCurrentLeaguePeriod) this.fetchCwlLive(this.leaguePeriod)
     else if (this.activeTopTab === 'clan-war' && this.warView === 'current' && this.clans.length) this.fetchCurrentWars()
   },
   onHide() {
@@ -462,6 +471,8 @@ export default {
       this.historyCategories = []
       this.leagueClans = []
       this.leaguePeriods = []
+      this.leagueConfiguredCount = 0
+      this.leagueEmptyReason = ''
       this.leaguePeriod = ''
       this.filterInitialized = false
       this.selectedCategories = []
@@ -472,7 +483,7 @@ export default {
     onTopTab(tab) {
       this.activeTopTab = tab
       this.filterVisible = false
-      if (tab === 'league' && this.skyAlliance && !this.leagueClans.length) this.fetchCwlLive()
+      if (tab === 'league' && !this.leagueClans.length) this.fetchCwlLive()
       if (tab === 'clan-war' && this.warView === 'history' && !this.historyWars.length) this.fetchWarHistory()
       if (tab === 'clan-war' && this.warView === 'current') this.fetchCurrentWars()
     },
@@ -535,10 +546,6 @@ export default {
       } finally { this.historyLoading = false }
     },
     async fetchCwlLive(period) {
-      if (!this.skyAlliance) {
-        this.leagueLoading = false
-        return
-      }
       const allianceId = getCurrentAllianceId()
       const selected = typeof period === 'string' ? period : this.leaguePeriod
       if (!this.leagueClans.length) this.leagueLoading = true
@@ -550,13 +557,14 @@ export default {
         this.leaguePeriod = res.period || ''
         this.leagueUpdatedAt = res.updated_at || ''
         this.leaguePeriods = res.available_periods || []
+        this.leagueConfiguredCount = Number(res.configured_team_count || 0)
+        this.leagueEmptyReason = res.empty_reason || ''
       } catch (e) {
         this.leagueError = e.message || '联赛队伍加载失败'
         if (this.leagueClans.length) uni.showToast({ title: this.leagueError, icon: 'none' })
       } finally { this.leagueLoading = false }
     },
     onLeaguePeriodChange(event) {
-      if (!this.skyAlliance) return
       const selected = this.leaguePeriods[Number(event.detail.value)]
       if (!selected || selected.period === this.leaguePeriod) return
       this.leaguePeriod = selected.period
@@ -568,7 +576,7 @@ export default {
       this.nowMs = Date.now()
       this.clockTimer = setInterval(() => { this.nowMs = Date.now() }, 1000)
       this.refreshTimer = setInterval(() => {
-        if (this.activeTopTab === 'league' && this.skyAlliance) {
+        if (this.activeTopTab === 'league') {
           if (this.isCurrentLeaguePeriod) this.fetchCwlLive(this.leaguePeriod)
         } else if (this.activeTopTab === 'clan-war' && this.warView === 'current') this.fetchCurrentWars()
       }, CACHE_REFRESH_INTERVAL_MS)
@@ -705,7 +713,7 @@ export default {
 .war-toolbar { flex-shrink: 0; height: 72rpx; padding: 0 24rpx; display: flex; align-items: center; justify-content: space-between; background: #141428; border-bottom: 1rpx solid #2a2a4a; }
 .toolbar-title-wrap, .toolbar-actions { display: flex; align-items: center; }.toolbar-title { color: #d8dce8; font-size: 28rpx; font-weight: 600; }.toolbar-count { margin-left: 12rpx; color: #66708a; font-size: 22rpx; }.filter-trigger { padding: 12rpx; color: #aab4c8; font-size: 25rpx; }
 .state-box { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }.state-text { color: #8890a0; font-size: 28rpx; }.error-text { margin: 0 32rpx 20rpx; color: #e17055; font-size: 26rpx; text-align: center; }.retry-btn { color: #5fa8ff; font-size: 26rpx; }
-.war-list-scroll { flex: 1; height: 0; }.war-list-inner { padding: 18rpx 24rpx 0; }.update-time { margin-bottom: 14rpx; color: #596178; font-size: 22rpx; text-align: center; }.filter-summary { display: flex; align-items: center; justify-content: center; margin-bottom: 16rpx; padding: 12rpx; color: #9aa0b0; font-size: 22rpx; background: #15152a; border-radius: 8rpx; }.clear-filter { margin-left: 18rpx; color: #5fa8ff; }.empty-list { padding: 100rpx 0; color: #66708a; font-size: 26rpx; text-align: center; }
+.war-list-scroll { flex: 1; height: 0; }.war-list-inner { padding: 18rpx 24rpx 0; }.update-time { margin-bottom: 14rpx; color: #596178; font-size: 22rpx; text-align: center; }.filter-summary { display: flex; align-items: center; justify-content: center; margin-bottom: 16rpx; padding: 12rpx; color: #9aa0b0; font-size: 22rpx; background: #15152a; border-radius: 8rpx; }.clear-filter { margin-left: 18rpx; color: #5fa8ff; }.empty-list { padding: 100rpx 0; color: #66708a; font-size: 26rpx; text-align: center; }.league-waiting-notice { display: block; margin-bottom: 16rpx; padding: 16rpx 18rpx; color: #9aa6be; background: #17172d; border: 1rpx solid #2a2c4b; border-radius: 10rpx; font-size: 24rpx; text-align: center; }
 .war-card { margin-bottom: 20rpx; overflow: hidden; border: 1rpx solid #2a2a4a; border-radius: 14rpx; background: #18182d; box-sizing: border-box; }.card-header { min-height: 68rpx; padding: 14rpx 18rpx; display: flex; align-items: center; box-sizing: border-box; border-bottom: 1rpx solid #282844; }.category-badge { flex-shrink: 0; margin-right: 10rpx; padding: 3rpx 9rpx; border-radius: 6rpx; color: #9fc9ff; background: rgba(74,144,217,.18); font-size: 20rpx; }.category-farm { color: #7fd8a8; background: rgba(0,184,148,.15); }.category-flat { color: #d9b8ff; background: rgba(162,111,212,.16); }.clan-name { min-width: 0; overflow: hidden; color: #f0f0f5; font-size: 28rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.clan-tag { flex-shrink: 0; margin-left: 8rpx; color: #66708a; font-size: 20rpx; }.status-badge { flex-shrink: 0; margin-left: auto; padding-left: 12rpx; color: #8890a0; font-size: 22rpx; }.status-in_war { color: #ff7675; }.status-preparation { color: #fdcb6e; }.status-war_ended { color: #8890a0; }.status-error { color: #e17055; }
 .simple-state { padding: 28rpx 20rpx; color: #7d8498; font-size: 25rpx; text-align: center; }.error-state { color: #e17055; }.cwl-state { color: #74b9ff; }.sync-warning { margin-bottom: 16rpx; padding: 12rpx 14rpx; border-radius: 8rpx; color: #fdcb6e; background: rgba(253,203,110,.1); font-size: 21rpx; line-height: 1.5; }
 .war-summary { padding: 18rpx; }.opponent-row { display: flex; align-items: center; }.opponent-label { margin-right: 10rpx; color: #66708a; font-size: 22rpx; }.opponent-name { max-width: 280rpx; overflow: hidden; color: #d8dce8; font-size: 26rpx; text-overflow: ellipsis; white-space: nowrap; }.opponent-tag { margin-left: 8rpx; color: #596178; font-size: 20rpx; }.result-label { margin-left: auto; font-size: 23rpx; font-weight: 600; }.result-active { color: #ff7675; }.result-preparation { color: #fdcb6e; }.result-ended { color: #8890a0; font-weight: 400; }

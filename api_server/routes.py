@@ -763,8 +763,12 @@ def _cwl_live_available_periods(db: Database) -> list[dict]:
     return result
 
 
-def _build_cwl_live_summary(db: Database, period: str) -> dict:
-    teams = _cwl_live_teams(db, period)
+def _build_cwl_live_summary(
+    db: Database,
+    period: str,
+    teams: list[dict] | None = None,
+) -> dict:
+    teams = teams if teams is not None else _cwl_live_teams(db, period)
     clans = []
     updated = []
     for team in teams:
@@ -969,13 +973,32 @@ def cwl_live_detail(
     view: Optional[str] = None,
 ):
     """按需返回单个自有联赛部落的战斗日或联赛总览。"""
+    selected_period = period or _current_cwl_live_period()
+    return _build_cwl_live_detail(
+        db,
+        clan_tag,
+        selected_period,
+        round=round,
+        view=view,
+    )
+
+
+def _build_cwl_live_detail(
+    db: Database,
+    clan_tag: str,
+    selected_period: str,
+    *,
+    round: Optional[int] = None,
+    view: Optional[str] = None,
+    teams: list[dict] | None = None,
+):
+    """构建单队详情；联盟接口可注入自己的月度队伍范围。"""
     if view not in {None, "war-day", "overview"}:
         raise HTTPException(status_code=422, detail="view 仅支持 war-day/overview")
-    selected_period = period or _current_cwl_live_period()
     if not _valid_period(selected_period):
         raise HTTPException(status_code=400, detail="period 必须为 YYYY-MM")
     normalized = normalize_tag(clan_tag)
-    teams = _cwl_live_teams(db, selected_period)
+    teams = teams if teams is not None else _cwl_live_teams(db, selected_period)
     team = next((item for item in teams if item.get("clan_tag") == normalized), None)
     if team is None:
         raise HTTPException(status_code=404, detail="部落不在当月联赛队伍列表中")

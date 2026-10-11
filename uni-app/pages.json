@@ -29,6 +29,13 @@
       }
     },
     {
+      "path": "pages/settings/cwl-settings",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "联赛设置"
+      }
+    },
+    {
       "path": "pages/login/login",
       "style": {
         "navigationBarTitleText": "微信登录"

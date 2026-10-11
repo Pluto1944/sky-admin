@@ -13,6 +13,7 @@ from modules.alliance.access import (
     resolve_alliance_context,
 )
 from modules.alliance.migration import SKY_ALLIANCE_KEY, apply_sky_migration
+from modules.alliance.cwl_config import sync_sky_league_teams
 
 
 CLANS = [
@@ -426,7 +427,7 @@ def test_farm_config_returns_empty_when_alliance_has_no_farm_clan(db):
     assert result["clans"] == []
 
 
-def test_sky_cwl_keeps_legacy_shell_teams_while_other_alliances_stay_scoped(db):
+def test_alliance_cwl_uses_monthly_config_instead_of_daily_clan_scope(db):
     apply_sky_migration(db.conn, CLANS, now=NOW)
     sky_user = _user(db, "sky-cwl")
     ensure_sky_admin_membership(db.conn, "sky-cwl", now=NOW)
@@ -446,6 +447,21 @@ def test_sky_cwl_keeps_legacy_shell_teams_while_other_alliances_stay_scoped(db):
         ],
     )
     db.conn.commit()
+    sync_sky_league_teams(db.conn, period)
+    paid_season = db.conn.execute(
+        """INSERT INTO alliance_cwl_seasons
+           (alliance_id, period, status, created_at, updated_at, confirmed_at)
+           VALUES (?, ?, 'active', ?, ?, ?)""",
+        (paid_id, period, NOW, NOW, NOW),
+    ).lastrowid
+    db.conn.execute(
+        """INSERT INTO alliance_cwl_teams
+           (season_id, team_index, clan_tag, clan_name_snapshot, team_alias,
+            category, sort_order, source, created_at, updated_at)
+           VALUES (?, 0, '#BBB', '外部队', '外部队', 'combat', 0, 'manual', ?, ?)""",
+        (paid_season, NOW, NOW),
+    )
+    db.conn.commit()
 
     sky = alliance_routes.alliance_cwl_live(
         sky_id, user={"openid": "sky-cwl"}, db=db,
@@ -460,8 +476,61 @@ def test_sky_cwl_keeps_legacy_shell_teams_while_other_alliances_stay_scoped(db):
         paid_id, user={"openid": "paid-cwl"}, db=db,
     )
     assert [item["clan_tag"] for item in paid["clans"]] == ["#BBB"]
+    sky_shared = next(item for item in sky["clans"] if item["clan_tag"] == "#BBB")
+    paid_shared = paid["clans"][0]
+    for field in (
+        "clan_tag", "team_alias", "team_name", "category", "status",
+        "wins", "losses", "ties", "attack_stars", "league_stars",
+        "average_destruction", "synced_at", "error",
+    ):
+        assert sky_shared[field] == paid_shared[field]
     with pytest.raises(HTTPException) as exc:
         alliance_routes.alliance_cwl_live_detail(
             paid_id, "#CWLX", user={"openid": "paid-cwl"}, db=db,
         )
     assert exc.value.status_code == 404
+
+
+def test_alliance_league_stats_only_uses_its_monthly_combat_teams(db):
+    apply_sky_migration(db.conn, CLANS, now=NOW)
+    user_id = _user(db, "paid-stats")
+    alliance_id = _paid_alliance(db, key="paid-stats", name="统计联盟")
+    _membership(db, alliance_id, user_id, "admin")
+    season_id = db.conn.execute(
+        """INSERT INTO alliance_cwl_seasons
+           (alliance_id, period, status, created_at, updated_at, confirmed_at)
+           VALUES (?, '2026-09', 'complete', ?, ?, ?)""",
+        (alliance_id, NOW, NOW, NOW),
+    ).lastrowid
+    db.conn.execute(
+        """INSERT INTO alliance_cwl_teams
+           (season_id, team_index, clan_tag, clan_name_snapshot, team_alias,
+            category, sort_order, source, created_at, updated_at)
+           VALUES (?, 0, '#BBB', '统计队', '统计队', 'combat', 0, 'manual', ?, ?)""",
+        (season_id, NOW, NOW),
+    )
+    db.conn.executemany(
+        "INSERT INTO accounts (player_tag, account_name, town_hall_level) VALUES (?, ?, 18)",
+        [("#P1", "成员一"), ("#P2", "外部成员")],
+    )
+    db.conn.executemany(
+        """INSERT INTO league_results
+           (period, team_index, team_alias, clan_tag, category, player_tag,
+            account_name, attacks, offense_3stars, defense_3stars, defense_total, fetched_at)
+           VALUES ('2026-09', ?, ?, ?, 'combat', ?, ?, 4, ?, 1, 2, ?)""",
+        [
+            (0, "统计队", "#BBB", "#P1", "成员一", 3, NOW),
+            (1, "别的队", "#OTHER", "#P2", "外部成员", 4, NOW),
+        ],
+    )
+    db.conn.commit()
+
+    result = alliance_routes.alliance_league_stats(
+        alliance_id,
+        period="2026-09",
+        user={"openid": "paid-stats"},
+        db=db,
+    )
+
+    assert [item["player_tag"] for item in result["stats"]] == ["#P1"]
+    assert result["stats"][0]["offense_1m"] == 0.75

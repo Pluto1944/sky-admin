@@ -11,6 +11,7 @@ db_path 传 ":memory:" 用于测试。
 from __future__ import annotations
 
 import os
+import json
 import sqlite3
 from datetime import datetime, timezone
 
@@ -112,7 +113,7 @@ CREATE TABLE IF NOT EXISTS league_results (
     defense_total   INTEGER DEFAULT 0,
     fetched_at      TEXT,
     raw_metrics     TEXT,
-    UNIQUE(period, team_index, player_tag),
+    UNIQUE(period, clan_tag, player_tag),
     FOREIGN KEY(player_tag) REFERENCES accounts(player_tag)
 );
 """
@@ -299,6 +300,47 @@ CREATE TABLE IF NOT EXISTS alliance_audit_events (
 
 CREATE INDEX IF NOT EXISTS idx_alliance_audit_alliance_created
 ON alliance_audit_events(alliance_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS alliance_cwl_seasons (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    alliance_id          INTEGER NOT NULL,
+    period               TEXT NOT NULL,
+    status               TEXT NOT NULL DEFAULT 'draft'
+                         CHECK(status IN ('draft', 'active', 'frozen', 'complete')),
+    created_by_user_id   INTEGER,
+    confirmed_by_user_id INTEGER,
+    created_at           TEXT NOT NULL,
+    updated_at           TEXT NOT NULL,
+    confirmed_at         TEXT,
+    UNIQUE(alliance_id, period),
+    FOREIGN KEY(alliance_id) REFERENCES alliances(id) ON DELETE CASCADE,
+    FOREIGN KEY(created_by_user_id) REFERENCES wechat_users(id) ON DELETE SET NULL,
+    FOREIGN KEY(confirmed_by_user_id) REFERENCES wechat_users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_alliance_cwl_seasons_period_status
+ON alliance_cwl_seasons(period, status);
+
+CREATE TABLE IF NOT EXISTS alliance_cwl_teams (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    season_id          INTEGER NOT NULL,
+    team_index         INTEGER NOT NULL CHECK(team_index >= 0),
+    clan_tag           TEXT NOT NULL,
+    clan_name_snapshot TEXT,
+    team_alias         TEXT,
+    category           TEXT NOT NULL CHECK(category IN ('combat', 'shell')),
+    sort_order         INTEGER NOT NULL DEFAULT 0 CHECK(sort_order >= 0),
+    source             TEXT NOT NULL DEFAULT 'manual'
+                       CHECK(source IN ('manual', 'copied', 'migrated', 'arrangement', 'corrected')),
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL,
+    UNIQUE(season_id, team_index),
+    UNIQUE(season_id, clan_tag),
+    FOREIGN KEY(season_id) REFERENCES alliance_cwl_seasons(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_alliance_cwl_teams_clan
+ON alliance_cwl_teams(clan_tag, season_id);
 """
 
 _FARM_STATS_DDL = """
@@ -762,6 +804,29 @@ class Database:
             self.conn.execute("ALTER TABLE league_results ADD COLUMN missed_attacks INTEGER")
         if "offense_1stars" not in lr_cols:
             self.conn.execute("ALTER TABLE league_results ADD COLUMN offense_1stars INTEGER")
+        unique_indexes = []
+        for index in self.conn.execute("PRAGMA index_list(league_results)").fetchall():
+            if not index[2]:
+                continue
+            unique_indexes.append(tuple(
+                row[2] for row in self.conn.execute(f"PRAGMA index_info({index[1]})").fetchall()
+            ))
+        if ("period", "clan_tag", "player_tag") not in unique_indexes:
+            duplicates = self.conn.execute(
+                """SELECT COUNT(*) FROM (
+                       SELECT period, clan_tag, player_tag
+                       FROM league_results
+                       WHERE clan_tag IS NOT NULL
+                       GROUP BY period, clan_tag, player_tag
+                       HAVING COUNT(*) > 1
+                   )"""
+            ).fetchone()[0]
+            if duplicates:
+                raise RuntimeError(
+                    "league_results contains duplicate (period, clan_tag, player_tag) rows; "
+                    "refusing automatic M3.1 key migration"
+                )
+            self._rebuild_league_results()
 
         # farm_stats 表迁移（互刷部落缓存）
         fs_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(farm_stats)")}
@@ -900,6 +965,43 @@ class Database:
         if not runtime_cols:
             self.conn.execute(_SERVICE_RUNTIME_DDL)
 
+        # M3.1：为既有套餐补齐 CWL 权益。只合并缺失键，保留运营期间可能增加的
+        # 其他 entitlement，不用一次 schema 初始化覆盖整份 JSON。
+        cwl_entitlements = {
+            "free": {"max_cwl_teams": 1, "cwl_data": True, "cwl_registration": False},
+            "paid": {"max_cwl_teams": 20, "cwl_data": True, "cwl_registration": False},
+            "internal": {
+                "max_cwl_teams": 100,
+                "cwl_data": True,
+                "cwl_registration": True,
+                "registration_source": "tencent_docs",
+            },
+        }
+        for plan_code, defaults in cwl_entitlements.items():
+            row = self.conn.execute(
+                "SELECT entitlements_json FROM alliance_plans WHERE plan_code = ?",
+                (plan_code,),
+            ).fetchone()
+            if row is None:
+                continue
+            try:
+                entitlements = json.loads(row[0] or "{}")
+            except (TypeError, json.JSONDecodeError):
+                entitlements = {}
+            if not isinstance(entitlements, dict):
+                entitlements = {}
+            merged = {**defaults, **entitlements}
+            if merged != entitlements:
+                self.conn.execute(
+                    "UPDATE alliance_plans SET entitlements_json = ?, updated_at = ? "
+                    "WHERE plan_code = ?",
+                    (
+                        json.dumps(merged, ensure_ascii=False, sort_keys=True),
+                        now_iso(),
+                        plan_code,
+                    ),
+                )
+
         # 普通战旧聚合任务已随旧表物理退役；清理历史运行状态，避免 --list
         # 显示一个不再存在且无法调度的任务。
         self.conn.execute("DELETE FROM sync_jobs WHERE job_id = 'war_results'")
@@ -957,10 +1059,32 @@ class Database:
         self.conn.execute("DROP TABLE registrations")
         self.conn.execute("ALTER TABLE registrations_new RENAME TO registrations")
 
+    def _rebuild_league_results(self) -> None:
+        """把 CWL 投影唯一键从苍穹 team_index 改为公共 clan_tag。"""
+        columns = (
+            "id", "period", "team_index", "team_alias", "team_name", "clan_tag",
+            "category", "player_tag", "account_name", "total_stars", "attacks",
+            "appearances", "missed_attacks", "offense_1stars", "offense_3stars",
+            "defense_3stars", "defense_total", "fetched_at", "raw_metrics",
+        )
+        self.conn.execute("DROP TABLE IF EXISTS league_results_new")
+        self.conn.execute(_LEAGUE_RESULTS_DDL.replace(
+            "CREATE TABLE IF NOT EXISTS league_results",
+            "CREATE TABLE league_results_new",
+            1,
+        ))
+        joined = ", ".join(columns)
+        self.conn.execute(
+            f"INSERT INTO league_results_new ({joined}) SELECT {joined} FROM league_results"
+        )
+        self.conn.execute("DROP TABLE league_results")
+        self.conn.execute("ALTER TABLE league_results_new RENAME TO league_results")
+
     def reset(self) -> None:
         """清空并重建所有业务表（历史数据清零）。"""
         self.conn.execute("PRAGMA foreign_keys = OFF")
         for table in (
+            "alliance_cwl_teams", "alliance_cwl_seasons",
             "alliance_audit_events", "alliance_visits", "alliance_clans",
             "alliance_members", "alliances", "alliance_plans",
             "cwl_assembly_cache", "cwl_roster_snapshots",

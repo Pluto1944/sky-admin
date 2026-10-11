@@ -40,6 +40,7 @@ from modules.cwl_registration.baseline_rebuilder import build_final_list
 from modules.cwl_registration.team_builder import build_teams
 from modules.cwl_registration.repository import RegistrationRepository
 from modules.cwl_registration.sorter import sort_accounts
+from modules.alliance.cwl_config import sync_sky_league_teams
 from modules.coc_sync.official.api_client import CocApiClient, CocApiError
 from modules.player.service import PlayerService
 from shared.io_adapter.base import ExcelIO
@@ -258,9 +259,20 @@ class LeagueArranger:
             return None
 
         lr_rows = self.reg_repo.conn.execute(
-            "SELECT * FROM league_results WHERE period = ? AND category = ? "
-            "ORDER BY team_index, id",
-            (cwl_period, LEAGUE_COMBAT),
+            """SELECT results.*
+               FROM league_results AS results
+               WHERE results.period = ? AND results.category = ?
+                 AND (
+                   results.clan_tag IS NULL
+                   OR EXISTS (
+                     SELECT 1 FROM league_teams AS teams
+                     WHERE teams.period = results.period
+                       AND teams.clan_tag = results.clan_tag
+                       AND teams.category = ?
+                   )
+                 )
+               ORDER BY results.team_index, results.id""",
+            (cwl_period, LEAGUE_COMBAT, LEAGUE_COMBAT),
         ).fetchall()
         result: list[dict] = []
         for r in lr_rows:
@@ -309,6 +321,9 @@ class LeagueArranger:
                 ),
             )
         self.reg_repo.conn.commit()
+        # 苍穹报名编排继续以 league_teams 为兼容快照，同时把结果映射到通用的
+        # 联盟月度配置。已冻结月份会被同步器安全跳过。
+        sync_sky_league_teams(self.reg_repo.conn, period, source="arrangement")
 
     def arrange(
         self,

@@ -142,6 +142,12 @@ def test_league_results_tracks_reliability_facts(db):
         row[1] for row in db.conn.execute("PRAGMA table_info(league_results)")
     }
     assert {"appearances", "missed_attacks", "offense_1stars"} <= columns
+    unique_indexes = [
+        tuple(info[2] for info in db.conn.execute(f"PRAGMA index_info({index[1]})"))
+        for index in db.conn.execute("PRAGMA index_list(league_results)")
+        if index[2]
+    ]
+    assert ("period", "clan_tag", "player_tag") in unique_indexes
 
 
 def test_league_results_migration_preserves_old_rows_as_unknown(tmp_path):
@@ -184,6 +190,12 @@ def test_league_results_migration_preserves_old_rows_as_unknown(tmp_path):
         "SELECT attacks, appearances, missed_attacks, offense_1stars FROM league_results"
     ).fetchone()
     assert tuple(row) == (5, None, None, None)
+    unique_indexes = [
+        tuple(info[2] for info in migrated.conn.execute(f"PRAGMA index_info({index[1]})"))
+        for index in migrated.conn.execute("PRAGMA index_list(league_results)")
+        if index[2]
+    ]
+    assert ("period", "clan_tag", "player_tag") in unique_indexes
     migrated.close()
 
 

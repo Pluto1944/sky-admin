@@ -25,21 +25,40 @@ _PLAN_ROWS = (
         "display_name": "免费联盟",
         "max_clans": 1,
         "sync_tier": "low",
-        "entitlements": {"history_scope": "full", "manual_refresh": True},
+        "entitlements": {
+            "history_scope": "full",
+            "manual_refresh": True,
+            "max_cwl_teams": 1,
+            "cwl_data": True,
+            "cwl_registration": False,
+        },
     },
     {
         "plan_code": "paid",
         "display_name": "付费联盟",
         "max_clans": 10,
         "sync_tier": "high",
-        "entitlements": {"history_scope": "full", "automatic_refresh": True},
+        "entitlements": {
+            "history_scope": "full",
+            "automatic_refresh": True,
+            "max_cwl_teams": 20,
+            "cwl_data": True,
+            "cwl_registration": False,
+        },
     },
     {
         "plan_code": "internal",
         "display_name": "内部联盟",
         "max_clans": 100,
         "sync_tier": "internal",
-        "entitlements": {"history_scope": "full", "automatic_refresh": True},
+        "entitlements": {
+            "history_scope": "full",
+            "automatic_refresh": True,
+            "max_cwl_teams": 100,
+            "cwl_data": True,
+            "cwl_registration": True,
+            "registration_source": "tencent_docs",
+        },
     },
 )
 

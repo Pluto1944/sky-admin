@@ -371,6 +371,16 @@ GET /api/alliances/{alliance_id}/wars/current/{clan_tag}
 GET /api/alliances/{alliance_id}/wars/history
 GET /api/alliances/{alliance_id}/wars/history/{clan_tag}/{war_key}
 GET /api/alliances/{alliance_id}/war-stats
+GET /api/alliances/{alliance_id}/league-stats
+GET /api/alliances/{alliance_id}/cwl/seasons
+GET /api/alliances/{alliance_id}/cwl/seasons/{period}
+POST /api/alliances/{alliance_id}/cwl/seasons/{period}
+POST /api/alliances/{alliance_id}/cwl/seasons/{period}/copy-previous
+POST /api/alliances/{alliance_id}/cwl/seasons/{period}/teams
+PUT /api/alliances/{alliance_id}/cwl/seasons/{period}/teams/{team_id}
+DELETE /api/alliances/{alliance_id}/cwl/seasons/{period}/teams/{team_id}
+POST /api/alliances/{alliance_id}/cwl/seasons/{period}/teams/{team_id}/correct-tag
+POST /api/alliances/{alliance_id}/cwl/seasons/{period}/confirm
 GET /api/alliances/{alliance_id}/cwl/live
 GET /api/alliances/{alliance_id}/cwl/live/{clan_tag}
 ```
@@ -399,14 +409,17 @@ GET /api/alliances/{alliance_id}/cwl/live/{clan_tag}
 `combat_clans` 供后续多战营切换；没有战营部落时返回空统计，不回退到固定 `#2QQ` 或苍穹配置。
 该接口与普通战历史接口都只读 `war_history_cache`、`member_war_facts` 和成员快照。
 
-当前战争和当前月 CWL 属于协作数据，联盟成员可见。历史月份 CWL 属于评价数据：汇总
-接口要求全部订阅部落均具备管理权限，单部落详情要求当前部落具备管理权限。全部联盟
-接口只读 SQLite 缓存，不在请求路径调用 COC。
+当前战争和当前月 CWL 属于协作数据，联盟成员可见。历史月份 CWL 和滚动联赛统计属于评价数据，
+要求联盟管理员或首领权限。全部联盟接口只读 SQLite 缓存，不在请求路径调用 COC。
 
-苍穹现有联赛队伍包含不属于固定 12 个日常部落的临时壳子。迁移期
-`league_teams` 存量记录全部视为 `sky-internal` 的月度队伍快照，因此苍穹 CWL 接口按月份
-读取完整队伍，不以日常订阅部落标签误删；其他联盟仍严格限制到其订阅部落。为外部联盟
-支持独立临时壳子归属，需在后续同步解耦阶段为月度队伍快照补联盟归属。
+月度 CWL 队伍来自 `alliance_cwl_seasons`、`alliance_cwl_teams`，不要求出现在日常
+`alliance_clans`，也不要求部落认证。联盟管理员和首领可配置当前月、下月；普通成员只读已确认
+配置。发现官方联赛组后普通编辑被冻结，错误 Tag 只能通过带原因的审计纠正接口处理。
+套餐中的 `max_cwl_teams` 控制每月上限，免费为 1、付费为 20。
+
+苍穹现有 `league_teams` 继续作为报名编排快照和旧接口兼容来源，通过迁移脚本及以后每次编排
+幂等同步到新表；临时壳子无需加入日常 12 部落。通用 CWL 汇总和详情不按联盟名称特判，也不从
+日常订阅范围推断联赛队伍。
 
 苍穹迁移期有一条已确认兼容规则：登录用户若在固定 `sky-internal` 尚无任何成员记录，
 自动新增为管理员并记录审计；已有成员、降级、移除或封禁记录绝不覆盖或自动恢复。该

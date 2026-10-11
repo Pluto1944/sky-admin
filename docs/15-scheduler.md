@@ -9,7 +9,7 @@
 | 任务 | 频率 / 窗口 | 主要写入 | 要点 |
 |---|---|---|---|
 | `current_wars` | 每 2 分钟检查，按战争状态限频 | `current_war_cache`、结束时 `war_history_cache` / `member_war_facts` | 最终普通战才归档；单部落失败保留上次成功快照 |
-| `cwl_live` | 战斗日每 2 分钟；准备日按轮次限频 | `cwl_live_group_cache`、`cwl_live_war_cache` | 第一轮准备日动态 30/2 分钟；后续准备日由上一轮结束触发并保留 30 分钟兜底 |
+| `cwl_live` | 战斗日每 2 分钟；准备日按轮次限频 | `cwl_live_group_cache`、`cwl_live_war_cache` | 合并所有联盟已确认月度队伍并按 Tag 去重；第一轮准备日动态 30/2 分钟；后续准备日由上一轮结束触发 |
 | `cwl_assembly` | 月初窗口每 5 分钟 | 名单 revision、集结核对 | 开赛或截止后冻结，不重绑已冻结 revision |
 | `farm_stats` | 30 分钟 | `farm_stats` | API 只读缓存，不在请求内批量访问 COC |
 | `coc_sync` | 6 小时 | `accounts`、部落资料 | COC 身份和当前归属权威同步 |
@@ -38,6 +38,11 @@
 `cwl_live` 将当月每队的分组目录和目录中每个 `war_tag` 独立保存。每个分组计算
 `raw_status`：采集中、完整或已结束但缺档。只有完整分组会调用投影器重建
 `league_results`；进行中的成绩不得进入该表。
+
+同步目标由苍穹兼容 `league_teams` 与状态为 `active / frozen / complete` 的
+`alliance_cwl_teams` 合并，按规范化 `clan_tag` 全局去重。同一支队伍被多个联盟配置时仍只有一次
+官方分组和逐场请求。配置为 `draft` 的月份不进入调度；发现分组后调度器同步把联盟月份状态更新为
+`frozen`，全部已发现分组完成后更新为 `complete`。
 
 CWL 的第二轮至最后一轮准备日与上一轮战斗日重叠，因此调度器只对当前战斗日保持
 2 分钟高频刷新。第一轮准备日平时每 30 分钟刷新，开战前 30 分钟提升到 2 分钟；

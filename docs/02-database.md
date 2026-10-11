@@ -27,6 +27,8 @@
 | 联盟部落 | `alliance_clans` | `(alliance_id, clan_tag)` | 联盟订阅部落、业务标签、显示顺序和认证摘要 |
 | 联盟访问 | `alliance_visits` | `(alliance_id, user_id)` | 最近访问及默认联盟；访问记录本身不授予成员权限 |
 | 联盟审计 | `alliance_audit_events` | `id` / `event_key` | 联盟迁移及后续管理动作的幂等审计记录 |
+| 联盟 CWL 月份 | `alliance_cwl_seasons` | `(alliance_id, period)` | 联盟月度联赛配置与生命周期 |
+| 联盟 CWL 队伍 | `alliance_cwl_teams` | `(season_id, team_index)` / `(season_id, clan_tag)` | 当月队伍、类别、顺序和来源 |
 | 都城贡献 | `capital_raid_member_results` | `(clan_tag, start_time, player_tag)` | 突袭周末成员事实 |
 | 都城状态 | `capital_raid_status_cache` | `clan_tag` | 最近一次突袭周末的开启、进行、结束或未开启状态 |
 | 竞赛贡献 | `clan_games_member_snapshots` | `(period, player_tag)` | 月末成就快照和差值 |
@@ -89,14 +91,35 @@ M1 只建立联盟数据模型与苍穹映射，不改变现有 API、前端或�
 `raw_status` 取 `collecting`、`complete`、`incomplete`。只有分组所列全部战争均存在且为最终
 `war_ended` 时，才可替换对应队伍的 `league_results` 投影。该投影除星数和实际进攻外，还保存
 `appearances`（进入阵容场次）、`missed_attacks`（漏刀次数）与 `offense_1stars`（一星刀数）；
-旧月份未重建时这些字段为 `NULL`，不能按零漏刀或零一星刀处理。`league_results` 可删除并重建，
+旧月份未重建时这些字段为 `NULL`，不能按零漏刀或零一星刀处理。投影唯一键为
+`(period, clan_tag, player_tag)`；`team_index` 继续作为苍穹编排兼容字段，但不再充当公共事实身份。
+`league_results` 可删除并重建，
 但在当前规模下保留以服务编排和快速查询。
 详细规则见 [`12-league-stats.md`](12-league-stats.md)。
+
+### 多联盟月度配置（已实现、待生产迁移）
+
+多联盟 CWL 不复用 `alliance_clans` 表示当月参赛范围，也不把苍穹专用 `league_teams` 直接扩展为
+租户表。当前实现新增：
+
+| 表 | 键 / 身份 | 责任 |
+|---|---|---|
+| `alliance_cwl_seasons` | `(alliance_id, period)` | 联盟当月 CWL 配置及 `draft / active / frozen / complete` 生命周期 |
+| `alliance_cwl_teams` | `(season_id, team_index)`、`(season_id, clan_tag)` | 当月队伍 Tag、名称快照、别名、`combat / shell`、顺序与来源 |
+
+两表是联盟私有配置；官方分组、战争和成绩仍使用现有公共事实表。月度队伍可以是临时壳子，
+不要求存在于 `alliance_clans`，也不要求完成部落认证。套餐通过 `max_cwl_teams` 限制每月队伍数：
+免费 1、付费 20；该字段与日常订阅部落配额分开。
+
+苍穹现有 `league_teams` 保留为编排快照和旧接口兼容来源，并幂等导入新表；以后编排成功时同步
+更新苍穹对应月度配置。`scripts/migrate_alliance_cwl.py` 默认只读预览；`--apply --yes` 会先创建
+一致性备份，再建表、迁移全部苍穹结构化历史并执行完整性与外键检查。
 
 ## 不可破坏的约束
 
 - `accounts.player_tag` 是真实 COC Tag；`NULL` 不能覆盖已有资料。
 - `registrations.period` / `league_teams.period` 是即将参赛月；`league_results.period` 是实际发生月；
+  `alliance_cwl_seasons.period` 与 `alliance_cwl_teams` 表示联盟配置的实际 CWL 月份；
   普通战使用单场 `end_time`，不得混用。
 - `team_index` 是月内从 0 开始的稳定队伍身份；`team_alias` 不是唯一键。
 - `farm_fill_accounts` 以填坑账号编号保留全部登记；当前部落归属始终通过 `player_tag` 关联

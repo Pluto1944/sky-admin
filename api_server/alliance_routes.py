@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 
 from modules.alliance.access import (
     AllianceContext,
@@ -18,7 +19,18 @@ from modules.alliance.access import (
     list_alliance_contexts,
     resolve_alliance_context,
 )
-from modules.alliance.migration import SKY_ALLIANCE_KEY
+from modules.alliance.cwl_config import (
+    CwlConfigError,
+    add_team,
+    confirm_season,
+    copy_previous,
+    correct_frozen_tag,
+    create_season,
+    delete_team,
+    list_seasons,
+    season_payload,
+    update_team,
+)
 from modules.coc_sync.current_war import current_war_summary
 from modules.coc_sync.official.mapper import normalize_tag
 from modules.player.member_stats import member_summary_map
@@ -31,6 +43,19 @@ from .deps import get_db
 
 
 router = APIRouter(prefix="/api")
+
+
+class CwlTeamInput(BaseModel):
+    clan_tag: str
+    clan_name: str | None = None
+    team_alias: str | None = None
+    category: str = "shell"
+    sort_order: int = 0
+
+
+class CwlTagCorrectionInput(BaseModel):
+    clan_tag: str
+    reason: str
 
 
 def _utc_now() -> str:
@@ -571,35 +596,333 @@ def alliance_war_stats(
     return result
 
 
+@router.get("/alliances/{alliance_id}/league-stats")
+def alliance_league_stats(
+    alliance_id: int,
+    period: Optional[str] = None,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    """按联盟各月配置的实战队伍返回 CWL 滚动窗口统计。"""
+    context = _context(user, alliance_id, db)
+    if context.role not in {"admin", "leader"}:
+        raise HTTPException(status_code=403, detail="联赛历史统计需要管理权限")
+    selected_period = period or legacy_routes._get_current_period()
+    if not legacy_routes._valid_period(selected_period):
+        raise HTTPException(status_code=400, detail="period 必须为 YYYY-MM")
+    windows = {
+        "1m": set(legacy_routes._get_window_months(selected_period, 1)),
+        "3m": set(legacy_routes._get_window_months(selected_period, 3)),
+        "6m": set(legacy_routes._get_window_months(selected_period, 6)),
+    }
+    all_months = sorted(set().union(*windows.values()))
+    placeholders = ",".join("?" for _ in all_months)
+    rows = db.conn.execute(
+        f"""SELECT results.player_tag, results.account_name, results.period,
+                   results.attacks, results.offense_3stars,
+                   results.defense_3stars, results.defense_total,
+                   results.fetched_at
+            FROM league_results AS results
+            JOIN alliance_cwl_seasons AS seasons
+              ON seasons.alliance_id = ? AND seasons.period = results.period
+            JOIN alliance_cwl_teams AS teams
+              ON teams.season_id = seasons.id
+             AND teams.clan_tag = results.clan_tag
+             AND teams.category = 'combat'
+            WHERE results.period IN ({placeholders})""",
+        (context.alliance_id, *all_months),
+    ).fetchall()
+    tags = sorted({row["player_tag"] for row in rows if row["player_tag"]})
+    accounts = {}
+    if tags:
+        tag_placeholders = ",".join("?" for _ in tags)
+        accounts = {
+            row["player_tag"]: dict(row)
+            for row in db.conn.execute(
+                f"""SELECT player_tag, account_name, town_hall_level
+                    FROM accounts WHERE player_tag IN ({tag_placeholders})""",
+                tags,
+            ).fetchall()
+        }
+    metrics: dict[str, dict[str, dict[str, int]]] = defaultdict(
+        lambda: {
+            key: {"offense_3stars": 0, "attacks": 0, "defense_3stars": 0, "defense_total": 0}
+            for key in windows
+        }
+    )
+    names = {}
+    updated = []
+    for row in rows:
+        tag = row["player_tag"]
+        names.setdefault(tag, row["account_name"] or tag)
+        if row["fetched_at"] and str(row["fetched_at"])[:4].isdigit():
+            updated.append(row["fetched_at"])
+        for key, months in windows.items():
+            if row["period"] not in months:
+                continue
+            metrics[tag][key]["offense_3stars"] += row["offense_3stars"] or 0
+            metrics[tag][key]["attacks"] += row["attacks"] or 0
+            metrics[tag][key]["defense_3stars"] += row["defense_3stars"] or 0
+            metrics[tag][key]["defense_total"] += row["defense_total"] or 0
+    result = []
+    for tag in tags:
+        account = accounts.get(tag, {})
+        item = {
+            "player_tag": tag,
+            "account_name": account.get("account_name") or names.get(tag) or tag,
+            "town_hall_level": account.get("town_hall_level"),
+        }
+        for key in windows:
+            sample = metrics[tag][key]
+            item[f"offense_{key}"] = legacy_routes._calc_rate(
+                sample["offense_3stars"], sample["attacks"],
+            )
+            item[f"defense_{key}"] = legacy_routes._calc_rate(
+                sample["defense_3stars"], sample["defense_total"],
+            )
+            item[f"offense_{key}_sample"] = {
+                "three_stars": sample["offense_3stars"], "attacks": sample["attacks"],
+            }
+            item[f"defense_{key}_sample"] = {
+                "three_stars": sample["defense_3stars"], "attacks": sample["defense_total"],
+            }
+        result.append(item)
+    return {
+        "alliance_id": alliance_id,
+        "period": selected_period,
+        "stats": result,
+        "updated_at": max(updated) if updated else None,
+    }
+
+
 def _historical_cwl_allowed(context: AllianceContext, period: str) -> None:
     if period == legacy_routes._current_cwl_live_period():
         return
-    if context.alliance_key == SKY_ALLIANCE_KEY:
-        if context.role not in {"admin", "leader"}:
-            raise HTTPException(status_code=403, detail="历史联赛数据需要管理权限")
-        return
-    if any(not clan.management_allowed for clan in context.clans):
-        raise HTTPException(status_code=403, detail="历史联赛数据需要全部相关部落的管理权限")
+    if context.role not in {"admin", "leader"}:
+        raise HTTPException(status_code=403, detail="历史联赛数据需要管理权限")
 
 
-def _cwl_allowed_tags(
+def _cwl_config_error(exc: CwlConfigError) -> HTTPException:
+    status = 403 if "权限" in str(exc) else 400
+    return HTTPException(status_code=status, detail=str(exc))
+
+
+def _configured_cwl_teams(
     context: AllianceContext,
     db: Database,
     period: str,
-) -> frozenset[str]:
-    """返回当前联盟可见的 CWL 队伍标签。
+) -> tuple[dict | None, list[dict]]:
+    """读取已确认的联盟月度队伍，并适配既有 CWL 展示构建器。"""
+    season = season_payload(db.conn, context, period, include_draft=False)
+    if season is None or season["status"] == "draft":
+        return season, []
+    legacy_by_tag = {
+        normalize_tag(item.get("clan_tag")): item
+        for item in legacy_routes._cwl_live_teams(db, period)
+        if normalize_tag(item.get("clan_tag"))
+    }
+    teams = []
+    for item in season["teams"]:
+        legacy = legacy_by_tag.get(item["clan_tag"], {})
+        teams.append({
+            "period": period,
+            "team_index": item["team_index"],
+            "team_alias": item["team_alias"] or item["clan_name_snapshot"] or item["clan_tag"],
+            "team_name": item["clan_name_snapshot"] or legacy.get("team_name") or item["clan_tag"],
+            "clan_tag": item["clan_tag"],
+            "category": item["category"],
+            "member_count": legacy.get("member_count", 0),
+            "league_level": legacy.get("league_level"),
+            "leader_name": legacy.get("leader_name", ""),
+            "manager_names": legacy.get("manager_names", ""),
+        })
+    return season, teams
 
-    苍穹现有 CWL 队伍包含临时壳子部落，未必出现在固定 12 个日常订阅部落中；
-    迁移期 ``league_teams`` 中的存量数据全部属于苍穹，因此按月份完整复用。其他
-    联盟仍只能看到其订阅部落，直到后续阶段为 CWL 队伍快照增加联盟归属。
-    """
-    if context.alliance_key == SKY_ALLIANCE_KEY:
-        return frozenset(
-            normalize_tag(team.get("clan_tag"))
-            for team in legacy_routes._cwl_live_teams(db, period)
-            if normalize_tag(team.get("clan_tag"))
+
+def _alliance_cwl_available_periods(
+    context: AllianceContext,
+    db: Database,
+) -> list[dict]:
+    current = legacy_routes._current_cwl_live_period()
+    items = [{"period": current, "label": f"{current[:4]}年{int(current[5:])}月", "current": True}]
+    for season in list_seasons(db.conn, context):
+        period = season["period"]
+        if period == current or season["status"] != "complete":
+            continue
+        items.append({
+            "period": period,
+            "label": f"{period[:4]}年{int(period[5:])}月",
+            "current": False,
+        })
+    return items
+
+
+@router.get("/alliances/{alliance_id}/cwl/seasons")
+def alliance_cwl_seasons_list(
+    alliance_id: int,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    context = _context(user, alliance_id, db)
+    seasons = list_seasons(db.conn, context)
+    db.conn.commit()
+    return {"alliance_id": alliance_id, "count": len(seasons), "seasons": seasons}
+
+
+@router.get("/alliances/{alliance_id}/cwl/seasons/{period}")
+def alliance_cwl_season_detail(
+    alliance_id: int,
+    period: str,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    context = _context(user, alliance_id, db)
+    try:
+        season = season_payload(
+            db.conn,
+            context,
+            period,
+            include_draft=context.role in {"admin", "leader"},
         )
-    return context.clan_tags
+    except CwlConfigError as exc:
+        raise _cwl_config_error(exc) from exc
+    if season is None:
+        raise HTTPException(status_code=404, detail="联赛月份配置不存在")
+    db.conn.commit()
+    return {"alliance_id": alliance_id, **season}
+
+
+@router.post("/alliances/{alliance_id}/cwl/seasons/{period}")
+def alliance_cwl_season_create(
+    alliance_id: int,
+    period: str,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    context = _context(user, alliance_id, db)
+    try:
+        return {"alliance_id": alliance_id, **create_season(db.conn, context, period)}
+    except CwlConfigError as exc:
+        raise _cwl_config_error(exc) from exc
+
+
+@router.post("/alliances/{alliance_id}/cwl/seasons/{period}/copy-previous")
+def alliance_cwl_season_copy_previous(
+    alliance_id: int,
+    period: str,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    context = _context(user, alliance_id, db)
+    try:
+        return {"alliance_id": alliance_id, **copy_previous(db.conn, context, period)}
+    except CwlConfigError as exc:
+        raise _cwl_config_error(exc) from exc
+
+
+@router.post("/alliances/{alliance_id}/cwl/seasons/{period}/teams")
+def alliance_cwl_team_add(
+    alliance_id: int,
+    period: str,
+    payload: CwlTeamInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    context = _context(user, alliance_id, db)
+    try:
+        team = add_team(
+            db.conn,
+            context,
+            period,
+            clan_tag=payload.clan_tag,
+            clan_name=payload.clan_name,
+            team_alias=payload.team_alias,
+            category=payload.category,
+        )
+        return {"alliance_id": alliance_id, "period": period, "team": team}
+    except CwlConfigError as exc:
+        raise _cwl_config_error(exc) from exc
+
+
+@router.put("/alliances/{alliance_id}/cwl/seasons/{period}/teams/{team_id}")
+def alliance_cwl_team_update(
+    alliance_id: int,
+    period: str,
+    team_id: int,
+    payload: CwlTeamInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    context = _context(user, alliance_id, db)
+    try:
+        team = update_team(
+            db.conn,
+            context,
+            period,
+            team_id,
+            clan_tag=payload.clan_tag,
+            clan_name=payload.clan_name,
+            team_alias=payload.team_alias,
+            category=payload.category,
+            sort_order=payload.sort_order,
+        )
+        return {"alliance_id": alliance_id, "period": period, "team": team}
+    except CwlConfigError as exc:
+        raise _cwl_config_error(exc) from exc
+
+
+@router.delete("/alliances/{alliance_id}/cwl/seasons/{period}/teams/{team_id}")
+def alliance_cwl_team_delete(
+    alliance_id: int,
+    period: str,
+    team_id: int,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    context = _context(user, alliance_id, db)
+    try:
+        delete_team(db.conn, context, period, team_id)
+        return {"alliance_id": alliance_id, "period": period, "deleted": True}
+    except CwlConfigError as exc:
+        raise _cwl_config_error(exc) from exc
+
+
+@router.post("/alliances/{alliance_id}/cwl/seasons/{period}/teams/{team_id}/correct-tag")
+def alliance_cwl_team_correct_tag(
+    alliance_id: int,
+    period: str,
+    team_id: int,
+    payload: CwlTagCorrectionInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    context = _context(user, alliance_id, db)
+    try:
+        team = correct_frozen_tag(
+            db.conn,
+            context,
+            period,
+            team_id,
+            clan_tag=payload.clan_tag,
+            reason=payload.reason,
+        )
+        return {"alliance_id": alliance_id, "period": period, "team": team}
+    except CwlConfigError as exc:
+        raise _cwl_config_error(exc) from exc
+
+
+@router.post("/alliances/{alliance_id}/cwl/seasons/{period}/confirm")
+def alliance_cwl_season_confirm(
+    alliance_id: int,
+    period: str,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    context = _context(user, alliance_id, db)
+    try:
+        return {"alliance_id": alliance_id, **confirm_season(db.conn, context, period)}
+    except CwlConfigError as exc:
+        raise _cwl_config_error(exc) from exc
 
 
 @router.get("/alliances/{alliance_id}/cwl/live")
@@ -614,17 +937,18 @@ def alliance_cwl_live(
     if not legacy_routes._valid_period(selected_period):
         raise HTTPException(status_code=400, detail="period 必须为 YYYY-MM")
     _historical_cwl_allowed(context, selected_period)
-    result = legacy_routes._build_cwl_live_summary(db, selected_period)
-    allowed_tags = _cwl_allowed_tags(context, db, selected_period)
+    season, teams = _configured_cwl_teams(context, db, selected_period)
+    result = legacy_routes._build_cwl_live_summary(db, selected_period, teams=teams)
     result["alliance_id"] = alliance_id
-    result["clans"] = [
-        item for item in result["clans"]
-        if normalize_tag(item.get("clan_tag")) in allowed_tags
-    ]
+    result["available_periods"] = _alliance_cwl_available_periods(context, db)
+    result["season_status"] = season.get("status") if season else None
+    result["configured_team_count"] = len(teams)
+    result["empty_reason"] = "no_config" if not teams else None
     result["updated_at"] = max(
         (item.get("synced_at") for item in result["clans"] if item.get("synced_at")),
         default=None,
     )
+    db.conn.commit()
     return result
 
 
@@ -641,21 +965,20 @@ def alliance_cwl_live_detail(
     context = _context(user, alliance_id, db)
     selected_period = period or legacy_routes._current_cwl_live_period()
     normalized = normalize_tag(clan_tag)
-    if normalized not in _cwl_allowed_tags(context, db, selected_period):
+    if not legacy_routes._valid_period(selected_period):
+        raise HTTPException(status_code=400, detail="period 必须为 YYYY-MM")
+    _historical_cwl_allowed(context, selected_period)
+    _season, teams = _configured_cwl_teams(context, db, selected_period)
+    if normalized not in {item["clan_tag"] for item in teams}:
         raise HTTPException(status_code=404, detail="部落不在当前联盟联赛队伍范围内")
-    if selected_period != legacy_routes._current_cwl_live_period():
-        if context.alliance_key == SKY_ALLIANCE_KEY:
-            if context.role not in {"admin", "leader"}:
-                raise HTTPException(status_code=403, detail="历史联赛数据需要管理权限")
-        else:
-            _management_required(context, normalized)
-    result = legacy_routes.cwl_live_detail(
-        normalized, period=period, round=round, db=db, view=view,
+    result = legacy_routes._build_cwl_live_detail(
+        db,
+        normalized,
+        selected_period,
+        round=round,
+        view=view,
+        teams=teams,
     )
-    allowed_tags = _cwl_allowed_tags(context, db, selected_period)
     result["alliance_id"] = alliance_id
-    result["available_teams"] = [
-        item for item in result.get("available_teams", [])
-        if normalize_tag(item.get("clan_tag")) in allowed_tags
-    ]
+    db.conn.commit()
     return result

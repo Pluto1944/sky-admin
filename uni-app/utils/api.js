@@ -184,7 +184,8 @@ export function getClanOverviewDetail(clanTag) {
  */
 export function getLeagueStats(period) {
   const query = period ? `?period=${period}` : ''
-  return legacySkyRequest(`/api/clan/league-stats${query}`)
+  const scoped = scopedPath('/league-stats')
+  return request(`${scoped || '/api/clan/league-stats'}${query}`, 'GET', {}, Boolean(scoped))
 }
 
 /**
@@ -272,6 +273,57 @@ export function getCwlLiveDetail(clanTag, period, round, view) {
   )
 }
 
+/** 读取当前联盟的月度联赛配置。 */
+export function getAllianceCwlSeason(period) {
+  const scoped = scopedPath(`/cwl/seasons/${encodeURIComponent(period)}`)
+  if (!scoped) return Promise.reject(new Error('请先选择联盟'))
+  return request(scoped, 'GET', {}, true)
+}
+
+/** 创建当前联盟的月度联赛配置。 */
+export function createAllianceCwlSeason(period) {
+  const scoped = scopedPath(`/cwl/seasons/${encodeURIComponent(period)}`)
+  if (!scoped) return Promise.reject(new Error('请先选择联盟'))
+  return request(scoped, 'POST', {}, true)
+}
+
+export function copyPreviousAllianceCwlSeason(period) {
+  const scoped = scopedPath(`/cwl/seasons/${encodeURIComponent(period)}/copy-previous`)
+  if (!scoped) return Promise.reject(new Error('请先选择联盟'))
+  return request(scoped, 'POST', {}, true)
+}
+
+export function addAllianceCwlTeam(period, payload) {
+  const scoped = scopedPath(`/cwl/seasons/${encodeURIComponent(period)}/teams`)
+  if (!scoped) return Promise.reject(new Error('请先选择联盟'))
+  return request(scoped, 'POST', payload, true)
+}
+
+export function updateAllianceCwlTeam(period, teamId, payload) {
+  const scoped = scopedPath(`/cwl/seasons/${encodeURIComponent(period)}/teams/${teamId}`)
+  if (!scoped) return Promise.reject(new Error('请先选择联盟'))
+  return request(scoped, 'PUT', payload, true)
+}
+
+export function deleteAllianceCwlTeam(period, teamId) {
+  const scoped = scopedPath(`/cwl/seasons/${encodeURIComponent(period)}/teams/${teamId}`)
+  if (!scoped) return Promise.reject(new Error('请先选择联盟'))
+  return request(scoped, 'DELETE', {}, true)
+}
+
+/** 联赛组已发现后，通过留痕操作纠正队伍 Tag。 */
+export function correctAllianceCwlTeamTag(period, teamId, payload) {
+  const scoped = scopedPath(`/cwl/seasons/${encodeURIComponent(period)}/teams/${teamId}/correct-tag`)
+  if (!scoped) return Promise.reject(new Error('请先选择联盟'))
+  return request(scoped, 'POST', payload, true)
+}
+
+export function confirmAllianceCwlSeason(period) {
+  const scoped = scopedPath(`/cwl/seasons/${encodeURIComponent(period)}/confirm`)
+  if (!scoped) return Promise.reject(new Error('请先选择联盟'))
+  return request(scoped, 'POST', {}, true)
+}
+
 export default {
   getServerInfo,
   getSystemVersion,
@@ -294,5 +346,13 @@ export default {
   getCwlCheckIn,
   getCwlAssembly,
   getCwlAssemblyDetail,
-  getCwlLiveDetail
+  getCwlLiveDetail,
+  getAllianceCwlSeason,
+  createAllianceCwlSeason,
+  copyPreviousAllianceCwlSeason,
+  addAllianceCwlTeam,
+  updateAllianceCwlTeam,
+  deleteAllianceCwlTeam,
+  correctAllianceCwlTeamTag,
+  confirmAllianceCwlSeason
 }

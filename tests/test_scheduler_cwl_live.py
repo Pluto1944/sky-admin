@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 import config
 import modules.coc_sync.service as service_module
 from modules.coc_sync.cwl_live import normalize_cwl_group, normalize_cwl_war
-from scripts.scheduler import _cwl_war_refresh_due, _run_cwl_live
+from scripts.scheduler import _cwl_live_teams_for_period, _cwl_war_refresh_due, _run_cwl_live
 from shared.db.connection import Database
 from tests.coc_sync.cwl_live_fixtures import league_group, league_war_one, team
 
@@ -23,6 +23,48 @@ def _seed_team(db):
         ),
     )
     db.conn.commit()
+
+
+def test_cwl_live_targets_include_confirmed_alliance_teams_and_deduplicate_legacy(db):
+    db.conn.execute(
+        """INSERT INTO alliance_plans
+           (plan_code, display_name, max_clans, sync_tier, entitlements_json,
+            status, created_at, updated_at)
+           VALUES ('paid', '付费', 10, 'high', '{}', 'active', 'now', 'now')"""
+    )
+    alliance_id = db.conn.execute(
+        """INSERT INTO alliances
+           (alliance_key, name, status, plan_code, created_at, updated_at)
+           VALUES ('a', 'A', 'active', 'paid', 'now', 'now')"""
+    ).lastrowid
+    season_id = db.conn.execute(
+        """INSERT INTO alliance_cwl_seasons
+           (alliance_id, period, status, created_at, updated_at)
+           VALUES (?, '2026-09', 'active', 'now', 'now')""",
+        (alliance_id,),
+    ).lastrowid
+    db.conn.executemany(
+        """INSERT INTO alliance_cwl_teams
+           (season_id, team_index, clan_tag, clan_name_snapshot, team_alias,
+            category, sort_order, source, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'combat', ?, 'manual', 'now', 'now')""",
+        [
+            (season_id, 0, '#ABC', '共享队', '共享队', 0),
+            (season_id, 1, '#NEW', '新增队', '新增队', 1),
+        ],
+    )
+    db.conn.execute(
+        """INSERT INTO league_teams
+           (period, team_index, team_alias, team_name, clan_tag, category, member_count)
+           VALUES ('2026-09', 0, '旧队', '旧队', '#ABC', 'combat', 15)"""
+    )
+    db.conn.commit()
+
+    teams = _cwl_live_teams_for_period(db, '2026-09')
+
+    assert {item['clan_tag'] for item in teams} == {'#ABC', '#NEW'}
+    assert next(item for item in teams if item['clan_tag'] == '#ABC')['team_name'] == '旧队'
+    assert next(item for item in teams if item['clan_tag'] == '#NEW')['team_name'] == '新增队'
 
 
 def test_cwl_live_scheduler_writes_group_and_war_cache_incrementally(tmp_path, monkeypatch):

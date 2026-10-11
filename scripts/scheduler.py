@@ -521,11 +521,65 @@ def _refresh_cwl_projections(db: Database, teams: list[dict], period: str, times
         complete += 1
         if group_row["raw_status"] == "complete":
             continue
+        if not team.get("projection_enabled", True):
+            continue
         rebuilt, _skipped = rebuild_league_results(
             db.conn, group, wars, team, rebuilt_at=timestamp,
         )
         projected += rebuilt
     return complete, projected
+
+
+def _cwl_live_teams_for_period(db: Database, period: str) -> list[dict]:
+    """合并苍穹兼容快照和联盟月度配置，按 clan_tag 全局去重。
+
+    ``league_results`` 已按 ``period + clan_tag + player_tag`` 保存公共投影，
+    因而外部联盟队伍也可以安全投影；苍穹旧快照仅提供兼容展示元数据。
+    """
+    merged: dict[str, dict] = {}
+    legacy_rows = db.conn.execute(
+        """SELECT period, team_index, team_alias, team_name, clan_tag,
+                  category, member_count, league_level
+           FROM league_teams
+           WHERE period = ? AND category IN ('combat', 'shell')
+           ORDER BY team_index""",
+        (period,),
+    ).fetchall()
+    from modules.coc_sync.official.mapper import normalize_tag
+
+    for row in legacy_rows:
+        item = dict(row)
+        tag = normalize_tag(item.get("clan_tag"))
+        if not tag:
+            continue
+        item["clan_tag"] = tag
+        merged[tag] = item
+
+    rows = db.conn.execute(
+        """SELECT teams.id, teams.team_index, teams.team_alias,
+                  teams.clan_name_snapshot, teams.clan_tag, teams.category,
+                  teams.sort_order
+           FROM alliance_cwl_teams AS teams
+           JOIN alliance_cwl_seasons AS seasons ON seasons.id = teams.season_id
+           WHERE seasons.period = ? AND seasons.status IN ('active', 'frozen', 'complete')
+           ORDER BY teams.sort_order, teams.team_index, teams.id""",
+        (period,),
+    ).fetchall()
+    for row in rows:
+        tag = normalize_tag(row["clan_tag"])
+        if not tag or tag in merged:
+            continue
+        merged[tag] = {
+            "period": period,
+            "team_index": 1000000 + int(row["id"]),
+            "team_alias": row["team_alias"] or row["clan_name_snapshot"] or tag,
+            "team_name": row["clan_name_snapshot"] or row["team_alias"] or tag,
+            "clan_tag": tag,
+            "category": row["category"],
+            "member_count": 0,
+            "league_level": None,
+        }
+    return list(merged.values())
 
 
 def _run_cwl_live(force: bool = False, now: datetime | None = None) -> dict:
@@ -541,17 +595,10 @@ def _run_cwl_live(force: bool = False, now: datetime | None = None) -> dict:
 
     db = Database(config.DB_PATH)
     db.init_schema()
-    teams = [dict(row) for row in db.conn.execute(
-        """SELECT period, team_index, team_alias, team_name, clan_tag,
-                  category, member_count, league_level
-           FROM league_teams
-           WHERE period = ? AND category IN ('combat', 'shell')
-           ORDER BY team_index""",
-        (period,),
-    ).fetchall()]
+    teams = _cwl_live_teams_for_period(db, period)
     if not teams:
         db.close()
-        return {"status": "skipped", "reason": f"{period} 无 league_teams 联赛队伍"}
+        return {"status": "skipped", "reason": f"{period} 无已确认的联盟联赛队伍"}
 
     service = CocSyncService()
     attempted_at = local_now.astimezone(timezone.utc).isoformat(timespec="seconds")
@@ -810,6 +857,8 @@ def _run_cwl_live(force: bool = False, now: datetime | None = None) -> dict:
         db.conn.commit()
 
     complete_groups, projected_rows = _refresh_cwl_projections(db, teams, period, attempted_at)
+    from modules.alliance.cwl_config import refresh_season_statuses
+    refresh_season_statuses(db.conn, period)
     db.conn.commit()
     db.close()
     if group_failed == len(teams) and not group_payloads:

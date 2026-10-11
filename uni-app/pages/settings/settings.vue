@@ -52,6 +52,15 @@
         <view class="menu-section">
           <view class="menu-title">其他管理</view>
           <view class="menu-list">
+            <view v-if="canManageAlliance" class="menu-item" @tap="openCwlSettings">
+              <view class="menu-icon menu-icon-league">赛</view>
+              <view class="menu-copy">
+                <text class="menu-text">联赛设置</text>
+                <text class="menu-desc">配置本月和下月的联赛队伍</text>
+              </view>
+              <text class="menu-arrow">›</text>
+            </view>
+            <view v-if="canManageAlliance" class="menu-divider"></view>
             <view class="menu-item" @tap="pageState = 'bind'">
               <view class="menu-icon menu-icon-account">号</view>
               <view class="menu-copy">
@@ -170,7 +179,7 @@
 <script>
 import TopBar from '@/components/TopBar.vue'
 import { wechatLogin, getMyInfo, bindAccount, getServerInfo, getSystemVersion } from '@/utils/api.js'
-import { clearAllianceContext, loadAllianceContext } from '@/utils/alliance.js'
+import { clearAllianceContext, getCurrentAlliance, loadAllianceContext } from '@/utils/alliance.js'
 import { APP_VERSION } from '@/config/release.js'
 
 export default {
@@ -189,6 +198,10 @@ export default {
     }
   },
   computed: {
+    canManageAlliance() {
+      const alliance = getCurrentAlliance()
+      return alliance && ['admin', 'leader'].indexOf(alliance.role) >= 0
+    },
     displayName() {
       if (this.userInfo && this.userInfo.nickname) {
         return this.userInfo.nickname
@@ -200,6 +213,9 @@ export default {
     this.refreshLoginState()
   },
   methods: {
+    openCwlSettings() {
+      uni.navigateTo({ url: '/pages/settings/cwl-settings' })
+    },
     refreshLoginState() {
       const token = uni.getStorageSync('token')
       const consented = uni.getStorageSync('privacyConsent') === 'v1'

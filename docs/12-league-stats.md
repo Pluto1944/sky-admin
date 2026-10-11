@@ -20,6 +20,16 @@
 前三张报名/编排/公示表不因战斗数据重构而改变。`cwl_assembly_cache` 是开赛前的
 到位事实，不是战绩；一旦 `locked_at` 写入，其 `roster_snapshot_id` 不能被后续修订重绑。
 
+多联盟通用化增加了一类独立的“联盟月度查看/同步范围”：
+
+- `alliance_cwl_seasons` 表示某联盟某月的配置生命周期；
+- `alliance_cwl_teams` 表示该联盟当月配置的 CWL 部落和 `combat / shell` 类别；
+- 它们不替代苍穹报名、编排和公示事实，也不复制官方战争数据；
+- 官方分组、战争和战绩继续按公共键全局保存，同一队被多个联盟配置时只同步一次。
+
+该数据模型已在代码中实现、尚待生产迁移。苍穹从现有 `league_teams` 幂等导入并在以后
+编排成功后同步更新；其他联盟无需报名即可配置和查看 CWL 数据，但第一版不开放报名功能。
+
 ## 当前和历史使用同一套原始表
 
 一个 CWL 分组的身份是 `(period, clan_tag)`，一场战争的身份是全局 `war_tag`：
@@ -37,7 +47,7 @@
 `league_results` 保留以支持下月排序/升降级和高效展示，但它不是原始来源：
 
 ```text
-cwl_live_group_cache + cwl_live_war_cache + league_teams
+cwl_live_group_cache + cwl_live_war_cache + 联盟月度队伍（苍穹兼容 league_teams）
   -> 完整性校验
   -> league_results
 ```
@@ -49,12 +59,14 @@ cwl_live_group_cache + cwl_live_war_cache + league_teams
 - `complete`：所有对局均为最终档案，可重建投影；
 - `incomplete`：分组已结束但缺少或损坏任一最终档案。
 
-只有 `complete` 允许在同一事务中替换该队 `(period, team_index)` 的所有
+只有 `complete` 允许在同一事务中替换该队 `(period, clan_tag)` 的所有
 `league_results` 行。每支队伍只聚合包含该队的对局；完整分组中其他队之间的比赛只用于完整性验证。
 进行中的月度成绩不会进入 `league_results`，从而不会污染下月编排和历史窗口。
 
-联赛首页的历史月份选择只根据 `league_teams` 与持久化的
-`cwl_live_group_cache.raw_status=complete` 判断可用性。`raw_status` 已由上述完整性流程在写入时
+联盟联赛首页的候选月份和队伍范围来自当前联盟的 `alliance_cwl_seasons`、
+`alliance_cwl_teams`；苍穹旧接口暂时仍根据 `league_teams` 与持久化的
+`cwl_live_group_cache.raw_status=complete` 判断可用性。
+`raw_status` 已由上述完整性流程在写入时
 校验，因此页面请求不得再次反序列化所有历史 `data_json`；用户真正选择某个历史月份或详情后，
 才解析该月份所需的固定原始档案。
 
@@ -73,6 +85,8 @@ cwl_live_group_cache + cwl_live_war_cache + league_teams
 ## 任务和补档
 
 - `cwl_live` 在月初活跃窗口持续拉取官方分组和逐场数据；最终战争封存后不重复刷新。
+- `cwl_live` 合并苍穹兼容快照与所有联盟已确认的月度队伍，并按 `clan_tag` 全局去重；同一部落
+  被多个联盟配置不会增加重复请求。
 - `cwl` 每日任务不再访问 ClashKing 直接写成绩，只重新检查本地原始档案并投影完整分组。
 - `scripts/fetch_cwl_data.py --period YYYY-MM` 只从本地完整档案重建，绝不访问第三方聚合 API。
 - `scripts/backfill_cwl_live.py --period YYYY-MM` 默认 dry-run。它只把可验证的完整历史分组和
@@ -83,6 +97,10 @@ cwl_live_group_cache + cwl_live_war_cache + league_teams
   自动挑选。已确认的例外可用 `--archive-season` 精确选择；选择失败时禁止回退战争日志。
 
 历史补档来源可以是 ClashKing，但绝不能绕过分组/逐场档案直接写入 `league_results`。
+
+M3.1 将 `league_results` 唯一键从 `(period, team_index, player_tag)` 迁移为
+`(period, clan_tag, player_tag)`，使外部联盟队伍可以安全共享同一投影。苍穹编排读取上月名单时
+仍与苍穹 `league_teams` 按 `period + clan_tag` 连接，外部联盟成绩不会进入苍穹排序输入。
 
 ### 2026-10-04 历史漏刀补算记录
 
@@ -108,6 +126,10 @@ SQLite 完整性和外键检查；写入前创建并校验 COS 恢复快照，�
 
 战斗月份统一为 `YYYY-MM`，代表 CWL 实际发生月。编排月 `N` 使用
 `registrations(N)`、`league_results(N-1)`、`league_teams(N-1)`；不要将两种月份混用。
+
+联盟月度 CWL 配置也使用实际参赛月 `YYYY-MM`。管理员只能常规编辑当前月和下月；官方分组出现后
+冻结普通编辑，历史月份只读。冻结后的 Tag 纠错必须保留审计，不能静默重绑已经保存的战争事实。
+月度队伍不要求属于联盟日常订阅部落，也不要求认证；这不授予任何部落管理权限。
 
 小程序/API 请求只读本地表，不直接请求 COC、ClashKing 或腾讯文档。外部公示仍是独立的人工确认步骤，
 编排或查询操作不得隐式发布名单。

@@ -2,8 +2,7 @@
   <view class="detail-page">
     <TopBar title="返回参赛部落" :showBack="true" :backFallback="listFallback" />
 
-    <view v-if="!skyAlliance" class="state-box"><text class="state-text">当前无数据，联系管理员</text></view>
-    <view v-else-if="loading" class="state-box"><text class="state-text">加载联赛数据...</text></view>
+    <view v-if="loading" class="state-box"><text class="state-text">加载联赛数据...</text></view>
     <view v-else-if="loadError && !detail" class="state-box">
       <text class="error-text">{{ loadError }}</text>
       <text class="retry-btn" @tap="fetchDetail">点击重试</text>
@@ -156,7 +155,7 @@
 <script>
 import TopBar from '@/components/TopBar.vue'
 import { getCwlLiveDetail } from '@/utils/api.js'
-import { ALLIANCE_CHANGED_EVENT, activateSharedAlliance, allianceQuery, isSkyAlliance } from '@/utils/alliance.js'
+import { ALLIANCE_CHANGED_EVENT, activateSharedAlliance, allianceQuery } from '@/utils/alliance.js'
 
 const CACHE_REFRESH_INTERVAL_MS = 60 * 1000
 const BUSINESS_TIMEZONE_OFFSET_MS = 8 * 60 * 60 * 1000
@@ -179,7 +178,6 @@ export default {
       activeView: 'war-day', selectedRoundNumber: null, requestedRound: null,
       refreshTimer: null, standingMatch: null, loadedViews: {},
       allianceChangeHandler: null,
-      skyAlliance: true,
       viewLoading: { 'war-day': false, overview: false }, viewVersions: {}, requestGeneration: 0,
       openSections: { townHalls: false, standings: true, offense: true, defense: false }
     }
@@ -209,24 +207,22 @@ export default {
     this.activeView = options && options.view === 'overview' ? 'overview' : 'war-day'
     this.requestedRound = Number((options && options.round) || 0) || null
     try { await activateSharedAlliance(options) } catch (e) { this.loadError = e.message || '联盟切换失败' }
-    this.skyAlliance = isSkyAlliance()
     this.allianceChangeHandler = () => uni.switchTab({ url: '/pages/war/war' })
     uni.$on(ALLIANCE_CHANGED_EVENT, this.allianceChangeHandler)
     rememberLeagueList()
-    if (this.skyAlliance) this.fetchDetail(this.activeView)
-    else this.loading = false
+    this.fetchDetail(this.activeView)
   },
   onShow() {
     rememberLeagueList()
     this.stopTimer()
-    if (this.skyAlliance && this.isCurrentPeriod) {
+    if (this.isCurrentPeriod) {
       if (this.detail) this.fetchDetail(this.activeView)
       this.refreshTimer = setInterval(() => { this.fetchDetail(this.activeView) }, CACHE_REFRESH_INTERVAL_MS)
     }
   },
   onHide() { this.stopTimer() },
   onUnload() { this.stopTimer(); if (this.allianceChangeHandler) uni.$off(ALLIANCE_CHANGED_EVENT, this.allianceChangeHandler) },
-  async onPullDownRefresh() { if (this.skyAlliance) await this.fetchDetail(this.activeView); uni.stopPullDownRefresh() },
+  async onPullDownRefresh() { await this.fetchDetail(this.activeView); uni.stopPullDownRefresh() },
   onShareAppMessage() {
     const round = this.selectedRoundNumber ? `&round=${this.selectedRoundNumber}` : ''
     const alliance = allianceQuery()
@@ -238,10 +234,6 @@ export default {
   },
   methods: {
     async fetchDetail(targetView) {
-      if (!this.skyAlliance) {
-        this.loading = false
-        return
-      }
       const requestedView = typeof targetView === 'string' ? targetView : this.activeView
       if (!this.clanTag) { this.loadError = '缺少部落标签'; this.loading = false; return }
       if (!this.detail) this.loading = true
@@ -276,7 +268,6 @@ export default {
       }
     },
     switchView(view) {
-      if (!this.skyAlliance) return
       if (view === this.activeView) return
       this.activeView = view
       this.standingMatch = null
@@ -284,7 +275,6 @@ export default {
     },
     stopTimer() { if (this.refreshTimer) clearInterval(this.refreshTimer); this.refreshTimer = null },
     switchTeam(event) {
-      if (!this.skyAlliance) return
       const selected = this.availableTeams[Number(event.detail.value)]
       if (!selected || selected.clan_tag === this.clanTag) return
       this.clanTag = selected.clan_tag
