@@ -67,6 +67,28 @@ def public_round_clan(row: sqlite3.Row) -> dict:
     }
 
 
+def public_bound_clan(row: sqlite3.Row) -> dict:
+    """无当前场次时仍展示账号已绑定的启用部落。"""
+    score = int(row["score"])
+    return {
+        "clan_id": int(row["id"]),
+        "account_id": int(row["account_id"]),
+        "clan_tag": row["clan_tag"],
+        "clan_name": row["clan_name"],
+        "score_before": score,
+        "current_score": score,
+        "registration_status": "not_registered",
+        "match_id": None,
+        "opponent_tag": None,
+        "opponent_name": None,
+        "result": None,
+        "score_after": None,
+        "registered_at": None,
+        "last_attempt_at": None,
+        "last_error": None,
+    }
+
+
 class FarmRoundService:
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
@@ -172,7 +194,18 @@ class FarmRoundService:
     def dashboard(self, actor: dict) -> dict:
         round_row = self.current_round()
         if round_row is None:
-            return {"round": None, "registered_count": 0, "total_count": 0, "clans": []}
+            clans = self.conn.execute(
+                """SELECT * FROM farm_clans
+                   WHERE account_id = ? AND status = 'active'
+                   ORDER BY id""",
+                (int(actor["id"]),),
+            ).fetchall()
+            return {
+                "round": None,
+                "registered_count": 0,
+                "total_count": len(clans),
+                "clans": [public_bound_clan(row) for row in clans],
+            }
         clans = self._round_clans(int(round_row["id"]), account_id=int(actor["id"]))
         registered = sum(
             row["registration_status"] in FINAL_REGISTRATION_STATUSES for row in clans

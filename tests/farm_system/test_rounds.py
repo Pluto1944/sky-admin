@@ -38,6 +38,41 @@ def test_dashboard_without_round_has_stable_empty_state(db):
     }
 
 
+def test_dashboard_without_round_still_lists_bound_active_clans(db):
+    creator = dict(_account(db, "creator.one", "creator"))
+    member = dict(_account(db, "member.one", "member"))
+    first = _clan(db, creator, member, "#AAA", "一部落")
+    disabled = _clan(db, creator, member, "#BBB", "二部落")
+    FarmClanRepository(db.conn).update_clan(
+        disabled["clan_tag"], status="disabled", actor_account_id=creator["id"]
+    )
+
+    dashboard = FarmRoundService(db.conn).dashboard(member)
+
+    assert dashboard["round"] is None
+    assert dashboard["total_count"] == 1
+    assert dashboard["registered_count"] == 0
+    assert dashboard["clans"] == [
+        {
+            "clan_id": first["id"],
+            "account_id": member["id"],
+            "clan_tag": "#AAA",
+            "clan_name": "一部落",
+            "score_before": 0,
+            "current_score": 0,
+            "registration_status": "not_registered",
+            "match_id": None,
+            "opponent_tag": None,
+            "opponent_name": None,
+            "result": None,
+            "score_after": None,
+            "registered_at": None,
+            "last_attempt_at": None,
+            "last_error": None,
+        }
+    ]
+
+
 def test_create_round_snapshots_only_active_clans_and_uses_utc(db):
     creator = dict(_account(db, "creator.one", "creator"))
     member = dict(_account(db, "member.one", "member"))

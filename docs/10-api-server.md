@@ -398,8 +398,9 @@ POST /api/farm-system/creator/accounts/{account_id}/reset-password
 为 stale 的官方资料，HTTP 请求路径不会为了添加部落直接调用 COC API。转移部落仅改变当前归属，
 原积分不清零。
 
-`dashboard` 只返回当前账号在当前场次快照中的部落；管理员结果接口返回全联盟快照。创建场次时把
-带时区的北京时间转换为 UTC，并复制全部启用参与部落。统一时间固定为“开始搜战时间”，
+`dashboard` 在无当前场次时返回当前账号已绑定的启用部落；创建场次后只返回当前账号在本轮快照
+中的部落。管理员结果接口返回全联盟快照。创建场次时把带时区的北京时间转换为 UTC，并复制全部
+启用参与部落。统一时间固定为“开始搜战时间”，
 `business_time_kind` 只允许 `preparation_start`，登记时与官方 `preparationStartTime` 比较。
 
 单部落登记接口额外受 `FARM_SYSTEM_REGISTRATION_ENABLED` 控制。它是用户显式写操作：读取官方
