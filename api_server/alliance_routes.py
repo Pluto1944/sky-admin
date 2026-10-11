@@ -480,6 +480,97 @@ def alliance_current_war_detail(
     return item
 
 
+def _configured_context_clans(context: AllianceContext) -> list[dict]:
+    return [
+        {
+            "tag": clan.clan_tag,
+            "name": clan.clan_name,
+            "category": clan.category,
+            "enabled": True,
+        }
+        for clan in context.clans
+    ]
+
+
+@router.get("/alliances/{alliance_id}/wars/history")
+def alliance_war_history(
+    alliance_id: int,
+    clan_tag: Optional[str] = None,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    """返回当前联盟订阅部落的已结束普通战档案，不触发外部同步。"""
+    context = _context(user, alliance_id, db)
+    if clan_tag:
+        _subscribed_clan(context, clan_tag)
+    result = legacy_routes._war_history_for_clans(
+        db, _configured_context_clans(context), clan_tag,
+    )
+    result["alliance_id"] = alliance_id
+    return result
+
+
+@router.get("/alliances/{alliance_id}/wars/history/{clan_tag}/{war_key}")
+def alliance_war_history_detail(
+    alliance_id: int,
+    clan_tag: str,
+    war_key: str,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    """返回当前联盟订阅部落的一场已结束普通战详情。"""
+    context = _context(user, alliance_id, db)
+    clan = _subscribed_clan(context, clan_tag)
+    configured = {
+        "tag": clan.clan_tag,
+        "name": clan.clan_name,
+        "category": clan.category,
+    }
+    result = legacy_routes._war_history_detail_for_clan(db, configured, war_key)
+    result["alliance_id"] = alliance_id
+    return result
+
+
+@router.get("/alliances/{alliance_id}/war-stats")
+def alliance_war_stats(
+    alliance_id: int,
+    clan_tag: Optional[str] = None,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    """按当前联盟的战营标签返回普通战固定窗口统计。"""
+    context = _context(user, alliance_id, db)
+    combat_clans = [clan for clan in context.clans if clan.category == "combat"]
+    options = [
+        {"clan_tag": clan.clan_tag, "clan_name": clan.clan_name}
+        for clan in combat_clans
+    ]
+    if clan_tag:
+        selected = _subscribed_clan(context, clan_tag)
+        if selected.category != "combat":
+            raise HTTPException(status_code=404, detail="部落不是当前联盟的战营部落")
+    else:
+        selected = combat_clans[0] if combat_clans else None
+    if selected is None:
+        return {
+            "alliance_id": alliance_id,
+            "clan_tag": None,
+            "clan_name": None,
+            "combat_clans": [],
+            "stats": [],
+            "updated_at": None,
+            "history_coverage": {"available": 0, "target": 45, "complete": False},
+        }
+    result = legacy_routes._war_stats_for_clan(db, {
+        "tag": selected.clan_tag,
+        "name": selected.clan_name,
+        "category": selected.category,
+    })
+    result["alliance_id"] = alliance_id
+    result["combat_clans"] = options
+    return result
+
+
 def _historical_cwl_allowed(context: AllianceContext, period: str) -> None:
     if period == legacy_routes._current_cwl_live_period():
         return

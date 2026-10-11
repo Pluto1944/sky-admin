@@ -506,11 +506,14 @@ def current_war_detail(clan_tag: str, db: Database = Depends(get_db)):
     return item
 
 
-@router.get("/clan/war-history")
-def war_history(clan_tag: Optional[str] = None, db: Database = Depends(get_db)):
-    """返回每个自有部落最近 15 场已结束普通部落战的轻量摘要。"""
+def _war_history_for_clans(
+    db: Database,
+    configured_clans: list[dict],
+    clan_tag: Optional[str] = None,
+) -> dict:
+    """从本地档案组装指定部落范围内的普通战历史。"""
     configured_by_tag = {
-        normalize_tag(clan["tag"]): clan for clan in _enabled_clans()
+        normalize_tag(clan["tag"]): clan for clan in configured_clans
     }
     selected = normalize_tag(clan_tag) if clan_tag else None
     if selected and selected not in configured_by_tag:
@@ -546,7 +549,7 @@ def war_history(clan_tag: Optional[str] = None, db: Database = Depends(get_db)):
     categories = []
     seen_categories = set()
     clans = []
-    for configured in _enabled_clans():
+    for configured in configured_clans:
         tag = normalize_tag(configured["tag"])
         category = configured.get("category", "normal")
         clans.append({
@@ -569,16 +572,19 @@ def war_history(clan_tag: Optional[str] = None, db: Database = Depends(get_db)):
     }
 
 
-@router.get("/clan/war-history/{clan_tag}/{war_key}")
-def war_history_detail(clan_tag: str, war_key: str, db: Database = Depends(get_db)):
-    """返回一场已归档普通部落战的完整详情。"""
-    normalized = normalize_tag(clan_tag)
-    configured = next(
-        (clan for clan in _enabled_clans() if normalize_tag(clan["tag"]) == normalized),
-        None,
-    )
-    if configured is None:
-        raise HTTPException(status_code=404, detail="部落不在允许查询的自有部落列表中")
+@router.get("/clan/war-history")
+def war_history(clan_tag: Optional[str] = None, db: Database = Depends(get_db)):
+    """返回每个自有部落最近 15 场已结束普通部落战的轻量摘要。"""
+    return _war_history_for_clans(db, _enabled_clans(), clan_tag)
+
+
+def _war_history_detail_for_clan(
+    db: Database,
+    configured: dict,
+    war_key: str,
+) -> dict:
+    """从本地档案返回一场指定部落的已结束普通战详情。"""
+    normalized = normalize_tag(configured["tag"])
     row = db.conn.execute(
         """SELECT data_json FROM war_history_cache
            WHERE clan_tag = ? AND war_key = ? AND status = 'war_ended'""",
@@ -595,6 +601,19 @@ def war_history_detail(clan_tag: str, war_key: str, db: Database = Depends(get_d
         "is_history": True,
     })
     return item
+
+
+@router.get("/clan/war-history/{clan_tag}/{war_key}")
+def war_history_detail(clan_tag: str, war_key: str, db: Database = Depends(get_db)):
+    """返回一场已归档普通部落战的完整详情。"""
+    normalized = normalize_tag(clan_tag)
+    configured = next(
+        (clan for clan in _enabled_clans() if normalize_tag(clan["tag"]) == normalized),
+        None,
+    )
+    if configured is None:
+        raise HTTPException(status_code=404, detail="部落不在允许查询的自有部落列表中")
+    return _war_history_detail_for_clan(db, configured, war_key)
 
 
 # ── CWL 联赛实时看板 ──────────────────────────────────────────
@@ -1226,20 +1245,10 @@ def league_stats(
 # ── 部落战战绩统计 ──────────────────────────────────────────────
 
 
-@router.get("/clan/war-stats")
-def war_stats(
-    clan_tag: Optional[str] = None,
-    db: Database = Depends(get_db),
-):
-    """按指定自有部落的固定战争窗口返回当前实际成员攻防三星率。"""
+def _war_stats_for_clan(db: Database, configured: dict) -> dict:
+    """从本地事实表计算一个已授权战营部落的固定窗口战绩。"""
     conn = db.conn
-    configured = {normalize_tag(clan["tag"]): clan for clan in _enabled_clans()}
-    default_tag = normalize_tag("#2QQ")
-    selected = normalize_tag(clan_tag) if clan_tag else (
-        default_tag if default_tag in configured else next(iter(configured), None)
-    )
-    if not selected or selected not in configured:
-        raise HTTPException(status_code=404, detail="部落不在允许查询的自有部落列表中")
+    selected = normalize_tag(configured["tag"])
 
     member_rows = conn.execute(
         """SELECT player_tag, account_name, town_hall_level
@@ -1306,11 +1315,36 @@ def war_stats(
         result.append(item)
     return {
         "clan_tag": selected,
-        "clan_name": configured[selected].get("name") or selected,
+        "clan_name": configured.get("name") or selected,
         "stats": result,
         "updated_at": max((row["updated_at"] for row in history_rows if row["updated_at"]), default=None),
         "history_coverage": {"available": len(history_rows), "target": 45, "complete": len(history_rows) >= 45},
     }
+
+
+@router.get("/clan/war-stats")
+def war_stats(
+    clan_tag: Optional[str] = None,
+    db: Database = Depends(get_db),
+):
+    """按配置中的战营标签返回固定战争窗口战绩；旧入口保留兼容。"""
+    configured_clans = _enabled_clans()
+    configured_by_tag = {
+        normalize_tag(clan["tag"]): clan for clan in configured_clans
+    }
+    selected = normalize_tag(clan_tag) if clan_tag else None
+    if selected:
+        configured = configured_by_tag.get(selected)
+        if configured is None:
+            raise HTTPException(status_code=404, detail="部落不在允许查询的自有部落列表中")
+    else:
+        configured = next(
+            (clan for clan in configured_clans if clan.get("category") == "combat"),
+            None,
+        )
+    if configured is None:
+        raise HTTPException(status_code=404, detail="当前没有战营部落")
+    return _war_stats_for_clan(db, configured)
 
 
 # ── 互刷部落配置 ──────────────────────────────────────────────

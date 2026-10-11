@@ -46,3 +46,9 @@ def test_war_stats_uses_current_clan_members_and_fixed_clan_window(db, monkeypat
     assert item["offense_5_sample"] == {"three_stars": 1, "attacks": 2}
     assert item["defense_5"] == 0.5
     assert item["defense_5_sample"] == {"three_stars": 1, "attacks": 2}
+
+    # 旧公开接口显式传 Tag 时继续兼容所有已启用自有部落；只有联盟接口限定战营标签。
+    monkeypatch.setattr(routes, "CLANS", [
+        {"tag": "#OWN", "name": "自有部落", "category": "normal", "enabled": True},
+    ])
+    assert routes.war_stats("#OWN", db)["clan_tag"] == "#OWN"

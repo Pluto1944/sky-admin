@@ -229,9 +229,15 @@ GET /api/clan/current-wars/{clan_tag}
 ```
 GET /api/clan/war-history?clan_tag=%232QQ
 GET /api/clan/war-history/{clan_tag}/{war_key}
+GET /api/alliances/{alliance_id}/wars/history?clan_tag=%232QQ
+GET /api/alliances/{alliance_id}/wars/history/{clan_tag}/{war_key}
 ```
 
-无需认证。汇总接口返回每个已启用自有部落最近 15 场已结束普通战争的轻量摘要、分类和部落筛选元数据；详情接口返回单场完整阵容与攻防宽表。接口只读 `war_history_cache`，不直接调用外部 API。CWL、未结束战争和外部部落标签不会出现在历史列表。
+前两条旧接口无需认证。汇总接口返回每个已启用自有部落最近 15 场已结束普通战争的轻量摘要、分类和部落筛选元数据；详情接口返回单场完整阵容与攻防宽表。接口只读 `war_history_cache`，不直接调用外部 API。CWL、未结束战争和外部部落标签不会出现在历史列表。
+
+登录后的联盟页面统一使用后两条联盟范围接口。它们必须携带 JWT，并从当前用户可访问的
+`alliance_clans` 组装允许范围；苍穹与其他联盟执行完全相同的范围校验，不按联盟名称或
+`alliance_key` 设置例外。
 
 ### 2.5 CWL 参赛部落汇总
 
@@ -362,6 +368,9 @@ GET /api/alliances/{alliance_id}/clans/{clan_tag}
 GET /api/alliances/{alliance_id}/members
 GET /api/alliances/{alliance_id}/wars/current
 GET /api/alliances/{alliance_id}/wars/current/{clan_tag}
+GET /api/alliances/{alliance_id}/wars/history
+GET /api/alliances/{alliance_id}/wars/history/{clan_tag}/{war_key}
+GET /api/alliances/{alliance_id}/war-stats
 GET /api/alliances/{alliance_id}/cwl/live
 GET /api/alliances/{alliance_id}/cwl/live/{clan_tag}
 ```
@@ -382,8 +391,13 @@ GET /api/alliances/{alliance_id}/cwl/live/{clan_tag}
 记录。为兼容现有小程序表格，具备管理权限时这些已授权字段也会投影到成员对象顶层；
 未认证部落即使是管理员也只返回成员字段。
 
-部落列表、单部落详情和当前战争接口均返回联盟订阅顺序、类别及页面所需的筛选元数据。
+部落列表、单部落详情、当前战争和普通战历史接口均返回联盟订阅顺序、类别及页面所需的筛选元数据。
 单部落详情只能读取当前联盟已订阅部落，并继续复用全局部落资料缓存。
+
+`GET /api/alliances/{alliance_id}/war-stats` 从当前联盟订阅关系中选择排序最前的
+`category=combat` 战营部落，也可用 `clan_tag` 显式选择当前联盟的其他战营部落。响应同时返回
+`combat_clans` 供后续多战营切换；没有战营部落时返回空统计，不回退到固定 `#2QQ` 或苍穹配置。
+该接口与普通战历史接口都只读 `war_history_cache`、`member_war_facts` 和成员快照。
 
 当前战争和当前月 CWL 属于协作数据，联盟成员可见。历史月份 CWL 属于评价数据：汇总
 接口要求全部订阅部落均具备管理权限，单部落详情要求当前部落具备管理权限。全部联盟

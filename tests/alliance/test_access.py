@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi import HTTPException
 
@@ -65,6 +67,40 @@ def _clan(
            VALUES (?, ?, ?, ?, ?, 'active', ?, 'manual', ?, ?)""",
         (alliance_id, tag, f"部落{tag}", category, order, verification, NOW, NOW),
     )
+
+
+def _war_archive(db, clan_tag: str, war_key: str, *, player_tag: str | None = None):
+    item = {
+        "clan_tag": clan_tag,
+        "clan_name": f"部落{clan_tag}",
+        "category": "combat",
+        "status": "war_ended",
+        "state": "warEnded",
+        "war_type": "random",
+        "result": "win",
+        "team_size": 15,
+        "attacks_per_member": 2,
+        "end_time": "20261009T230000.000Z",
+        "opponent": {"tag": "#ENEMY", "name": "对手"},
+        "rows": [],
+        "synced_at": NOW,
+    }
+    db.conn.execute(
+        """INSERT INTO war_history_cache
+           (clan_tag, war_key, clan_name, category, opponent_tag, opponent_name,
+            status, result, end_time, data_json, updated_at)
+           VALUES (?, ?, ?, 'combat', '#ENEMY', '对手', 'war_ended', 'win', ?, ?, ?)""",
+        (clan_tag, war_key, f"部落{clan_tag}", item["end_time"], json.dumps(item), NOW),
+    )
+    if player_tag:
+        db.conn.execute(
+            """INSERT INTO member_war_facts
+               (clan_tag, war_key, player_tag, end_time, status, category,
+                offense_effective_attacks, offense_effective_3stars,
+                defense_effective_attacks, defense_effective_3stars, updated_at)
+               VALUES (?, ?, ?, ?, 'war_ended', 'combat', 2, 1, 2, 1, ?)""",
+            (clan_tag, war_key, player_tag, item["end_time"], NOW),
+        )
 
 
 def test_sky_join_grants_admin_once_but_never_repromotes_or_restores(db):
@@ -269,6 +305,83 @@ def test_current_wars_are_scoped_to_subscribed_clans(db):
             paid_id, "#AAA", user={"openid": "paid-user"}, db=db,
         )
     assert exc.value.status_code == 404
+
+
+def test_war_history_is_scoped_to_current_alliance(db):
+    apply_sky_migration(db.conn, CLANS, now=NOW)
+    user_id = _user(db, "history-user")
+    paid_id = _paid_alliance(db)
+    _membership(db, paid_id, user_id, "member")
+    _clan(db, paid_id, "#BBB", category="combat")
+    _war_archive(db, "#BBB", "war-bbb")
+    _war_archive(db, "#AAA", "war-aaa")
+    db.conn.commit()
+
+    result = alliance_routes.alliance_war_history(
+        paid_id, user={"openid": "history-user"}, db=db,
+    )
+    assert [item["clan_tag"] for item in result["wars"]] == ["#BBB"]
+    assert result["alliance_id"] == paid_id
+
+    detail = alliance_routes.alliance_war_history_detail(
+        paid_id, "#BBB", "war-bbb", user={"openid": "history-user"}, db=db,
+    )
+    assert detail["clan_tag"] == "#BBB"
+    assert detail["is_history"] is True
+
+    with pytest.raises(HTTPException) as exc:
+        alliance_routes.alliance_war_history_detail(
+            paid_id, "#AAA", "war-aaa", user={"openid": "history-user"}, db=db,
+        )
+    assert exc.value.status_code == 404
+
+
+def test_war_stats_selects_current_alliance_combat_clan_without_sky_special_case(db):
+    apply_sky_migration(db.conn, CLANS, now=NOW)
+    user_id = _user(db, "stats-user")
+    paid_id = _paid_alliance(db)
+    _membership(db, paid_id, user_id, "member")
+    _clan(db, paid_id, "#NORMAL", category="normal", order=0)
+    _clan(db, paid_id, "#CAMP", category="combat", order=1)
+    db.conn.execute(
+        """INSERT INTO accounts
+           (player_tag, account_name, town_hall_level, clan_tag, membership_status)
+           VALUES ('#P1', '战营玩家', 18, '#CAMP', 'member')"""
+    )
+    _war_archive(db, "#CAMP", "war-camp", player_tag="#P1")
+    db.conn.commit()
+
+    result = alliance_routes.alliance_war_stats(
+        paid_id, user={"openid": "stats-user"}, db=db,
+    )
+    assert result["alliance_id"] == paid_id
+    assert result["clan_tag"] == "#CAMP"
+    assert result["combat_clans"] == [
+        {"clan_tag": "#CAMP", "clan_name": "部落#CAMP"},
+    ]
+    assert result["stats"][0]["offense_5_sample"] == {"three_stars": 1, "attacks": 2}
+
+    with pytest.raises(HTTPException) as exc:
+        alliance_routes.alliance_war_stats(
+            paid_id, clan_tag="#NORMAL", user={"openid": "stats-user"}, db=db,
+        )
+    assert exc.value.status_code == 404
+
+
+def test_war_stats_returns_empty_when_current_alliance_has_no_combat_clan(db):
+    apply_sky_migration(db.conn, CLANS, now=NOW)
+    user_id = _user(db, "no-camp-user")
+    paid_id = _paid_alliance(db)
+    _membership(db, paid_id, user_id, "member")
+    _clan(db, paid_id, "#NORMAL", category="normal")
+    db.conn.commit()
+
+    result = alliance_routes.alliance_war_stats(
+        paid_id, user={"openid": "no-camp-user"}, db=db,
+    )
+    assert result["clan_tag"] is None
+    assert result["combat_clans"] == []
+    assert result["stats"] == []
 
 
 def test_farm_config_only_returns_current_alliance_farm_clans(db):

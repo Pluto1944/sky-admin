@@ -34,9 +34,15 @@ CWL 普通战争。`data_json` 必须含双方完整阵容与**全部**攻击事
 
 ```text
 GET /api/clan/war-stats?clan_tag=<已启用的自有部落 Tag>
+GET /api/alliances/{alliance_id}/war-stats?clan_tag=<当前联盟的战营 Tag>
 ```
 
-未传 `clan_tag` 时为兼容旧入口默认战营 `#2QQ`。展示对象始终是当前实际成员：
+小程序登录后统一使用联盟范围接口。未传 `clan_tag` 时，从当前联盟订阅关系中选择排序最前的
+`category=combat` 部落；显式传入时也必须属于当前联盟且标签为 `combat`。苍穹与其他联盟执行
+同一规则，不按联盟身份写死 `#2QQ`。旧公开入口仅作未登录兼容，也从配置中的第一个战营标签
+选择，不再包含固定 Tag。没有战营标签时，联盟接口返回空统计。
+
+展示对象始终是所选战营部落的当前实际成员：
 
 ```sql
 accounts.clan_tag = 查询 clan_tag

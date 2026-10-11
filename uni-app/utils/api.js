@@ -194,7 +194,8 @@ export function getLeagueStats(period) {
  */
 export function getWarStats(clanTag) {
   const query = clanTag ? `?clan_tag=${encodeURIComponent(clanTag)}` : ''
-  return legacySkyRequest(`/api/clan/war-stats${query}`)
+  const scoped = scopedPath('/war-stats')
+  return request(`${scoped || '/api/clan/war-stats'}${query}`, 'GET', {}, Boolean(scoped))
 }
 
 /**
@@ -223,12 +224,17 @@ export function getCurrentWar(clanTag) {
 /** 获取全部自有部落最近 15 场已结束普通部落战摘要。 */
 export function getWarHistory(clanTag) {
   const query = clanTag ? `?clan_tag=${encodeURIComponent(clanTag)}` : ''
-  return legacySkyRequest(`/api/clan/war-history${query}`)
+  const scoped = scopedPath('/wars/history')
+  return request(`${scoped || '/api/clan/war-history'}${query}`, 'GET', {}, Boolean(scoped))
 }
 
 /** 获取一场已归档普通部落战的完整详情。 */
 export function getWarHistoryDetail(clanTag, warKey) {
-  return legacySkyRequest(`/api/clan/war-history/${encodeURIComponent(clanTag)}/${encodeURIComponent(warKey)}`)
+  const suffix = `/wars/history/${encodeURIComponent(clanTag)}/${encodeURIComponent(warKey)}`
+  const scoped = scopedPath(suffix)
+  return scoped
+    ? request(scoped, 'GET', {}, true)
+    : request(`/api/clan/war-history/${encodeURIComponent(clanTag)}/${encodeURIComponent(warKey)}`)
 }
 
 /** 获取当前月份 CWL 参赛部落摘要。 */

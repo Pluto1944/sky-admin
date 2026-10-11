@@ -6,6 +6,7 @@
     </view>
     <view v-if="loading" class="clan-stats-state"><text>加载中...</text></view>
     <view v-else-if="tab === 'league' && !skyAlliance" class="clan-stats-state"><text>当前无数据，联系管理员</text></view>
+    <view v-else-if="tab === 'war' && hasCombatClan === false" class="clan-stats-state"><text class="clan-stats-empty-icon">📊</text><text>当前联盟无战营部落</text></view>
     <view v-else-if="!stats.length" class="clan-stats-state"><text class="clan-stats-empty-icon">📊</text><text>暂无战营数据</text></view>
     <view v-else class="clan-stats-table-wrap">
       <view v-if="updatedAt" class="clan-stats-update">数据更新于 {{ updatedAt }}<text v-if="tab === 'war' && coverage"> · 已收录 {{ coverage.available }}/{{ coverage.target }} 场</text><text> · 轻触数据看详情</text></view>
@@ -57,7 +58,7 @@
 
 <script>
 import { getLeagueStats, getWarStats } from '@/utils/api.js'
-import { isSkyAlliance } from '@/utils/alliance.js'
+import { getCurrentAllianceId, isSkyAlliance } from '@/utils/alliance.js'
 
 const WAR_COLUMNS = [
   { key: 'offense_5', line1: '进攻', line2: '前5场' }, { key: 'offense_15', line1: '进攻', line2: '前15场' }, { key: 'offense_45', line1: '进攻', line2: '前45场' },
@@ -67,11 +68,11 @@ const LEAGUE_COLUMNS = [
   { key: 'offense_1m', line1: '进攻', line2: '上月' }, { key: 'offense_3m', line1: '进攻', line2: '前3月' }, { key: 'offense_6m', line1: '进攻', line2: '前6月' },
   { key: 'defense_1m', line1: '防守', line2: '上月' }, { key: 'defense_3m', line1: '防守', line2: '前3月' }, { key: 'defense_6m', line1: '防守', line2: '前6月' }
 ]
-const statsCache = { war: null, league: null }
+const statsCache = Object.create(null)
 
 export default {
   name: 'ClanStats',
-  data() { return { loading: true, stats: [], updatedAt: '', coverage: null, tab: 'war', sortKey: 'offense_45', sortOrder: 'desc', sampleDetail: null, skyAlliance: isSkyAlliance() } },
+  data() { return { loading: true, stats: [], updatedAt: '', coverage: null, hasCombatClan: null, tab: 'war', sortKey: 'offense_45', sortOrder: 'desc', sampleDetail: null, skyAlliance: isSkyAlliance() } },
   computed: {
     columns() { return this.tab === 'war' ? WAR_COLUMNS : LEAGUE_COLUMNS },
     sortedStats() {
@@ -82,14 +83,15 @@ export default {
   },
   created() { this.fetchData() },
   methods: {
-    switchTab(tab) { if (this.tab === tab) return; this.tab = tab; this.sortKey = tab === 'war' ? 'offense_45' : 'offense_6m'; this.sortOrder = 'desc'; this.stats = []; this.updatedAt = ''; this.coverage = null; if (tab === 'league' && !this.skyAlliance) { this.loading = false; return } this.fetchData() },
-    applyResponse(response) { this.stats = response.stats || []; this.updatedAt = response.updated_at ? this.formatTime(response.updated_at) : ''; this.coverage = response.history_coverage || null },
+    switchTab(tab) { if (this.tab === tab) return; this.tab = tab; this.sortKey = tab === 'war' ? 'offense_45' : 'offense_6m'; this.sortOrder = 'desc'; this.stats = []; this.updatedAt = ''; this.coverage = null; this.hasCombatClan = null; if (tab === 'league' && !this.skyAlliance) { this.loading = false; return } this.fetchData() },
+    applyResponse(response) { this.stats = response.stats || []; this.updatedAt = response.updated_at ? this.formatTime(response.updated_at) : ''; this.coverage = response.history_coverage || null; this.hasCombatClan = this.tab === 'war' ? Boolean(response.clan_tag) : null },
     async fetchData() {
       if (this.tab === 'league' && !this.skyAlliance) { this.loading = false; return }
       this.loading = true
       try {
-        if (!statsCache[this.tab]) statsCache[this.tab] = this.tab === 'war' ? await getWarStats() : await getLeagueStats()
-        this.applyResponse(statsCache[this.tab])
+        const cacheKey = `${getCurrentAllianceId() || 'legacy'}:${this.tab}`
+        if (!statsCache[cacheKey]) statsCache[cacheKey] = this.tab === 'war' ? await getWarStats() : await getLeagueStats()
+        this.applyResponse(statsCache[cacheKey])
       } catch (e) { uni.showToast({ title: '加载失败', icon: 'none' }) }
       finally { this.loading = false }
     },
