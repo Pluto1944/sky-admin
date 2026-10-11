@@ -49,11 +49,11 @@
 
 `capital_raid_status_cache` 与都城成员贡献事实分离：它每个自有部落只保留一行最近周末状态，服务概览卡片的开启提醒，不保存成员明细。同步失败只更新错误与尝试时间，已有同周状态不会被空结果覆盖。
 
-## 联盟租户底座（M1）
+## 联盟租户底座（M1–M3）
 
-M1 只建立联盟数据模型与苍穹映射，不改变现有 API、前端或调度器。迁移期
-`config/settings.yaml` 仍是苍穹部落范围的生产权威来源；`alliance_clans` 是可审计的新模型映射，M2
-以后才逐步接入读取和授权。
+M1 数据模型、M2 后端访问控制和 M3 小程序联盟切换均已实现。`config/settings.yaml` 继续作为苍穹
+遗留任务与编排流程的兼容来源；登录后的联盟页面以 `alliance_members`、`alliance_clans` 和联盟月度
+CWL 配置作为范围与权限依据。公共 COC 事实仍按全局 Tag 保存，不按联盟重复复制。
 
 - `alliances.alliance_key` 是不可变的程序身份；苍穹固定使用 `sky-internal`，展示名称可修改；
 - `alliance_members.role` 只允许 `member / admin / leader`，同一联盟最多一个有效首领；
@@ -130,7 +130,7 @@ F4 的 `farm_matches`、`farm_score_ledger` 和 `farm_registration_attempts` 分
 但在当前规模下保留以服务编排和快速查询。
 详细规则见 [`12-league-stats.md`](12-league-stats.md)。
 
-### 多联盟月度配置（已实现、待生产迁移）
+### 多联盟月度配置（已实现并完成生产迁移）
 
 多联盟 CWL 不复用 `alliance_clans` 表示当月参赛范围，也不把苍穹专用 `league_teams` 直接扩展为
 租户表。当前实现新增：
