@@ -13,7 +13,7 @@
         <text class="heading">四、协议变更</text>
         <text class="paragraph">我们会在本页面更新协议内容。重要变更会在小程序中提示，你可以选择停止使用相关服务。</text>
         <text class="heading">五、联系我们</text>
-        <text class="paragraph">如需注销账号、反馈问题或咨询协议，请通过小程序“设置”页面联系运营方。</text>
+        <text class="paragraph">如需注销账号、反馈问题或咨询协议，请通过小程序“管理”页面联系运营方。</text>
       </view>
     </scroll-view>
   </view>

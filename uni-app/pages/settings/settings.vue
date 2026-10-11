@@ -1,51 +1,74 @@
 <template>
   <view class="page-container">
     <!-- 自定义顶部栏 -->
-    <TopBar title="设置" />
+    <TopBar title="管理中心" />
 
     <!-- 中间展示区域 -->
     <view class="content">
       <!-- 已登录 + 不在绑定流程 -->
-      <view v-if="isLoggedIn && pageState === 'main'">
-        <!-- 用户信息 -->
+      <view v-if="isLoggedIn && pageState === 'main'" class="management-home">
+        <view class="section-heading">
+          <text class="section-heading-title">微信账号</text>
+          <text class="section-heading-status"><text class="status-dot"></text>已登录</text>
+        </view>
+
         <view class="user-card">
-          <view class="avatar">👤</view>
-          <view class="user-detail">
-            <view class="username">{{ displayName }}</view>
-            <view class="user-meta">
-              <text v-if="userInfo && userInfo.account_name">🎮 {{ userInfo.account_name }}</text>
-              <text v-if="userInfo && userInfo.player_tag">🏷️ {{ userInfo.player_tag }}</text>
+          <view class="user-card-main">
+            <view class="user-detail">
+              <view class="username">{{ displayName }}</view>
+              <view v-if="userInfo && (userInfo.account_name || userInfo.player_tag)" class="bound-account">
+                <text class="bound-account-label">已绑定 COC 账号</text>
+                <view class="bound-account-values">
+                  <text v-if="userInfo.account_name" class="user-chip">{{ userInfo.account_name }}</text>
+                  <text v-if="userInfo.player_tag" class="user-chip user-chip-muted">{{ userInfo.player_tag }}</text>
+                </view>
+              </view>
+              <text v-else class="user-empty">暂未绑定 COC 账号</text>
             </view>
           </view>
-        </view>
-
-        <view v-if="userInfo && userInfo.openid" class="openid-card">
-          <view class="openid-header">
-            <view>
-              <text class="openid-label">当前用户 OpenID</text>
-              <text class="openid-tip">用于向运营方确认当前账号，请勿公开分享</text>
+          <view v-if="userInfo && userInfo.openid" class="account-id-row">
+            <view class="account-id-copy">
+              <text class="account-id-label">账号标识</text>
+              <text class="account-id-tip">仅用于运营方核对身份</text>
             </view>
-            <button class="openid-copy" size="mini" @tap="copyOpenId">复制 OpenID</button>
+            <button class="openid-copy" size="mini" @tap="copyOpenId">复制</button>
           </view>
         </view>
 
-        <!-- 设置项 -->
-        <view class="menu-section">
-          <view class="menu-title">账号</view>
-          <view class="menu-item" @tap="pageState = 'bind'">
-            <text class="menu-icon">🔗</text>
-            <text class="menu-text">绑定/修改游戏账号</text>
-            <text class="menu-arrow">›</text>
-          </view>
+        <view class="section-heading">
+          <text class="section-heading-title">互刷系统</text>
+          <text class="farm-system-account">独立账号</text>
         </view>
 
-        <!-- 关于 -->
+        <view class="farm-system-entry">
+          <text class="farm-system-title">互刷联盟系统</text>
+          <text class="farm-system-desc">查看开战时间、匹配结果与积分</text>
+          <button class="farm-system-btn" @tap="openFarmSystem">
+            <text>进入系统</text><text class="farm-system-arrow">→</text>
+          </button>
+        </view>
+
+        <!-- 其他管理 -->
         <view class="menu-section">
-          <view class="menu-title">关于</view>
-          <view class="menu-item" @tap="showAbout">
-            <text class="menu-icon">ℹ️</text>
-            <text class="menu-text">关于苍穹联赛助手</text>
-            <text class="menu-arrow">›</text>
+          <view class="menu-title">其他管理</view>
+          <view class="menu-list">
+            <view class="menu-item" @tap="pageState = 'bind'">
+              <view class="menu-icon menu-icon-account">号</view>
+              <view class="menu-copy">
+                <text class="menu-text">游戏账号</text>
+                <text class="menu-desc">绑定或修改 COC 玩家账号</text>
+              </view>
+              <text class="menu-arrow">›</text>
+            </view>
+            <view class="menu-divider"></view>
+            <view class="menu-item" @tap="showAbout">
+              <view class="menu-icon menu-icon-about">i</view>
+              <view class="menu-copy">
+                <text class="menu-text">关于与版本</text>
+                <text class="menu-desc">服务状态、版本与应用信息</text>
+              </view>
+              <text class="menu-arrow">›</text>
+            </view>
           </view>
         </view>
 
@@ -130,6 +153,15 @@
           <text class="privacy-link" @tap.stop="openPrivacyPolicy">《隐私政策》</text>
         </view>
         <view class="privacy-note">未同意前不会调用微信登录或创建账号</view>
+
+        <view class="farm-system-entry farm-system-entry-login">
+          <text class="farm-system-badge">独立账号</text>
+          <text class="farm-system-title">互刷联盟系统</text>
+          <text class="farm-system-desc">查看开战时间、匹配结果与积分</text>
+          <button class="farm-system-btn" @tap="openFarmSystem">
+            <text>进入系统</text><text class="farm-system-arrow">→</text>
+          </button>
+        </view>
       </view>
     </view>
   </view>
@@ -254,6 +286,10 @@ export default {
     },
     openPrivacyPolicy() {
       uni.navigateTo({ url: '/pages/legal/privacy-policy' })
+    },
+
+    openFarmSystem() {
+      uni.showToast({ title: '互刷系统暂未开放', icon: 'none' })
     },
 
     // ====== 绑定 ======
@@ -386,7 +422,7 @@ export default {
 }
 </script>
 
-<style scoped>
+<style>
 .page-container {
   min-height: 100vh;
   display: flex;
@@ -396,33 +432,60 @@ export default {
 
 .content {
   flex: 1;
-  padding: 30rpx 30rpx;
-  padding-bottom: 100rpx;
+  padding: 28rpx 28rpx 100rpx;
+  box-sizing: border-box;
 }
 
 /* ====== 已登录 - 主页面 ====== */
 
-.user-card {
-  display: flex;
-  align-items: center;
-  background: linear-gradient(135deg, #1a1a3e, #1e1e40);
-  border: 1rpx solid #2a2a4a;
-  border-radius: 20rpx;
-  padding: 40rpx 30rpx;
-  margin-bottom: 30rpx;
+.management-home {
+  width: 100%;
 }
 
-.avatar {
-  width: 100rpx;
-  height: 100rpx;
-  background: #252545;
-  border-radius: 50%;
+.section-heading {
   display: flex;
   align-items: center;
-  justify-content: center;
-  font-size: 50rpx;
-  margin-right: 24rpx;
-  flex-shrink: 0;
+  justify-content: space-between;
+  margin: 0 4rpx 16rpx;
+}
+
+.section-heading-title {
+  color: #8f99ad;
+  font-size: 23rpx;
+  font-weight: 500;
+  letter-spacing: 2rpx;
+}
+
+.section-heading-status {
+  display: flex;
+  align-items: center;
+  color: #728098;
+  font-size: 21rpx;
+}
+
+.status-dot {
+  width: 10rpx;
+  height: 10rpx;
+  margin-right: 8rpx;
+  background: #42c98b;
+  border-radius: 50%;
+}
+
+.user-card {
+  padding: 30rpx 28rpx 0;
+  margin-bottom: 24rpx;
+  overflow: hidden;
+  background: linear-gradient(145deg, #1b1d38, #17182f);
+  border: 1rpx solid #2d3153;
+  border-radius: 18rpx;
+  box-shadow: 0 10rpx 30rpx rgba(0, 0, 0, 0.14);
+}
+
+.user-card-main {
+  display: flex;
+  align-items: center;
+  min-height: 84rpx;
+  padding-bottom: 28rpx;
 }
 
 .user-detail {
@@ -430,134 +493,272 @@ export default {
 }
 
 .username {
-  font-size: 36rpx;
+  margin-bottom: 12rpx;
+  color: #f3f5fb;
+  font-size: 32rpx;
   font-weight: 600;
-  color: #ffffff;
-  margin-bottom: 8rpx;
 }
 
-.user-meta {
-  font-size: 24rpx;
-  color: #8890a0;
+.bound-account-values {
   display: flex;
   flex-wrap: wrap;
-  gap: 16rpx;
+  align-items: center;
 }
 
-.openid-card {
-  padding: 26rpx 24rpx;
-  margin-bottom: 30rpx;
-  background: #17172b;
-  border: 1rpx solid #2a2a4a;
-  border-radius: 16rpx;
+.bound-account-label {
+  display: block;
+  margin-bottom: 9rpx;
+  color: #737f95;
+  font-size: 20rpx;
+  line-height: 1.2;
 }
 
-.openid-header {
+.user-chip {
+  padding: 5rpx 12rpx;
+  margin: 0 10rpx 6rpx 0;
+  color: #aecff4;
+  background: rgba(74, 144, 217, 0.13);
+  border-radius: 8rpx;
+  font-size: 21rpx;
+}
+
+.user-chip-muted {
+  color: #8b96aa;
+  background: rgba(139, 150, 170, 0.1);
+}
+
+.user-empty {
+  color: #737d91;
+  font-size: 22rpx;
+}
+
+.account-id-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20rpx;
+  min-height: 88rpx;
+  margin: 0 -28rpx;
+  padding: 0 28rpx;
+  background: rgba(10, 11, 27, 0.34);
+  border-top: 1rpx solid #292d4b;
 }
 
-.openid-label {
-  display: block;
-  color: #c9ceda;
-  font-size: 27rpx;
-  font-weight: 600;
+.account-id-copy {
+  min-width: 0;
+  flex: 1;
 }
 
-.openid-tip {
+.account-id-label {
   display: block;
-  margin-top: 6rpx;
-  color: #677087;
-  font-size: 21rpx;
+  color: #aab3c5;
+  font-size: 23rpx;
+  font-weight: 500;
+}
+
+.account-id-tip {
+  display: block;
+  margin-top: 4rpx;
+  color: #636d82;
+  font-size: 19rpx;
 }
 
 .openid-copy {
   flex-shrink: 0;
   margin: 0;
-  padding: 0 22rpx;
-  color: #67aef5;
-  background: #222743;
-  border: 1rpx solid #343c62;
-  border-radius: 10rpx;
-  font-size: 24rpx;
-  line-height: 58rpx;
+  padding: 0 24rpx;
+  color: #92c6ff;
+  background: transparent;
+  border: 1rpx solid #385072;
+  border-radius: 22rpx;
+  font-size: 21rpx;
+  line-height: 44rpx;
 }
 
 .openid-copy::after {
   border: 0;
 }
 
+.farm-system-entry {
+  padding: 30rpx 28rpx 28rpx;
+  margin-bottom: 28rpx;
+  overflow: hidden;
+  background: linear-gradient(145deg, #1b1d38, #17182f);
+  border: 1rpx solid #2d3153;
+  border-radius: 18rpx;
+  box-shadow: 0 10rpx 30rpx rgba(0, 0, 0, 0.14);
+  box-sizing: border-box;
+}
+
+.farm-system-entry-login {
+  width: 100%;
+  margin-top: 44rpx;
+  margin-bottom: 0;
+  text-align: left;
+}
+
+.farm-system-account {
+  padding: 4rpx 13rpx;
+  color: #7fa8d4;
+  background: rgba(74, 144, 217, 0.08);
+  border: 1rpx solid rgba(94, 151, 207, 0.22);
+  border-radius: 18rpx;
+  font-size: 19rpx;
+}
+
+.farm-system-badge {
+  display: inline-block;
+  padding: 5rpx 14rpx;
+  margin-bottom: 18rpx;
+  color: #90bde9;
+  background: rgba(79, 143, 207, 0.12);
+  border: 1rpx solid rgba(124, 181, 237, 0.22);
+  border-radius: 18rpx;
+  font-size: 20rpx;
+}
+
+.farm-system-title,
+.farm-system-desc {
+  display: block;
+}
+
+.farm-system-title {
+  color: #e8f1ff;
+  font-size: 32rpx;
+  font-weight: 600;
+}
+
+.farm-system-desc {
+  margin-top: 10rpx;
+  color: #8d9bb1;
+  font-size: 23rpx;
+  line-height: 1.6;
+}
+
+.farm-system-btn {
+  width: 100%;
+  height: 72rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 26rpx 0 0;
+  padding: 0 28rpx;
+  color: #f5f9ff;
+  background: linear-gradient(135deg, #397fc2, #2d65a1);
+  border: 0;
+  border-radius: 12rpx;
+  font-size: 26rpx;
+  font-weight: 600;
+  line-height: 72rpx;
+}
+
+.farm-system-arrow {
+  margin-left: 14rpx;
+  color: #cfe5ff;
+  font-size: 27rpx;
+}
+
+.farm-system-btn::after {
+  border: 0;
+}
+
 /* 菜单 */
 .menu-section {
-  margin-bottom: 30rpx;
+  margin-bottom: 18rpx;
 }
 
 .menu-title {
-  font-size: 24rpx;
-  color: #666;
-  padding: 0 10rpx 16rpx;
-  text-transform: uppercase;
+  padding: 0 4rpx 16rpx;
+  color: #788398;
+  font-size: 22rpx;
+  font-weight: 500;
   letter-spacing: 2rpx;
+}
+
+.menu-list {
+  overflow: hidden;
+  background: #18192f;
+  border: 1rpx solid #292d4c;
+  border-radius: 16rpx;
 }
 
 .menu-item {
   display: flex;
   align-items: center;
-  background: #1a1a2e;
-  border: 1rpx solid #2a2a4a;
-  padding: 30rpx 24rpx;
-  margin-bottom: 2rpx;
-}
-
-.menu-item:first-of-type {
-  border-radius: 16rpx 16rpx 0 0;
-}
-
-.menu-item:last-of-type {
-  border-radius: 0 0 16rpx 16rpx;
-  margin-bottom: 0;
-}
-
-.menu-item:only-of-type {
-  border-radius: 16rpx;
+  min-height: 102rpx;
+  padding: 0 24rpx;
 }
 
 .menu-icon {
-  font-size: 36rpx;
-  margin-right: 20rpx;
+  width: 52rpx;
+  height: 52rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 18rpx;
+  border-radius: 14rpx;
+  font-size: 23rpx;
+  font-weight: 700;
+}
+
+.menu-icon-account {
+  color: #9bc6f2;
+  background: rgba(74, 144, 217, 0.16);
+}
+
+.menu-icon-about {
+  color: #b8acd9;
+  background: rgba(147, 112, 219, 0.15);
+}
+
+.menu-copy {
+  min-width: 0;
+  flex: 1;
 }
 
 .menu-text {
-  flex: 1;
-  font-size: 30rpx;
-  color: #e0e0e0;
+  display: block;
+  color: #dce0ea;
+  font-size: 27rpx;
+  font-weight: 500;
+}
+
+.menu-desc {
+  display: block;
+  margin-top: 5rpx;
+  color: #687287;
+  font-size: 20rpx;
 }
 
 .menu-arrow {
-  font-size: 32rpx;
-  color: #555;
+  margin-left: 18rpx;
+  color: #565f73;
+  font-size: 34rpx;
   font-weight: 300;
+}
+
+.menu-divider {
+  height: 1rpx;
+  margin-left: 94rpx;
+  background: #292d49;
 }
 
 /* 退出 */
 .logout-section {
-  padding: 40rpx 0;
+  padding: 28rpx 0 12rpx;
   text-align: center;
 }
 
 .logout-btn {
-  width: 400rpx;
-  height: 80rpx;
+  width: 280rpx;
+  height: 68rpx;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   background: transparent;
-  color: #d9534f;
-  font-size: 28rpx;
-  border: 1rpx solid rgba(217, 83, 79, 0.3);
-  border-radius: 40rpx;
+  color: #a66b70;
+  font-size: 24rpx;
+  border: 1rpx solid rgba(184, 92, 99, 0.22);
+  border-radius: 34rpx;
 }
 
 .logout-btn::after {

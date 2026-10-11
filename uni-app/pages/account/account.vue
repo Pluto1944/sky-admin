@@ -24,7 +24,7 @@
       <view class="placeholder" v-else>
         <text class="placeholder-icon">👤</text>
         <text class="placeholder-text">暂未登录</text>
-        <text class="placeholder-desc">请前往「设置」页登录</text>
+        <text class="placeholder-desc">请前往「管理」页登录</text>
       </view>
     </view>
   </view>
