@@ -14,7 +14,7 @@
 
 - **Nginx**：公网入口，处理 HTTPS，转发请求到 FastAPI
 - **FastAPI**：Python 后端，只监听 127.0.0.1:8000（不直接对外）
-- **systemd**：守护 FastAPI 进程（sky-admin）与周期调度器（sky-scheduler），挂了自动重启，开机自启
+- **systemd**：守护 FastAPI、周期调度器和 M4 同步 Worker，挂了自动重启，开机自启
 - **certbot**：自动管理 SSL 证书，到期自动续期
 
 ---
@@ -70,7 +70,13 @@ sudo systemctl daemon-reload
 sudo systemctl enable sky-scheduler
 sudo systemctl start sky-scheduler
 
-# 6. 申请 HTTPS 证书
+# 6. 配置 M4 同步 Worker（可先以空 live 类型启动）
+sudo cp deploy/sky-sync-worker.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable sky-sync-worker
+sudo systemctl start sky-sync-worker
+
+# 7. 申请 HTTPS 证书
 sudo certbot --nginx -d api.skycoc.cc
 ```
 
@@ -175,6 +181,22 @@ sudo systemctl restart sky-scheduler
 sudo systemctl enable sky-scheduler
 ```
 
+### 2.1 sky-sync-worker 服务管理（M4 全局去重同步）
+
+```bash
+sudo systemctl status sky-sync-worker
+sudo systemctl restart sky-sync-worker
+sudo systemctl enable sky-sync-worker
+sudo tail -f /var/log/sky-sync-worker.log
+sudo tail -f /var/log/sky-sync-worker-error.log
+```
+
+生产必须同时启用 `sync_queue_plan` 与 Worker，并按
+`clan_profile,clan_members,current_war,cwl_live` 顺序逐类增加
+`SYNC_QUEUE_LIVE_TYPES`。同一个 `.env` 由 API、Scheduler 和 Worker 加载，修改后需重启三个服务。
+回滚某类时，从该变量删除它并再重启；旧 Scheduler 任务会恢复。不要同时启用
+`sync_shadow_plan`。
+
 调度器统一管理 **7 类周期任务**，状态落 `sync_jobs` 表（设计详见 `docs/15-scheduler.md`）：
 
 | job_id | 说明 | 频率 |
@@ -242,6 +264,15 @@ sudo journalctl -u sky-scheduler -n 50 --no-pager
 # 查看应用写入的日志
 sudo tail -f /var/log/sky-scheduler.log
 sudo tail -f /var/log/sky-scheduler-error.log
+```
+
+**sky-sync-worker（M4 同步 Worker）：**
+
+```bash
+sudo journalctl -u sky-sync-worker -f
+sudo journalctl -u sky-sync-worker -n 50 --no-pager
+sudo tail -f /var/log/sky-sync-worker.log
+sudo tail -f /var/log/sky-sync-worker-error.log
 ```
 
 **Nginx（公网入口）：**
@@ -343,6 +374,7 @@ cd /home/ubuntu/YANG/sky-admin
 git pull                              # 拉取最新代码
 sudo systemctl restart sky-admin      # 重启 FastAPI 生效
 sudo systemctl restart sky-scheduler  # 重启调度器生效（若调度器相关代码有改动）
+sudo systemctl restart sky-sync-worker # 重启 M4 Worker
 
 # 两个服务都启动后，核对它们实际加载的 VERSION 与 Git commit
 venv/bin/python scripts/verify_runtime_version.py \
@@ -350,7 +382,7 @@ venv/bin/python scripts/verify_runtime_version.py \
   --expected-commit "$(git rev-parse HEAD)"
 ```
 
-`/api/ping` 只证明 API 可响应；`verify_runtime_version.py` 还会检查调度器心跳、两个组件的
+`/api/ping` 只证明 API 可响应；`verify_runtime_version.py` 还会检查调度器和已启用 Worker 的心跳、各组件的
 实际启动提交和启动时工作区状态。它失败时不能把部署标记为完成，应先检查
 `/api/system/version` 与两个 systemd 服务日志。
 
@@ -474,7 +506,9 @@ sudo tail -f /var/log/sky-scheduler-error.log
 | Nginx 配置 | `/etc/nginx/sites-available/sky-admin-domain` | 当前正式域名站点配置 |
 | systemd 服务 | `/etc/systemd/system/sky-admin.service` | 守护进程配置 |
 | systemd 调度器 | `/etc/systemd/system/sky-scheduler.service` | 周期调度器守护配置 |
+| systemd M4 Worker | `/etc/systemd/system/sky-sync-worker.service` | 全局去重同步 Worker 守护配置 |
 | 调度器脚本 | `/home/ubuntu/YANG/sky-admin/scripts/scheduler.py` | 周期调度器核心脚本（CLI + 常驻循环） |
+| M4 Worker 脚本 | `/home/ubuntu/YANG/sky-admin/scripts/sync_worker.py` | 有限并发执行 live 同步任务 |
 | FastAPI 日志 | `/var/log/sky-admin.log` | 应用标准输出日志 |
 | FastAPI 错误 | `/var/log/sky-admin-error.log` | 应用错误日志 |
 | 调度器日志 | `/var/log/sky-scheduler.log` | 调度器标准输出日志 |

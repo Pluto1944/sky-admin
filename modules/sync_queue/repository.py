@@ -285,6 +285,7 @@ class SyncQueueRepository:
         now: datetime | None = None,
         limit: int = 1000,
         max_attempts: int = 3,
+        resource_types: Sequence[str] | None = None,
     ) -> list[dict]:
         """Create at most one task per due target and advance its schedule."""
         if mode not in VALID_MODES:
@@ -293,12 +294,23 @@ class SyncQueueRepository:
             raise ValueError("limit and max_attempts must be positive")
         current = _as_utc(now)
         timestamp = _iso(current)
+        selected_types = tuple(dict.fromkeys(str(item).strip() for item in (resource_types or ())))
+        filters = [
+            "status = 'active'",
+            "planning_mode = ?",
+            "(next_due_at IS NULL OR next_due_at <= ?)",
+        ]
+        params: list[object] = [mode, timestamp]
+        if selected_types:
+            placeholders = ",".join("?" for _ in selected_types)
+            filters.append(f"resource_type IN ({placeholders})")
+            params.extend(selected_types)
         rows = self.conn.execute(
-            """SELECT * FROM sync_targets
-               WHERE status = 'active' AND (next_due_at IS NULL OR next_due_at <= ?)
-               ORDER BY priority_rank DESC, COALESCE(next_due_at, ''), id
-               LIMIT ?""",
-            (timestamp, int(limit)),
+            f"""SELECT * FROM sync_targets
+                WHERE {' AND '.join(filters)}
+                ORDER BY priority_rank DESC, COALESCE(next_due_at, ''), id
+                LIMIT ?""",
+            (*params, int(limit)),
         ).fetchall()
         created: list[dict] = []
         task_status = "shadowed" if mode == "shadow" else "pending"
@@ -341,6 +353,57 @@ class SyncQueueRepository:
                     ).fetchone()
                     created.append(dict(task))
         return created
+
+    def set_target_modes(
+        self,
+        live_resource_types: Sequence[str],
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, int]:
+        """Apply the cut-over set and make every mode transition immediately due.
+
+        Pending live work is cancelled on rollback.  A task already running may
+        finish under its lease; legacy writers are only re-enabled after the
+        same configuration change and process restart, so no new duplicate is
+        introduced by this transaction.
+        """
+        live_types = {
+            str(item).strip() for item in live_resource_types if str(item).strip()
+        }
+        timestamp = _iso(now)
+        changed_to_live = changed_to_shadow = unchanged = 0
+        with self.conn:
+            rows = self.conn.execute(
+                "SELECT id, resource_type, planning_mode FROM sync_targets"
+            ).fetchall()
+            for row in rows:
+                desired = "live" if row["resource_type"] in live_types else "shadow"
+                if row["planning_mode"] == desired:
+                    unchanged += 1
+                    continue
+                self.conn.execute(
+                    """UPDATE sync_targets
+                       SET planning_mode = ?, next_due_at = NULL, updated_at = ?
+                       WHERE id = ?""",
+                    (desired, timestamp, row["id"]),
+                )
+                if desired == "live":
+                    changed_to_live += 1
+                else:
+                    changed_to_shadow += 1
+                    self.conn.execute(
+                        """UPDATE sync_tasks
+                           SET status = 'cancelled', finished_at = ?, updated_at = ?,
+                               last_error = '资源类型已回滚到旧调度路径'
+                           WHERE target_id = ? AND mode = 'live'
+                             AND status IN ('pending', 'retry_wait')""",
+                        (timestamp, timestamp, row["id"]),
+                    )
+        return {
+            "live": changed_to_live,
+            "shadow": changed_to_shadow,
+            "unchanged": unchanged,
+        }
 
     def prune_shadow_tasks(
         self,
@@ -396,6 +459,47 @@ class SyncQueueRepository:
             self.conn.rollback()
             raise
 
+    def interrupt_running_tasks(
+        self,
+        *,
+        reason: str = "Worker 进程重启",
+        now: datetime | None = None,
+    ) -> int:
+        """Release all leases owned by the previous singleton worker process."""
+        timestamp = _iso(now)
+        message = _limited(reason) or "Worker 进程重启"
+        _begin_immediate(self.conn)
+        try:
+            rows = self.conn.execute(
+                "SELECT * FROM sync_tasks WHERE mode = 'live' AND status = 'running'"
+            ).fetchall()
+            for row in rows:
+                exhausted = int(row["attempt_count"]) >= int(row["max_attempts"])
+                status = "dead" if exhausted else "retry_wait"
+                self.conn.execute(
+                    """UPDATE sync_tasks
+                       SET status = ?, available_at = ?, lease_owner = NULL,
+                           lease_expires_at = NULL, last_error = ?, updated_at = ?,
+                           finished_at = CASE WHEN ? THEN ? ELSE NULL END
+                       WHERE id = ? AND status = 'running'""",
+                    (
+                        status, timestamp, message, timestamp,
+                        int(exhausted), timestamp, row["id"],
+                    ),
+                )
+                self.conn.execute(
+                    """UPDATE sync_attempts
+                       SET status = 'interrupted', finished_at = ?,
+                           error_type = 'WorkerRestarted', error_message = ?
+                       WHERE task_id = ? AND attempt_no = ? AND status = 'running'""",
+                    (timestamp, message, row["id"], row["attempt_count"]),
+                )
+            self.conn.commit()
+            return len(rows)
+        except Exception:
+            self.conn.rollback()
+            raise
+
     def claim_tasks(
         self,
         worker_id: str,
@@ -403,6 +507,7 @@ class SyncQueueRepository:
         limit: int = 1,
         lease_seconds: int = 120,
         priorities: Sequence[str] | None = None,
+        resource_types: Sequence[str] | None = None,
         now: datetime | None = None,
     ) -> list[dict]:
         """Atomically claim a bounded live-task batch for one worker."""
@@ -418,6 +523,13 @@ class SyncQueueRepository:
         timestamp = _iso(current)
         lease_expires = _iso(current + timedelta(seconds=lease_seconds))
         placeholders = ",".join("?" for _ in selected_priorities)
+        selected_types = tuple(dict.fromkeys(str(item).strip() for item in (resource_types or ())))
+        type_filter = ""
+        type_params: tuple[object, ...] = ()
+        if selected_types:
+            type_placeholders = ",".join("?" for _ in selected_types)
+            type_filter = f" AND resource_type IN ({type_placeholders})"
+            type_params = selected_types
         _begin_immediate(self.conn)
         try:
             self._recover_expired_leases_locked(timestamp)
@@ -425,10 +537,10 @@ class SyncQueueRepository:
                 f"""SELECT * FROM sync_tasks
                     WHERE mode = 'live' AND status IN ('pending', 'retry_wait')
                       AND available_at <= ? AND due_at <= ?
-                      AND priority IN ({placeholders})
+                      AND priority IN ({placeholders}){type_filter}
                     ORDER BY priority_rank DESC, due_at, id
                     LIMIT ?""",
-                (timestamp, timestamp, *selected_priorities, int(limit)),
+                (timestamp, timestamp, *selected_priorities, *type_params, int(limit)),
             ).fetchall()
             claimed: list[dict] = []
             for row in rows:

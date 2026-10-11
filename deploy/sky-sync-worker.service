@@ -1,0 +1,18 @@
+[Unit]
+Description=Sky Admin M4 Synchronization Worker
+After=network.target sky-scheduler.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/YANG/sky-admin
+Environment="PATH=/home/ubuntu/YANG/sky-admin/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="SKY_ADMIN_ENV=production"
+ExecStart=/home/ubuntu/YANG/sky-admin/venv/bin/python scripts/sync_worker.py
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/sky-sync-worker.log
+StandardError=append:/var/log/sky-sync-worker-error.log
+
+[Install]
+WantedBy=multi-user.target

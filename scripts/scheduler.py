@@ -14,7 +14,7 @@
     capital_raid_status 都城突袭开启状态（每10分钟检查，已开启部落自动停拉）
     capital_member_stats 都城成员贡献（每6小时检查业务窗口）
     clan_games_stats 竞赛贡献（每6小时检查业务窗口）
-    sync_shadow_plan M4 同步队列影子规划（默认关闭，不调用外部 API）
+    sync_queue_plan M4 同步队列规划（按资源类型影子/live 灰度）
     war_layout  公众号阵型群发（每天北京时间 09:00）
 
 用法：
@@ -76,6 +76,9 @@ OBSERVABILITY_RETENTION_DAYS = max(
 )
 SYNC_QUEUE_SHADOW_INTERVAL_MINUTES = max(
     1, int(os.getenv("SYNC_QUEUE_SHADOW_INTERVAL_MINUTES", "5"))
+)
+SYNC_QUEUE_PLAN_INTERVAL_MINUTES = max(
+    1, int(os.getenv("SYNC_QUEUE_PLAN_INTERVAL_MINUTES", "1"))
 )
 _last_observability_prune_date: str | None = None
 
@@ -330,12 +333,16 @@ def _archive_current_war(
     return True
 
 
-def _run_current_wars(force: bool = False, now: datetime | None = None) -> dict:
-    """按战争状态增量拉取已启用自有部落，写入当前战争缓存。"""
-    from modules.coc_sync.service import CocSyncService
+def _queue_live_types() -> set[str]:
+    from modules.sync_queue.config import active_live_resource_types
+
+    return set(active_live_resource_types())
+
+
+def _configured_clans() -> list[dict]:
     from modules.coc_sync.official.mapper import normalize_tag
 
-    clans = [
+    return [
         {
             "tag": normalize_tag(clan["tag"]),
             "name": clan.get("name"),
@@ -343,6 +350,27 @@ def _run_current_wars(force: bool = False, now: datetime | None = None) -> dict:
         }
         for clan in config.CLANS
         if clan.get("enabled", True)
+    ]
+
+
+def _run_current_wars(
+    force: bool = False,
+    now: datetime | None = None,
+    clans: list[dict] | None = None,
+) -> dict:
+    """按战争状态增量拉取已启用自有部落，写入当前战争缓存。"""
+    from modules.coc_sync.service import CocSyncService
+    from modules.coc_sync.official.mapper import normalize_tag
+
+    if clans is None and "current_war" in _queue_live_types():
+        return {"status": "skipped", "reason": "current_war 已由 M4 Worker 接管"}
+    clans = _configured_clans() if clans is None else [
+        {
+            "tag": normalize_tag(clan["tag"]),
+            "name": clan.get("name"),
+            "category": clan.get("category", "normal"),
+        }
+        for clan in clans
     ]
     if not clans:
         return {"status": "skipped", "reason": "没有配置已启用部落"}
@@ -586,20 +614,28 @@ def _cwl_live_teams_for_period(db: Database, period: str) -> list[dict]:
     return list(merged.values())
 
 
-def _run_cwl_live(force: bool = False, now: datetime | None = None) -> dict:
+def _run_cwl_live(
+    force: bool = False,
+    now: datetime | None = None,
+    teams: list[dict] | None = None,
+    period_override: str | None = None,
+) -> dict:
     """增量刷新当前月份 CWL 联赛组与逐场战争缓存。"""
     from modules.coc_sync.cwl_live import group_war_tags
     from modules.coc_sync.official.mapper import normalize_tag
     from modules.coc_sync.service import CocSyncService
 
     local_now = (now or datetime.now(timezone.utc)).astimezone(BUSINESS_TZ)
-    period = local_now.strftime("%Y-%m")
+    period = period_override or local_now.strftime("%Y-%m")
     if not force and local_now.day > 12:
         return {"status": "skipped", "reason": f"{period} 已过联赛实时窗口（今天{local_now.day}号）"}
 
+    if teams is None and "cwl_live" in _queue_live_types():
+        return {"status": "skipped", "reason": "cwl_live 已由 M4 Worker 接管"}
+
     db = Database(config.DB_PATH)
     db.init_schema()
-    teams = _cwl_live_teams_for_period(db, period)
+    teams = _cwl_live_teams_for_period(db, period) if teams is None else teams
     if not teams:
         db.close()
         return {"status": "skipped", "reason": f"{period} 无已确认的联盟联赛队伍"}
@@ -877,9 +913,17 @@ def _run_cwl_live(force: bool = False, now: datetime | None = None) -> dict:
     }
 
 
-def _sync_clan_profiles(db: Database, service) -> dict:
+def _sync_clan_profiles(
+    db: Database,
+    service,
+    clans: list[dict] | None = None,
+) -> dict:
     """同步已启用自有部落官方资料，失败时保留上次成功缓存。"""
-    profiles = service.fetch_clan_profiles()
+    profiles = (
+        service.fetch_clan_profiles()
+        if clans is None
+        else service.fetch_clan_profiles(clans)
+    )
     success = 0
     failed = 0
     for result in profiles:
@@ -940,7 +984,12 @@ def _sync_clan_profiles(db: Database, service) -> dict:
     return {"success": success, "failed": failed}
 
 
-def _run_coc_sync() -> dict:
+def _run_coc_sync(
+    *,
+    clans: list[dict] | None = None,
+    sync_members: bool | None = None,
+    sync_profiles: bool | None = None,
+) -> dict:
     """同步联盟部落成员和部落官方资料。"""
     from modules.coc_sync.service import CocSyncService
     from modules.player.repository import PlayerRepository
@@ -948,16 +997,40 @@ def _run_coc_sync() -> dict:
 
     db = Database(config.DB_PATH)
     db.init_schema()
+    live_types = _queue_live_types() if clans is None else set()
+    if sync_members is None:
+        sync_members = "clan_members" not in live_types
+    if sync_profiles is None:
+        sync_profiles = "clan_profile" not in live_types
+    if not sync_members and not sync_profiles:
+        db.close()
+        return {"status": "skipped", "reason": "clan_members 和 clan_profile 已由 M4 Worker 接管"}
     player_service = PlayerService(PlayerRepository(db.conn))
     svc = CocSyncService(player_service)
-    stats = svc.sync_clans()
-    profile_stats = _sync_clan_profiles(db, svc)
+    subscribed_tags = None
+    if clans is not None:
+        subscribed_tags = {
+            row["clan_tag"]
+            for row in db.conn.execute(
+                "SELECT DISTINCT clan_tag FROM alliance_clans WHERE status = 'active'"
+            ).fetchall()
+        }
+    stats = svc.sync_clans(
+        clans, alliance_clan_tags=subscribed_tags,
+    ) if sync_members else {
+        "clans": 0, "members": 0, "created": 0, "updated": 0,
+        "duplicates": 0, "left": 0, "failed_clans": [],
+    }
+    profile_stats = _sync_clan_profiles(db, svc, clans) if sync_profiles else {
+        "success": 0, "failed": 0,
+    }
     db.close()
 
     reason = (
+        f"成员同步 {'开启' if sync_members else '由 Worker 接管'}："
         f"部落 {stats['clans']}，成员 {stats['members']}，"
         f"新增 {stats['created']}，更新 {stats['updated']}，退部 {stats['left']}，"
-        f"部落资料 {profile_stats['success']}/{profile_stats['success'] + profile_stats['failed']}"
+        f"部落资料 {'由 Worker 接管' if not sync_profiles else str(profile_stats['success']) + '/' + str(profile_stats['success'] + profile_stats['failed'])}"
     )
     if stats["failed_clans"] or profile_stats["failed"]:
         suffix = f"，成员失败部落 {stats['failed_clans']}" if stats["failed_clans"] else ""
@@ -1651,10 +1724,35 @@ def _run_sync_shadow_plan() -> dict:
     """Build M4 shadow tasks from local subscriptions without external I/O."""
     from modules.sync_queue.planner import ShadowSyncPlanner, format_planner_reason
 
+    if _queue_live_types():
+        return {
+            "status": "skipped",
+            "reason": "已有 live 资源类型，请使用 sync_queue_plan 避免回滚目标模式",
+        }
     db = Database(config.DB_PATH)
     db.init_schema()
     try:
         result = ShadowSyncPlanner(db.conn).run()
+    finally:
+        db.close()
+    return {
+        "status": "success",
+        "reason": format_planner_reason(result),
+        "planner": result,
+    }
+
+
+def _run_sync_queue_plan() -> dict:
+    """Reconcile all targets and create live/shadow tasks by cut-over type."""
+    from modules.sync_queue.config import active_live_resource_types
+    from modules.sync_queue.planner import SyncPlanner, format_planner_reason
+
+    db = Database(config.DB_PATH)
+    db.init_schema()
+    try:
+        result = SyncPlanner(db.conn).run(
+            live_resource_types=active_live_resource_types(),
+        )
     finally:
         db.close()
     return {
@@ -1734,6 +1832,14 @@ JOBS = {
         in ("1", "true", "yes", "on"),
         "include_in_all": False,
         "run": _run_sync_shadow_plan,
+    },
+    "sync_queue_plan": {
+        "name": "M4同步队列规划",
+        "interval": SYNC_QUEUE_PLAN_INTERVAL_MINUTES,
+        "enabled_default": os.getenv("SYNC_QUEUE_PLANNER_ENABLED", "false").strip().lower()
+        in ("1", "true", "yes", "on"),
+        "include_in_all": False,
+        "run": _run_sync_queue_plan,
     },
     "war_layout": {
         "name": "公众号阵型更新",
@@ -1928,6 +2034,7 @@ def loop() -> None:
     try:
         interrupted = interrupt_running_job_runs(
             db.conn, interrupted_at=runtime_identity.started_at,
+            exclude_job_prefixes=("sync_worker:",),
         )
         if interrupted:
             print(f"[{now_iso()}] 已收口上一进程遗留任务 {interrupted} 条")

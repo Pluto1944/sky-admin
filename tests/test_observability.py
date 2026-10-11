@@ -197,6 +197,39 @@ def test_scheduler_restart_marks_abandoned_run_interrupted():
     db.close()
 
 
+def test_interrupted_run_recovery_isolated_by_process_prefix():
+    db = Database(":memory:")
+    db.init_schema()
+    scheduler_run = start_job_run(db.conn, "current_wars", "2026-10-08T00:00:00+00:00")
+    worker_run = start_job_run(
+        db.conn, "sync_worker:current_war", "2026-10-08T00:00:00+00:00",
+    )
+
+    scheduler_count = interrupt_running_job_runs(
+        db.conn,
+        interrupted_at="2026-10-08T00:01:00+00:00",
+        exclude_job_prefixes=("sync_worker:",),
+    )
+    assert scheduler_count == 1
+    assert db.conn.execute(
+        "SELECT status FROM sync_job_runs WHERE id = ?", (scheduler_run,),
+    ).fetchone()[0] == "interrupted"
+    assert db.conn.execute(
+        "SELECT status FROM sync_job_runs WHERE id = ?", (worker_run,),
+    ).fetchone()[0] == "running"
+
+    worker_count = interrupt_running_job_runs(
+        db.conn,
+        interrupted_at="2026-10-08T00:02:00+00:00",
+        job_id_prefix="sync_worker:",
+    )
+    assert worker_count == 1
+    assert db.conn.execute(
+        "SELECT status FROM sync_job_runs WHERE id = ?", (worker_run,),
+    ).fetchone()[0] == "interrupted"
+    db.close()
+
+
 def test_prune_removes_old_runs_and_request_events():
     db = Database(":memory:")
     db.init_schema()

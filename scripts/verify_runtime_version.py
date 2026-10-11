@@ -32,7 +32,10 @@ def _head_commit() -> str:
 def verify_runtime_payload(payload: dict, expected_version: str, expected_commit: str) -> list[str]:
     errors: list[str] = []
     components = payload.get("components") or {}
-    for name in ("api", "scheduler"):
+    required = ["api", "scheduler"]
+    if payload.get("worker_required"):
+        required.append("sync_worker")
+    for name in required:
         component = components.get(name) or {}
         if component.get("release_version") != expected_version:
             errors.append(f"{name} 版本不是 {expected_version}")
@@ -71,7 +74,7 @@ def main() -> int:
         for error in errors:
             print(f"FAIL: {error}", file=sys.stderr)
         return 1
-    print(f"OK: API 与调度器均运行 {args.expected_version} ({expected_commit[:12]})")
+    print(f"OK: 必需服务均运行 {args.expected_version} ({expected_commit[:12]})")
     return 0
 
 

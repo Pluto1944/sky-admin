@@ -1,7 +1,8 @@
 # 15 — 周期调度
 
-> 生产常驻入口：`scripts/scheduler.py`，服务：`sky-scheduler.service`。
-> 每次任务执行状态存入 `sync_jobs`；调度器进程身份和心跳单独存入 `service_runtime`。
+> 生产常驻入口：`scripts/scheduler.py` 和 `scripts/sync_worker.py`，服务分别为
+> `sky-scheduler.service` 和 `sky-sync-worker.service`。任务执行状态存入 `sync_jobs`；
+> 常驻进程身份和心跳单独存入 `service_runtime`。
 > 不要再增加独立 cron 或竞争性的常驻循环。
 
 ## 任务边界
@@ -20,6 +21,7 @@
 | `clan_games_stats` | 每 6 小时检查业务窗口 | 竞赛快照 | 月末窗口内运行 |
 | `cwl` | 每天，规则允许日期 | `league_results` | 只从本地完整 CWL 原始档案重建投影 |
 | `sync_shadow_plan` | 默认关闭；启用后默认每 5 分钟 | `sync_interests`、`sync_targets`、影子 `sync_tasks` | 只读本地联盟配置和缓存；不访问外部 API、不写业务事实、不接管旧任务 |
+| `sync_queue_plan` | 默认关闭；启用后默认每 1 分钟 | 同步需求、目标与 live/shadow 任务 | 按资源类型分阶段接管；Planner 本身不访问外部 API |
 | `war_layout` | 北京时间固定时刻 | 独立运行库、公众号草稿 | 默认仅草稿；群发硬开关不可绕过 |
 
 ## M4.0 影子规划
@@ -44,6 +46,29 @@ M4.0 没有注册真实任务执行器，`current_wars`、`cwl_live`、`coc_sync
 2026-10-11 生产已完成手工影子验收：111 条有效需求合并为 48 个全局目标，生成
 48 个 `shadowed` 任务；相同状态立即再规划时新增 0 个任务。该过程没有产生
 `sync_attempts` 或外部 API 请求，生产 `sync_shadow_plan` 仍保持 `enabled=0`。
+
+## M4 live Planner 与 Worker
+
+M4 完整链路使用 `sync_queue_plan` 将到期公共目标写为持久化任务，再由独立
+`sky-sync-worker.service` 以有限并发执行。当前可切换的资源类型为 `clan_profile`、
+`clan_members`、`current_war` 和 `cwl_live`。同一 Tag 被多个联盟订阅仍只生成一个目标和
+一个到期任务。
+
+```bash
+SYNC_QUEUE_PLANNER_ENABLED=true
+SYNC_QUEUE_WORKER_ENABLED=true
+SYNC_QUEUE_LIVE_TYPES=clan_profile,clan_members,current_war,cwl_live
+```
+
+`SYNC_QUEUE_LIVE_TYPES` 既是切换顺序，也是回滚开关：只有列入的类型会生成 live 任务，对应
+旧任务才会跳过。删除某个类型并同时重启 Scheduler/Worker 后，Planner 会取消该类型待执行
+live 任务，旧路径恢复。不允许同时启用 `sync_shadow_plan`；它在检测到 live 类型时会拒绝
+运行，避免意外将目标切回影子模式。
+
+Worker 并发度默认为 3，最大限制为 8；任务使用租约、心跳、有上限重试和退避。Worker 重启时
+会立即中断上一进程的运行尝试并释放租约；Scheduler 重启只收口 Scheduler 自己的运行记录，
+不会误中断 Worker。`cwl_live` 虽由队列每 2 分钟唤醒高质量目标，仍由现有单场状态策略
+决定是否访问官方 API，不会因切换而重拉所有准备中战争。
 
 ## 普通战归档
 
@@ -88,6 +113,7 @@ venv/bin/python scripts/scheduler.py --list
 venv/bin/python scripts/scheduler.py --once current_wars
 venv/bin/python scripts/scheduler.py --once capital_raid_status --force
 systemctl status sky-scheduler.service
+systemctl status sky-sync-worker.service
 curl -fsS http://127.0.0.1:8000/api/system/version
 ```
 
@@ -104,8 +130,8 @@ SocialData、X、微信公众号和图片下载请求。记录内容仅包括来
 
 外部请求观测采用进程内收集、任务结束后批量落库。创建、完成或清理观测记录失败时只输出警告，
 不能改变业务任务的成功或失败状态。历史默认保留 30 天，由 `OBSERVABILITY_RETENTION_DAYS` 调整；
-调度器每天清理一次过期运行记录及其请求明细。常驻调度器启动时，在单实例约束下会将上一进程
-遗留的 `running` 记录标记为 `interrupted`；中断轮次不计为业务失败，也不会被误报为仍在运行。
+调度器每天清理一次过期运行记录及其请求明细。Scheduler 和 Worker 启动时只会收口各自上一进程
+遗留的 `running` 记录；中断轮次不计为业务失败，也不会被误报为仍在运行。
 
 只读诊断命令：
 

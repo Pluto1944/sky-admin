@@ -257,6 +257,8 @@ def interrupt_running_job_runs(
     *,
     interrupted_at: str,
     reason: str = DEFAULT_INTERRUPTED_REASON,
+    job_id_prefix: str | None = None,
+    exclude_job_prefixes: tuple[str, ...] = (),
 ) -> int:
     """Close runs abandoned by a previous scheduler process.
 
@@ -265,8 +267,17 @@ def interrupt_running_job_runs(
     process and can no longer finish normally.  Keep its duration and request
     counters unknown instead of fabricating a completed measurement.
     """
+    filters = ["status = 'running'"]
+    params: list[str] = []
+    if job_id_prefix:
+        filters.append("job_id LIKE ?")
+        params.append(f"{job_id_prefix}%")
+    for prefix in exclude_job_prefixes:
+        filters.append("job_id NOT LIKE ?")
+        params.append(f"{prefix}%")
+    where = " AND ".join(filters)
     rows = conn.execute(
-        "SELECT DISTINCT job_id FROM sync_job_runs WHERE status = 'running'"
+        f"SELECT DISTINCT job_id FROM sync_job_runs WHERE {where}", params,
     ).fetchall()
     job_ids = [row[0] for row in rows]
     if not job_ids:
@@ -275,10 +286,10 @@ def interrupt_running_job_runs(
     message = _limited(reason, 1000) or DEFAULT_INTERRUPTED_REASON
     with conn:
         cursor = conn.execute(
-            """UPDATE sync_job_runs
+            f"""UPDATE sync_job_runs
                SET finished_at = ?, status = 'interrupted', reason = ?
-               WHERE status = 'running'""",
-            (interrupted_at, message),
+               WHERE {where}""",
+            (interrupted_at, message, *params),
         )
         conn.executemany(
             """UPDATE sync_jobs

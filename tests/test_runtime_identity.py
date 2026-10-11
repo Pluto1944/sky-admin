@@ -105,3 +105,28 @@ def test_system_version_marks_dirty_runtime_inconsistent():
     assert result["healthy"] is True
     assert result["consistent"] is False
     assert result["status"] == "degraded"
+
+
+def test_system_version_requires_worker_when_cutover_is_enabled():
+    api = _identity()
+    scheduler = {
+        **_identity("scheduler").as_dict(),
+        "heartbeat_at": "2026-10-06T00:01:00+00:00",
+    }
+    worker = {
+        **_identity("sync_worker").as_dict(),
+        "heartbeat_at": "2026-10-06T00:01:30+00:00",
+    }
+    now = datetime(2026, 10, 6, 0, 2, tzinfo=timezone.utc)
+
+    healthy = build_system_version(
+        api, scheduler, worker_runtime=worker, worker_required=True, now=now,
+    )
+    missing = build_system_version(
+        api, scheduler, worker_runtime=None, worker_required=True, now=now,
+    )
+
+    assert healthy["healthy"] is True
+    assert healthy["components"]["sync_worker"]["health"] == "healthy"
+    assert missing["healthy"] is False
+    assert missing["status"] == "degraded"

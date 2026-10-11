@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from modules.sync_queue.planner import ShadowSyncPlanner, _current_war_policy
+from modules.sync_queue.planner import ShadowSyncPlanner, SyncPlanner, _current_war_policy
 
 
 NOW = datetime(2026, 10, 5, 0, 0, tzinfo=timezone.utc)
@@ -125,3 +125,26 @@ def test_current_war_shadow_policy_matches_near_start_and_error_backoff():
         "internal", {"status": "error", "failure_count": 3}, NOW
     ) == ("scheduled", 1200)
     assert _current_war_policy("low", near_start, NOW) == ("scheduled", 21600)
+
+
+def test_live_cutover_only_creates_live_tasks_for_selected_types(db):
+    alliance_id = _seed_alliance(db, "internal", "Internal", "internal")
+    _seed_clan_and_cwl(db, alliance_id, "#2QQ")
+    db.conn.commit()
+
+    result = SyncPlanner(db.conn).run(
+        now=NOW, live_resource_types=("clan_profile", "current_war"),
+    )
+
+    assert result["live_tasks_planned"] == 2
+    assert result["shadow_tasks_planned"] == 2
+    modes = {
+        row["resource_type"]: row["planning_mode"]
+        for row in db.conn.execute("SELECT resource_type, planning_mode FROM sync_targets")
+    }
+    assert modes == {
+        "clan_profile": "live",
+        "clan_members": "shadow",
+        "current_war": "live",
+        "cwl_live": "shadow",
+    }

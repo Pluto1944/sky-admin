@@ -52,9 +52,18 @@ def ping(request: Request):
 
 @router.get("/system/version")
 def system_version(request: Request, db: Database = Depends(get_db)):
-    """返回 API 与调度器实际运行的版本、提交和心跳一致性。"""
+    """返回 API、调度器与 M4 Worker 的运行身份。"""
+    from modules.sync_queue.config import live_resource_types, worker_enabled
+
     scheduler = get_service_runtime(db.conn, "scheduler")
-    return build_system_version(request.app.state.runtime_identity, scheduler)
+    worker = get_service_runtime(db.conn, "sync_worker")
+    worker_required = worker_enabled() or bool(live_resource_types())
+    return build_system_version(
+        request.app.state.runtime_identity,
+        scheduler,
+        worker_runtime=worker,
+        worker_required=worker_required,
+    )
 
 
 @router.get("/members")

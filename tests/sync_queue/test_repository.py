@@ -90,6 +90,7 @@ def test_claim_respects_priority_and_retry_backoff(db):
             _interest("fast", "#FAST", "realtime", 120),
         ],
     )
+    repo.set_target_modes(("current_war",), now=NOW)
     assert len(repo.plan_due_tasks(mode="live", now=NOW)) == 2
 
     claimed = repo.claim_tasks("worker-a", limit=1, lease_seconds=30, now=NOW)
@@ -135,6 +136,7 @@ def test_claim_respects_priority_and_retry_backoff(db):
 def test_expired_lease_is_recovered_and_owner_is_enforced(db):
     repo = SyncQueueRepository(db.conn)
     _build_targets(repo, [_interest("one", "#2QQ", "interactive", 600)])
+    repo.set_target_modes(("current_war",), now=NOW)
     task = repo.plan_due_tasks(mode="live", now=NOW)[0]
     claimed = repo.claim_tasks("worker-a", lease_seconds=30, now=NOW)[0]
     assert claimed["id"] == task["id"]
@@ -153,9 +155,30 @@ def test_expired_lease_is_recovered_and_owner_is_enforced(db):
     assert dict(attempt) == {"status": "interrupted", "error_type": "LeaseExpired"}
 
 
+def test_worker_restart_interrupts_running_task_without_waiting_for_lease(db):
+    repo = SyncQueueRepository(db.conn)
+    _build_targets(repo, [_interest("one", "#2QQ", "interactive", 600)])
+    repo.set_target_modes(("current_war",), now=NOW)
+    task = repo.plan_due_tasks(mode="live", now=NOW)[0]
+    repo.claim_tasks("old-worker", lease_seconds=300, now=NOW)
+
+    assert repo.interrupt_running_tasks(
+        now=NOW + timedelta(seconds=1),
+    ) == 1
+    row = db.conn.execute(
+        "SELECT status, lease_owner FROM sync_tasks WHERE id = ?", (task["id"],)
+    ).fetchone()
+    attempt = db.conn.execute(
+        "SELECT status, error_type FROM sync_attempts WHERE task_id = ?", (task["id"],)
+    ).fetchone()
+    assert dict(row) == {"status": "retry_wait", "lease_owner": None}
+    assert dict(attempt) == {"status": "interrupted", "error_type": "WorkerRestarted"}
+
+
 def test_retryable_failure_stops_at_max_attempts(db):
     repo = SyncQueueRepository(db.conn)
     _build_targets(repo, [_interest("one", "#2QQ", "realtime", 120)])
+    repo.set_target_modes(("current_war",), now=NOW)
     task = repo.plan_due_tasks(mode="live", now=NOW, max_attempts=2)[0]
 
     repo.claim_tasks("worker", now=NOW)
@@ -179,6 +202,7 @@ def test_retryable_failure_stops_at_max_attempts(db):
 def test_stale_interest_deactivates_target_and_cancels_pending_live_task(db):
     repo = SyncQueueRepository(db.conn)
     _build_targets(repo, [_interest("one", "#2QQ", "scheduled", 300)])
+    repo.set_target_modes(("current_war",), now=NOW)
     task = repo.plan_due_tasks(mode="live", now=NOW)[0]
 
     result = repo.reconcile_interests(
@@ -189,6 +213,23 @@ def test_stale_interest_deactivates_target_and_cancels_pending_live_task(db):
     assert targets["deactivated"] == 1
     assert db.conn.execute(
         "SELECT status FROM sync_tasks WHERE id = ?", (task["id"],)
+    ).fetchone()[0] == "cancelled"
+
+
+def test_mode_transition_is_immediately_due_and_rollback_cancels_pending(db):
+    repo = SyncQueueRepository(db.conn)
+    _build_targets(repo, [_interest("one", "#2QQ", "scheduled", 3600)])
+    repo.plan_due_tasks(mode="shadow", now=NOW)
+
+    changed = repo.set_target_modes(("current_war",), now=NOW + timedelta(minutes=1))
+    live = repo.plan_due_tasks(mode="live", now=NOW + timedelta(minutes=1))
+    rolled_back = repo.set_target_modes((), now=NOW + timedelta(minutes=2))
+
+    assert changed["live"] == 1
+    assert len(live) == 1
+    assert rolled_back["shadow"] == 1
+    assert db.conn.execute(
+        "SELECT status FROM sync_tasks WHERE id = ?", (live[0]["id"],)
     ).fetchone()[0] == "cancelled"
 
 

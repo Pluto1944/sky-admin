@@ -11,8 +11,10 @@ import sqlite3
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
+import config
 from modules.coc_sync.official.mapper import normalize_tag
 
+from .config import RESOURCE_TYPES, parse_resource_types
 from .repository import SyncQueueRepository
 
 
@@ -74,8 +76,8 @@ def _current_war_policy(
     return "scheduled", 5 * 60
 
 
-class ShadowSyncPlanner:
-    """Reconcile alliance subscriptions into shadow queue tasks."""
+class SyncPlanner:
+    """Reconcile subscriptions and plan shadow/live work by resource type."""
 
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
@@ -180,14 +182,69 @@ class ShadowSyncPlanner:
             })
         return interests
 
+    def _legacy_comparison(self, current: datetime) -> dict[str, dict[str, int]]:
+        """Count target differences against the still-supported legacy sources.
+
+        Only counts are returned so observability never exposes clan tags.  An
+        extra queue target is valid for a non-legacy alliance; a missing legacy
+        target is the cut-over blocker.
+        """
+        configured = {
+            tag for item in config.CLANS if item.get("enabled", True)
+            if (tag := normalize_tag(item.get("tag")))
+        }
+        expected: dict[str, set[str]] = {
+            "clan_profile": set(configured),
+            "clan_members": set(configured),
+            "current_war": set(configured),
+            "cwl_live": set(),
+        }
+        local_now = current.astimezone(BUSINESS_TZ)
+        if local_now.day <= 12:
+            period = local_now.strftime("%Y-%m")
+            rows = self.conn.execute(
+                """SELECT clan_tag FROM league_teams
+                   WHERE period = ? AND category IN ('combat', 'shell')
+                   UNION
+                   SELECT teams.clan_tag
+                   FROM alliance_cwl_teams AS teams
+                   JOIN alliance_cwl_seasons AS seasons ON seasons.id = teams.season_id
+                   WHERE seasons.period = ?
+                     AND seasons.status IN ('active', 'frozen', 'complete')""",
+                (period, period),
+            ).fetchall()
+            expected["cwl_live"] = {
+                f"{period}:{tag}" for row in rows
+                if (tag := normalize_tag(row["clan_tag"]))
+            }
+        planned: dict[str, set[str]] = {name: set() for name in expected}
+        for row in self.conn.execute(
+            """SELECT resource_type, resource_key FROM sync_targets
+               WHERE status = 'active'"""
+        ).fetchall():
+            if row["resource_type"] in planned:
+                planned[row["resource_type"]].add(row["resource_key"])
+        return {
+            name: {
+                "legacy": len(expected[name]),
+                "planned": len(planned[name]),
+                "missing": len(expected[name] - planned[name]),
+                "extra": len(planned[name] - expected[name]),
+            }
+            for name in expected
+        }
+
     def run(
         self,
         *,
         now: datetime | None = None,
         task_limit: int = 1000,
         shadow_retention_days: int = 7,
+        live_resource_types: tuple[str, ...] | list[str] = (),
     ) -> dict:
         current = _as_utc(now)
+        live_types = parse_resource_types(live_resource_types)
+        shadow_types = tuple(item for item in RESOURCE_TYPES if item not in live_types)
         interests = self._clan_interests(current) + self._cwl_interests(current)
         interest_result = self.queue.reconcile_interests(
             interests,
@@ -195,16 +252,32 @@ class ShadowSyncPlanner:
             now=current,
         )
         target_result = self.queue.rebuild_targets(now=current)
-        tasks = self.queue.plan_due_tasks(mode="shadow", now=current, limit=task_limit)
+        comparison = self._legacy_comparison(current)
+        mode_changes = self.queue.set_target_modes(live_types, now=current)
+        live_tasks = self.queue.plan_due_tasks(
+            mode="live", now=current, limit=task_limit, resource_types=live_types,
+        ) if live_types else []
+        remaining = max(0, task_limit - len(live_tasks))
+        shadow_tasks = self.queue.plan_due_tasks(
+            mode="shadow", now=current, limit=remaining,
+            resource_types=shadow_types,
+        ) if shadow_types and remaining else []
+        tasks = live_tasks + shadow_tasks
         pruned = self.queue.prune_shadow_tasks(
             retention_days=shadow_retention_days,
             now=current,
         )
         return {
-            "mode": "shadow",
+            "mode": "mixed" if live_types and shadow_types else ("live" if live_types else "shadow"),
+            "live_resource_types": list(live_types),
+            "shadow_resource_types": list(shadow_types),
+            "mode_changes": mode_changes,
             "interests": interest_result,
             "targets": target_result,
+            "legacy_comparison": comparison,
             "tasks_planned": len(tasks),
+            "live_tasks_planned": len(live_tasks),
+            "shadow_tasks_planned": len(shadow_tasks),
             "tasks_by_type": {
                 resource_type: sum(1 for task in tasks if task["resource_type"] == resource_type)
                 for resource_type in sorted({task["resource_type"] for task in tasks})
@@ -214,10 +287,20 @@ class ShadowSyncPlanner:
         }
 
 
+class ShadowSyncPlanner(SyncPlanner):
+    """Backward-compatible M4.0 planner that never creates live work."""
+
+    def run(self, **kwargs) -> dict:
+        kwargs["live_resource_types"] = ()
+        return super().run(**kwargs)
+
+
 def format_planner_reason(result: dict) -> str:
     """Compact scheduler reason without exposing payloads or private data."""
     counts = json.dumps(result.get("tasks_by_type", {}), ensure_ascii=False, sort_keys=True)
     return (
-        f"影子计划 {result.get('tasks_planned', 0)} 个任务，"
+        f"计划 {result.get('tasks_planned', 0)} 个任务"
+        f"（live {result.get('live_tasks_planned', 0)} / "
+        f"影子 {result.get('shadow_tasks_planned', 0)}），"
         f"有效目标 {result.get('targets', {}).get('active', 0)}，类型 {counts}"
     )

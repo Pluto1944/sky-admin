@@ -926,6 +926,8 @@ CREATE TABLE IF NOT EXISTS sync_targets (
     alliance_count           INTEGER NOT NULL DEFAULT 0 CHECK(alliance_count >= 0),
     status                   TEXT NOT NULL DEFAULT 'active'
                              CHECK(status IN ('active', 'inactive')),
+    planning_mode            TEXT NOT NULL DEFAULT 'shadow'
+                             CHECK(planning_mode IN ('shadow', 'live')),
     metadata_json            TEXT NOT NULL DEFAULT '{}',
     last_planned_at          TEXT,
     next_due_at              TEXT,
@@ -1052,6 +1054,10 @@ class Database:
                 os.makedirs(parent, exist_ok=True)
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
+        # M4 Worker uses bounded parallel network calls with short independent
+        # SQLite writers.  Wait briefly for the single writer instead of
+        # failing immediately during a scheduler/API write transaction.
+        self.conn.execute("PRAGMA busy_timeout = 5000")
         self.conn.execute("PRAGMA foreign_keys = ON")
 
     def init_schema(self) -> None:
@@ -1294,6 +1300,18 @@ class Database:
         }
         if not runtime_cols:
             self.conn.execute(_SERVICE_RUNTIME_DDL)
+
+        # M4.1：目标级规划模式用于逐类灰度。模式切换时 Planner
+        # 会重置该目标到期时间，从而既不漏掉首次 live 执行，也不让
+        # 影子任务和 live 任务共用一个到期指针时相互干扰。
+        target_cols = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(sync_targets)")
+        }
+        if target_cols and "planning_mode" not in target_cols:
+            self.conn.execute(
+                "ALTER TABLE sync_targets ADD COLUMN planning_mode TEXT "
+                "NOT NULL DEFAULT 'shadow' CHECK(planning_mode IN ('shadow', 'live'))"
+            )
 
         # M3.1：为既有套餐补齐 CWL 权益。只合并缺失键，保留运营期间可能增加的
         # 其他 entitlement，不用一次 schema 初始化覆盖整份 JSON。

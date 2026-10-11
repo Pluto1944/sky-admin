@@ -27,3 +27,15 @@ def test_verify_runtime_payload_rejects_stale_scheduler():
 
     assert "scheduler 状态不是 healthy" in errors
     assert "API 与调度器运行身份不一致" in errors
+
+
+def test_verify_runtime_payload_checks_required_worker():
+    payload = _payload()
+    payload["worker_required"] = True
+    payload["components"]["sync_worker"] = dict(payload["components"]["api"])
+    assert verify_runtime_payload(payload, "v1.3.0", "a" * 40) == []
+
+    payload["components"]["sync_worker"]["health"] = "missing"
+    assert "sync_worker 状态不是 healthy" in verify_runtime_payload(
+        payload, "v1.3.0", "a" * 40,
+    )

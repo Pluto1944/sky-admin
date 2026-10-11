@@ -89,6 +89,8 @@ def build_system_version(
     api_identity: RuntimeIdentity,
     scheduler_runtime: Mapping | None,
     *,
+    worker_runtime: Mapping | None = None,
+    worker_required: bool = False,
     now: datetime | None = None,
     stale_after_seconds: int = DEFAULT_STALE_AFTER_SECONDS,
 ) -> dict:
@@ -113,17 +115,46 @@ def build_system_version(
             "heartbeat_age_seconds": None,
         }
 
-    same_release = scheduler.get("release_version") == api_identity.release_version
-    same_commit = scheduler.get("git_commit") == api_identity.git_commit
-    clean = not api_identity.tracked_dirty and not bool(scheduler.get("tracked_dirty"))
-    consistent = scheduler_healthy and same_release and same_commit and clean
-    healthy = scheduler_healthy
+    worker = dict(worker_runtime) if worker_runtime else None
+    worker_healthy = False
+    if worker is not None:
+        worker["tracked_dirty"] = bool(worker.get("tracked_dirty"))
+        heartbeat = _parse_utc(worker.get("heartbeat_at"))
+        age = max(0, int((current - heartbeat).total_seconds())) if heartbeat else None
+        worker["heartbeat_age_seconds"] = age
+        worker_healthy = age is not None and age <= stale_after_seconds
+        worker["health"] = "healthy" if worker_healthy else "stale"
+    else:
+        worker = {
+            "component": "sync_worker",
+            "health": "missing",
+            "heartbeat_age_seconds": None,
+        }
+
+    checked = [scheduler]
+    if worker_required:
+        checked.append(worker)
+    same_release = all(
+        component.get("release_version") == api_identity.release_version
+        for component in checked
+    )
+    same_commit = all(
+        component.get("git_commit") == api_identity.git_commit
+        for component in checked
+    )
+    clean = not api_identity.tracked_dirty and all(
+        not bool(component.get("tracked_dirty")) for component in checked
+    )
+    required_healthy = scheduler_healthy and (worker_healthy if worker_required else True)
+    consistent = required_healthy and same_release and same_commit and clean
+    healthy = required_healthy
 
     return {
         "status": "ok" if healthy and consistent else "degraded",
         "release_version": api_identity.release_version,
         "healthy": healthy,
         "consistent": consistent,
+        "worker_required": bool(worker_required),
         "checked_at": current.isoformat(timespec="seconds"),
-        "components": {"api": api, "scheduler": scheduler},
+        "components": {"api": api, "scheduler": scheduler, "sync_worker": worker},
     }

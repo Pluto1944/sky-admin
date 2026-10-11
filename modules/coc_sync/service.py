@@ -136,7 +136,12 @@ class CocSyncService:
     # ------------------------------------------------------------------
     # 同步落库
     # ------------------------------------------------------------------
-    def sync_clans(self, clans: list | None = None) -> dict:
+    def sync_clans(
+        self,
+        clans: list | None = None,
+        *,
+        alliance_clan_tags: set[str] | None = None,
+    ) -> dict:
         """遍历部落 -> 抓取成员 -> 标准化 -> 按真实 Tag 汇总去重 -> 写入 player 档案，
         并对本次成功同步的部落做"退部对账"。
 
@@ -195,7 +200,10 @@ class CocSyncService:
                 stats["members"] += 1
 
         # 退部对账：只针对本次成功同步的部落，避免抓取失败的部落误伤其成员
-        self._reconcile_left_members(set(seen.keys()), synced_clan_tags, stats)
+        self._reconcile_left_members(
+            set(seen.keys()), synced_clan_tags, stats,
+            alliance_clan_tags=alliance_clan_tags,
+        )
         return stats
 
     def sync_player(self, player_tag: str) -> dict:
@@ -210,7 +218,12 @@ class CocSyncService:
         return fields
 
     def _reconcile_left_members(
-        self, present_tags: set[str], synced_clan_tags: set[str], stats: dict
+        self,
+        present_tags: set[str],
+        synced_clan_tags: set[str],
+        stats: dict,
+        *,
+        alliance_clan_tags: set[str] | None = None,
     ) -> None:
         """对本次成功同步的部落做退部对账。
 
@@ -222,7 +235,10 @@ class CocSyncService:
         """
         if not synced_clan_tags:
             return
-        alliance = {normalize_tag(t) for t in config.ALLIANCE_CLAN_TAGS}
+        alliance = {
+            normalize_tag(t)
+            for t in (alliance_clan_tags or set(config.ALLIANCE_CLAN_TAGS))
+        }
         alliance.discard(None)
 
         for acc in self.player_service.list_members_by_clan(synced_clan_tags):

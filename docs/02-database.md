@@ -46,7 +46,7 @@
 | 调度运行历史 | `sync_job_runs` | `id` | 每轮任务状态、耗时、原因及外部请求计数；默认保留 30 天 |
 | 外部请求明细 | `external_request_events` | `id` | 按任务记录外部来源、操作、结果、HTTP 状态和耗时；不保存凭证或响应正文 |
 | 服务运行身份 | `service_runtime` | `component` | 常驻组件启动时冻结的版本、Git 提交、工作区状态与心跳 |
-| 同步需求 | `sync_interests` | `(source_type, source_key, resource_type, resource_key)` | 联盟订阅或月度队伍对公共资源提出的同步需求；M4.0 仅由影子 Planner 维护 |
+| 同步需求 | `sync_interests` | `(source_type, source_key, resource_type, resource_key)` | 联盟订阅或月度队伍对公共资源提出的同步需求；由 M4 Planner 维护 |
 | 同步目标 | `sync_targets` | `(resource_type, resource_key)` | 合并相同公共资源的优先级、最短周期和需求计数 |
 | 同步任务 | `sync_tasks` | `id` / `idempotency_key` | 影子或真实任务、优先级、到期时间、租约、有限重试和终态 |
 | 同步尝试 | `sync_attempts` | `(task_id, attempt_no)` | Worker 每次领取后的结果、错误分类和外部请求摘要 |
@@ -74,8 +74,8 @@ CWL 配置作为范围与权限依据。公共 COC 事实仍按全局 Tag 保存
 只执行于苍穹存量迁移，M1 以后新加入联盟的用户仍默认是普通成员。建议将预览输出的配置哈希通过
 `--expected-config-hash` 带入应用命令，防止评审后配置发生漂移。
 
-`service_runtime` 不属于业务任务队列，也不复用 `sync_jobs`。当前由常驻调度器以
-`component=scheduler` 上报启动身份并更新心跳；API 的运行身份直接保存在各 Uvicorn worker
+`service_runtime` 不属于业务任务队列，也不复用 `sync_jobs`。常驻调度器与 M4 Worker 分别以
+`component=scheduler / sync_worker` 上报启动身份并更新心跳；API 的运行身份直接保存在各 Uvicorn worker
 内存中，由 `/api/system/version` 与调度器记录聚合。发布版本或 Git 提交变化只有在组件重启后
 才会更新，这正是用于识别“磁盘代码已更新、进程仍运行旧代码”的依据。
 
@@ -92,10 +92,10 @@ M4.0 在 SQLite 中新增 `sync_interests → sync_targets → sync_tasks → sy
 按时间桶使用 `idempotency_key` 去重，尝试记录 Worker 租约内的一次执行。删除或停用一个联盟只会
 停用对应需求；仍被其他联盟使用的公共目标继续存在。
 
-当前只生成 `mode=shadow`、`status=shadowed` 的计划记录，不调用外部 API、不写业务缓存，也没有
-真实 Worker。`mode=live` 的原子领取、租约续期、租约过期恢复、成功、失败、指数退避和最大尝试次数
-已经作为后续切换所需的基础原语实现并由单元测试覆盖，但生产接管必须另行灰度。影子记录默认保留
-7 天；队列聚合状态由 `scripts/observability_report.py` 只读输出，不展示资源 Tag。
+`sync_targets.planning_mode` 记录每个目标当前应生成 `shadow` 还是 `live` 任务。`mode=live`
+任务由独立 Worker 原子领取，每次尝试使用租约、心跳、指数退避和最大尝试次数。目标从 live
+切回 shadow 时，待执行和等待重试的 live 任务会被取消，已开始的任务由租约所有者收口。
+影子记录默认保留 7 天；队列聚合状态由 `scripts/observability_report.py` 只读输出，不展示资源 Tag。
 
 ## 互刷系统独立认证底座（F1）
 
