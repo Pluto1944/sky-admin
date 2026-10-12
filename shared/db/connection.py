@@ -152,6 +152,7 @@ CREATE TABLE IF NOT EXISTS alliances (
     status             TEXT NOT NULL DEFAULT 'active'
                        CHECK(status IN ('active', 'suspended', 'archived')),
     plan_code          TEXT NOT NULL,
+    clan_limit_override INTEGER CHECK(clan_limit_override IS NULL OR clan_limit_override > 0),
     created_by_user_id INTEGER,
     created_at         TEXT NOT NULL,
     updated_at         TEXT NOT NULL,
@@ -266,7 +267,7 @@ BEGIN
         SELECT COUNT(*) FROM alliance_clans
         WHERE alliance_id = NEW.alliance_id AND status = 'active'
     ) >= (
-        SELECT p.max_clans
+        SELECT COALESCE(a.clan_limit_override, p.max_clans)
         FROM alliances a
         JOIN alliance_plans p ON p.plan_code = a.plan_code
         WHERE a.id = NEW.alliance_id
@@ -282,7 +283,7 @@ BEGIN
         SELECT COUNT(*) FROM alliance_clans
         WHERE alliance_id = NEW.alliance_id AND status = 'active' AND id != OLD.id
     ) >= (
-        SELECT p.max_clans
+        SELECT COALESCE(a.clan_limit_override, p.max_clans)
         FROM alliances a
         JOIN alliance_plans p ON p.plan_code = a.plan_code
         WHERE a.id = NEW.alliance_id
@@ -296,8 +297,9 @@ BEGIN
     SELECT CASE WHEN (
         SELECT COUNT(*) FROM alliance_clans
         WHERE alliance_id = OLD.id AND status = 'active'
-    ) > (
-        SELECT max_clans FROM alliance_plans WHERE plan_code = NEW.plan_code
+    ) > COALESCE(
+        NEW.clan_limit_override,
+        (SELECT max_clans FROM alliance_plans WHERE plan_code = NEW.plan_code)
     ) THEN RAISE(ABORT, 'alliance active clan limit exceeded by plan change') END;
 END;
 
@@ -312,7 +314,7 @@ BEGIN
           AND (
               SELECT COUNT(*) FROM alliance_clans c
               WHERE c.alliance_id = a.id AND c.status = 'active'
-          ) > NEW.max_clans
+          ) > COALESCE(a.clan_limit_override, NEW.max_clans)
     ) THEN RAISE(ABORT, 'plan max_clans is below an active alliance clan count') END;
 END;
 
@@ -1234,8 +1236,84 @@ class Database:
         self.conn.execute("PRAGMA foreign_keys = OFF")
 
         # 普通用户“一人一个免费联盟”由服务层按角色校验；超级管理员可以从
-        # 下拉菜单创建多个联盟，因此旧的数据库唯一索引必须幂等移除。
+        # 平台管理页创建多个联盟，因此旧的数据库唯一索引必须幂等移除。
         self.conn.execute("DROP INDEX IF EXISTS idx_alliances_one_active_free_per_creator")
+
+        # 平台超级管理员可以在“超级管理”内为单个联盟突破套餐部落数；普通入口
+        # 仍由服务层按套餐上限校验。数据库触发器使用逐联盟 override 维持硬约束。
+        alliance_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(alliances)")}
+        if "clan_limit_override" not in alliance_cols:
+            self.conn.execute(
+                "ALTER TABLE alliances ADD COLUMN clan_limit_override INTEGER "
+                "CHECK(clan_limit_override IS NULL OR clan_limit_override > 0)"
+            )
+        self.conn.executescript(
+            """
+            DROP TRIGGER IF EXISTS trg_alliance_clans_active_limit_insert;
+            DROP TRIGGER IF EXISTS trg_alliance_clans_active_limit_update;
+            DROP TRIGGER IF EXISTS trg_alliances_plan_clan_limit_update;
+            DROP TRIGGER IF EXISTS trg_alliance_plans_max_clans_update;
+
+            CREATE TRIGGER trg_alliance_clans_active_limit_insert
+            BEFORE INSERT ON alliance_clans
+            WHEN NEW.status = 'active'
+            BEGIN
+                SELECT CASE WHEN (
+                    SELECT COUNT(*) FROM alliance_clans
+                    WHERE alliance_id = NEW.alliance_id AND status = 'active'
+                ) >= (
+                    SELECT COALESCE(a.clan_limit_override, p.max_clans)
+                    FROM alliances a
+                    JOIN alliance_plans p ON p.plan_code = a.plan_code
+                    WHERE a.id = NEW.alliance_id
+                ) THEN RAISE(ABORT, 'alliance active clan limit exceeded') END;
+            END;
+
+            CREATE TRIGGER trg_alliance_clans_active_limit_update
+            BEFORE UPDATE OF alliance_id, status ON alliance_clans
+            WHEN NEW.status = 'active'
+             AND (OLD.status != 'active' OR OLD.alliance_id != NEW.alliance_id)
+            BEGIN
+                SELECT CASE WHEN (
+                    SELECT COUNT(*) FROM alliance_clans
+                    WHERE alliance_id = NEW.alliance_id AND status = 'active' AND id != OLD.id
+                ) >= (
+                    SELECT COALESCE(a.clan_limit_override, p.max_clans)
+                    FROM alliances a
+                    JOIN alliance_plans p ON p.plan_code = a.plan_code
+                    WHERE a.id = NEW.alliance_id
+                ) THEN RAISE(ABORT, 'alliance active clan limit exceeded') END;
+            END;
+
+            CREATE TRIGGER trg_alliances_plan_clan_limit_update
+            BEFORE UPDATE OF plan_code ON alliances
+            WHEN OLD.plan_code != NEW.plan_code
+            BEGIN
+                SELECT CASE WHEN (
+                    SELECT COUNT(*) FROM alliance_clans
+                    WHERE alliance_id = OLD.id AND status = 'active'
+                ) > COALESCE(
+                    NEW.clan_limit_override,
+                    (SELECT max_clans FROM alliance_plans WHERE plan_code = NEW.plan_code)
+                ) THEN RAISE(ABORT, 'alliance active clan limit exceeded by plan change') END;
+            END;
+
+            CREATE TRIGGER trg_alliance_plans_max_clans_update
+            BEFORE UPDATE OF max_clans ON alliance_plans
+            WHEN NEW.max_clans < OLD.max_clans
+            BEGIN
+                SELECT CASE WHEN EXISTS (
+                    SELECT 1
+                    FROM alliances a
+                    WHERE a.plan_code = OLD.plan_code
+                      AND (
+                          SELECT COUNT(*) FROM alliance_clans c
+                          WHERE c.alliance_id = a.id AND c.status = 'active'
+                      ) > COALESCE(a.clan_limit_override, NEW.max_clans)
+                ) THEN RAISE(ABORT, 'plan max_clans is below an active alliance clan count') END;
+            END;
+            """
+        )
 
         reg_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(registrations)")}
 

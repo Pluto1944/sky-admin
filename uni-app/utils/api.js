@@ -410,8 +410,32 @@ export function getPlatformAlliances(search = '') {
   return request(`/api/platform/alliances${query}`, 'GET', {}, true)
 }
 
+export function createPlatformAlliance(name) {
+  return request('/api/platform/alliances', 'POST', { name }, true)
+}
+
 export function getPlatformAlliance(allianceId) {
   return request(`/api/platform/alliances/${encodeURIComponent(allianceId)}`, 'GET', {}, true)
+}
+
+export function getPlatformManagedClans(allianceId) {
+  return request(`/api/platform/alliances/${encodeURIComponent(allianceId)}/managed-clans`, 'GET', {}, true)
+}
+
+export function addPlatformManagedClan(allianceId, payload) {
+  return request(`/api/platform/alliances/${encodeURIComponent(allianceId)}/managed-clans`, 'POST', payload, true)
+}
+
+export function updatePlatformManagedClan(allianceId, clanTag, payload) {
+  return request(`/api/platform/alliances/${encodeURIComponent(allianceId)}/managed-clans/${encodeURIComponent(clanTag)}`, 'PATCH', payload, true)
+}
+
+export function reorderPlatformManagedClans(allianceId, clanTags) {
+  return request(`/api/platform/alliances/${encodeURIComponent(allianceId)}/managed-clans/order`, 'PUT', { clan_tags: clanTags }, true)
+}
+
+export function removePlatformManagedClan(allianceId, clanTag) {
+  return request(`/api/platform/alliances/${encodeURIComponent(allianceId)}/managed-clans/${encodeURIComponent(clanTag)}`, 'DELETE', {}, true)
 }
 
 export function savePlatformFreeRegistration(enabled, limit) {

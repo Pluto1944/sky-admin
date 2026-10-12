@@ -9,6 +9,7 @@ from modules.alliance.operations import (
     add_alliance_member_by_openid,
     add_managed_clan,
     archive_suspended_alliance,
+    create_platform_alliance,
     create_share_link,
     delete_browsing_history,
     grant_alliance_plan,
@@ -71,6 +72,10 @@ class JoinRequestReviewInput(BaseModel):
 class PlatformSettingsInput(BaseModel):
     free_registration_enabled: bool
     free_registration_limit: int = Field(ge=0, le=10000)
+
+
+class PlatformAllianceCreateInput(BaseModel):
+    name: str = Field(min_length=1, max_length=30)
 
 
 class VerificationInput(BaseModel):
@@ -424,6 +429,20 @@ def platform_alliances(
         raise _error(exc) from exc
 
 
+@router.post("/platform/alliances", status_code=201)
+def platform_create_alliance_entry(
+    payload: PlatformAllianceCreateInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        return create_platform_alliance(
+            db.conn, user["openid"], payload.name,
+        )
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
 @router.get("/platform/alliances/{alliance_id}")
 def platform_alliance(
     alliance_id: int,
@@ -432,6 +451,95 @@ def platform_alliance(
 ):
     try:
         return platform_alliance_detail(db.conn, user["openid"], alliance_id)
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.get("/platform/alliances/{alliance_id}/managed-clans")
+def platform_alliance_managed_clans(
+    alliance_id: int,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        return list_managed_clans(
+            db.conn, user["openid"], alliance_id, platform=True,
+        )
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.post("/platform/alliances/{alliance_id}/managed-clans", status_code=201)
+def platform_create_alliance_managed_clan(
+    alliance_id: int,
+    payload: ManagedClanInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        clan = add_managed_clan(
+            db.conn, user["openid"], alliance_id, clan_tag=payload.clan_tag,
+            category=payload.category, clan_name=payload.clan_name, platform=True,
+        )
+        actor = db.conn.execute(
+            "SELECT id FROM wechat_users WHERE openid=?", (user["openid"],),
+        ).fetchone()
+        initialization = enqueue_initialization(
+            db.conn, alliance_id=alliance_id, clan_tag=clan["clan_tag"],
+            actor_user_id=int(actor["id"]),
+        )
+        return {"clan": clan, "initialization": initialization}
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.put("/platform/alliances/{alliance_id}/managed-clans/order")
+def platform_reorder_alliance_managed_clans(
+    alliance_id: int,
+    payload: ManagedClanOrderInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        return reorder_managed_clans(
+            db.conn, user["openid"], alliance_id, payload.clan_tags, platform=True,
+        )
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.patch("/platform/alliances/{alliance_id}/managed-clans/{clan_tag}")
+def platform_update_alliance_managed_clan(
+    alliance_id: int,
+    clan_tag: str,
+    payload: ManagedClanUpdateInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        clan = update_managed_clan(
+            db.conn, user["openid"], alliance_id, clan_tag,
+            category=payload.category, platform=True,
+        )
+        reconcile_sync_targets(db.conn)
+        return clan
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.delete("/platform/alliances/{alliance_id}/managed-clans/{clan_tag}")
+def platform_delete_alliance_managed_clan(
+    alliance_id: int,
+    clan_tag: str,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        result = remove_managed_clan(
+            db.conn, user["openid"], alliance_id, clan_tag, platform=True,
+        )
+        reconcile_sync_targets(db.conn)
+        return result
     except AllianceOperationError as exc:
         raise _error(exc) from exc
 

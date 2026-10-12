@@ -280,7 +280,7 @@ TabBar「管理」页
 “管理联盟”只对当前联盟的管理员和首领显示，承载加入申请、加入邀请、联盟成员和认证状态。管理员可批准申请、生成邀请并移除普通成员；只有首领可设置或取消管理员、移交首领和删除联盟。普通成员在“管理联盟列表”中退出，不显示“管理联盟”入口。认证按钮暂时只弹出人工认证说明。部落增删、标签和顺序统一放在部落概览底部的“部落管理”页。
 
 “超级管理”只在后端返回超级管理能力时显示，普通用户即使构造页路径也会被平台 API 拒绝。入口统一使用“超级管理”文案。联盟删除采用两阶段操作：先停用，只有已停用联盟才显示“删除已停用联盟”；删除前必须输入完整联盟名称，完成后从普通联盟列表移除，但保留历史事实和审计。
-超级管理员在左上角联盟下拉菜单中始终保留“创建联盟”入口，可连续创建多个运营或测试联盟；普通用户仍最多创建一个有效免费联盟。
+左上角联盟下拉菜单始终按普通权限工作，超级管理员也最多通过该入口创建一个有效免费联盟。创建多个运营或测试联盟，以及不受套餐数量限制地管理任意联盟部落，只能在“设置 → 超级管理”中进行。超级管理的联盟详情支持添加/移除部落、修改标签和调整顺序，并明确显示“不受套餐数量限制”。
 
 当前 uni-app/微信构建链会把页面 `<style scoped>` 编译为与 WXML 类名不匹配的属性选择器，导致
 管理页整体样式失效。因此该页面使用普通页面级 `<style>`；如果以后恢复 `scoped`，必须同时检查
@@ -516,6 +516,8 @@ TabBar「管理」页
 | `getAllianceUserMembers(id)` | `GET /api/alliances/{id}/user-members` | ✅ 管理 |
 | `addAllianceUserMember(id, openid, role)` | `POST /api/alliances/{id}/user-members` | ✅ 管理 |
 | `getPlatformAlliances()` | `GET /api/platform/alliances` | ✅ 超级管理 |
+| `createPlatformAlliance(name)` | `POST /api/platform/alliances` | ✅ 超级管理 |
+| `getPlatformManagedClans(id)` | `GET /api/platform/alliances/{id}/managed-clans` | ✅ 超级管理 |
 | `bindAccount(name, tag)` | `POST /api/wechat/bind` | ✅ |
 | `getMembers()` | `GET /api/alliances/{id}/members` | 成员、浏览历史或分享令牌 |
 | `getClanOverview()` | `GET /api/alliances/{id}/clans` | 成员、浏览历史或分享令牌 |

@@ -172,6 +172,54 @@ def require_platform_admin(conn: sqlite3.Connection, openid: str) -> sqlite3.Row
     return user
 
 
+def create_platform_alliance(
+    conn: sqlite3.Connection,
+    openid: str,
+    name: str,
+    *,
+    now: datetime | None = None,
+) -> dict:
+    """在超级管理入口创建联盟；不受个人普通创建入口的一联盟限制。"""
+    actor = require_platform_admin(conn, openid)
+    display_name = str(name or "").strip()
+    if not display_name:
+        raise AllianceOperationError("联盟名称不能为空", status_code=422)
+    if len(display_name) > 30:
+        raise AllianceOperationError("联盟名称不能超过 30 个字符", status_code=422)
+    if conn.execute(
+        "SELECT 1 FROM alliance_plans WHERE plan_code='free' AND status='active'",
+    ).fetchone() is None:
+        raise AllianceOperationError("免费套餐尚未初始化", status_code=503)
+    timestamp = _iso(now)
+    with conn:
+        cursor = conn.execute(
+            """INSERT INTO alliances
+               (alliance_key, name, status, plan_code, created_by_user_id,
+                created_at, updated_at)
+               VALUES (?, ?, 'active', 'free', ?, ?, ?)""",
+            (f"platform-{uuid.uuid4().hex}", display_name, int(actor["id"]), timestamp, timestamp),
+        )
+        alliance_id = int(cursor.lastrowid)
+        conn.execute(
+            """INSERT INTO alliance_members
+               (alliance_id, user_id, role, status, joined_at, created_at, updated_at)
+               VALUES (?, ?, 'leader', 'active', ?, ?, ?)""",
+            (alliance_id, int(actor["id"]), timestamp, timestamp, timestamp),
+        )
+        details = {"name": display_name, "plan_code": "free", "source": "platform"}
+        _alliance_audit(
+            conn, alliance_id=alliance_id, actor_user_id=int(actor["id"]),
+            action="alliance_created_by_platform", entity_type="alliance",
+            entity_id=alliance_id, details=details, timestamp=timestamp,
+        )
+        _platform_audit(
+            conn, actor_user_id=int(actor["id"]), action="alliance_created",
+            entity_type="alliance", entity_id=alliance_id,
+            details=details, timestamp=timestamp,
+        )
+    return {"alliance_id": alliance_id, "name": display_name, "plan_code": "free", "status": "active"}
+
+
 def _setting(conn: sqlite3.Connection, key: str, default: object) -> object:
     row = conn.execute(
         "SELECT value_json FROM platform_settings WHERE setting_key=?", (key,),
@@ -288,8 +336,24 @@ def _managed_clan_actor(
     openid: str,
     alliance_id: int,
     *,
+    platform: bool = False,
     now: datetime | None = None,
-) -> sqlite3.Row:
+) -> Mapping[str, object]:
+    if platform:
+        user = require_platform_admin(conn, openid)
+        alliance = conn.execute(
+            "SELECT name, status, plan_code FROM alliances WHERE id=?",
+            (int(alliance_id),),
+        ).fetchone()
+        if alliance is None or alliance["status"] == "archived":
+            raise AllianceOperationError("联盟不存在", status_code=404)
+        if alliance["status"] != "active":
+            raise AllianceOperationError("请先恢复联盟，再管理部落", status_code=409)
+        return {
+            "user_id": int(user["id"]), "role": "platform_admin",
+            "name": alliance["name"], "alliance_status": alliance["status"],
+            "plan_code": alliance["plan_code"], "platform_admin": True,
+        }
     actor = _member(conn, openid, alliance_id, roles={"admin", "leader"})
     if actor["plan_code"] not in {"free", "paid"}:
         raise AllianceOperationError("当前联盟的部落由系统配置，不能在小程序内修改", status_code=409)
@@ -305,11 +369,31 @@ def _managed_clan_actor(
             or (grant_expiry is not None and grant_expiry <= _now(now))
         ):
             raise AllianceOperationError("付费权益已到期，请先续期", status_code=409)
-    return actor
+    return {**dict(actor), "platform_admin": False}
 
 
-def list_managed_clans(conn: sqlite3.Connection, openid: str, alliance_id: int) -> dict:
-    member = _member(conn, openid, alliance_id)
+def list_managed_clans(
+    conn: sqlite3.Connection,
+    openid: str,
+    alliance_id: int,
+    *,
+    platform: bool = False,
+) -> dict:
+    if platform:
+        user = require_platform_admin(conn, openid)
+        alliance = conn.execute(
+            "SELECT name, status, plan_code FROM alliances WHERE id=?",
+            (int(alliance_id),),
+        ).fetchone()
+        if alliance is None or alliance["status"] == "archived":
+            raise AllianceOperationError("联盟不存在", status_code=404)
+        actor = {
+            "user_id": int(user["id"]), "role": "platform_admin",
+            "plan_code": alliance["plan_code"], "platform_admin": True,
+            "alliance_status": alliance["status"],
+        }
+    else:
+        actor = {**dict(_member(conn, openid, alliance_id)), "platform_admin": False}
     plan = conn.execute(
         """SELECT alliances.plan_code, plans.max_clans FROM alliances
            JOIN alliance_plans AS plans ON plans.plan_code=alliances.plan_code
@@ -337,14 +421,20 @@ def list_managed_clans(conn: sqlite3.Connection, openid: str, alliance_id: int) 
             or (grant_expiry is not None and grant_expiry <= _now())
         ):
             plan_allows_management = False
-    can_manage = member["role"] in {"admin", "leader"} and plan_allows_management
+    is_platform = bool(actor.get("platform_admin"))
+    can_manage = (is_platform and actor["alliance_status"] == "active") or (
+        actor["role"] in {"admin", "leader"} and plan_allows_management
+    )
     return {
-        "alliance_id": int(alliance_id), "actor_role": member["role"],
-        "plan_code": plan["plan_code"] if plan else member["plan_code"],
+        "alliance_id": int(alliance_id), "actor_role": actor["role"],
+        "plan_code": plan["plan_code"] if plan else actor["plan_code"],
         "max_clans": int(plan["max_clans"]) if plan else 1,
+        "unlimited": is_platform,
         "active_count": active_count,
         "can_manage": bool(can_manage),
-        "can_add": bool(can_manage and active_count < (int(plan["max_clans"]) if plan else 1)),
+        "can_add": bool((is_platform and can_manage) or (
+            can_manage and active_count < (int(plan["max_clans"]) if plan else 1)
+        )),
         "clans": [dict(row) for row in rows],
     }
 
@@ -357,9 +447,10 @@ def add_managed_clan(
     clan_tag: str,
     category: str,
     clan_name: str = "",
+    platform: bool = False,
     now: datetime | None = None,
 ) -> dict:
-    actor = _managed_clan_actor(conn, openid, alliance_id, now=now)
+    actor = _managed_clan_actor(conn, openid, alliance_id, platform=platform, now=now)
     tag = _clan_tag(clan_tag)
     selected_category = str(category or "").strip()
     if selected_category not in _CATEGORIES:
@@ -377,8 +468,31 @@ def add_managed_clan(
         "SELECT * FROM alliance_clans WHERE alliance_id=? AND clan_tag=?",
         (int(alliance_id), tag),
     ).fetchone()
+    if existing is not None and existing["status"] == "active":
+        raise AllianceOperationError("该部落已在当前联盟中", status_code=409)
+    active_count = int(conn.execute(
+        "SELECT COUNT(*) FROM alliance_clans WHERE alliance_id=? AND status='active'",
+        (int(alliance_id),),
+    ).fetchone()[0])
+    if not actor["platform_admin"]:
+        plan_limit = conn.execute(
+            """SELECT plans.max_clans FROM alliances
+               JOIN alliance_plans AS plans ON plans.plan_code=alliances.plan_code
+               WHERE alliances.id=?""",
+            (int(alliance_id),),
+        ).fetchone()
+        if plan_limit is None or active_count >= int(plan_limit["max_clans"]):
+            raise AllianceOperationError("已达到当前套餐的部落数量上限", status_code=409)
     try:
         with conn:
+            if actor["platform_admin"]:
+                conn.execute(
+                    """UPDATE alliances
+                       SET clan_limit_override=MAX(COALESCE(clan_limit_override, 0), ?),
+                           updated_at=?
+                       WHERE id=?""",
+                    (active_count + 1, timestamp, int(alliance_id)),
+                )
             if existing is None:
                 order = int(conn.execute(
                     "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM alliance_clans WHERE alliance_id=?",
@@ -393,8 +507,6 @@ def add_managed_clan(
                 )
                 action = "managed_clan_added"
             else:
-                if existing["status"] == "active":
-                    raise AllianceOperationError("该部落已在当前联盟中", status_code=409)
                 conn.execute(
                     """UPDATE alliance_clans SET clan_name=?, category=?, status='active',
                               verification_status='unverified', verified_by_user_id=NULL,
@@ -408,6 +520,13 @@ def add_managed_clan(
                 details={"clan_name": display_name, "category": selected_category},
                 timestamp=timestamp,
             )
+            if actor["platform_admin"]:
+                _platform_audit(
+                    conn, actor_user_id=int(actor["user_id"]), action=action,
+                    entity_type="alliance_clan", entity_id=tag,
+                    details={"alliance_id": int(alliance_id), "category": selected_category},
+                    timestamp=timestamp,
+                )
     except sqlite3.IntegrityError as exc:
         if "active clan limit" in str(exc):
             raise AllianceOperationError("已达到当前套餐的部落数量上限", status_code=409) from exc
@@ -425,9 +544,10 @@ def update_managed_clan(
     clan_tag: str,
     *,
     category: str,
+    platform: bool = False,
     now: datetime | None = None,
 ) -> dict:
-    actor = _managed_clan_actor(conn, openid, alliance_id, now=now)
+    actor = _managed_clan_actor(conn, openid, alliance_id, platform=platform, now=now)
     tag = _clan_tag(clan_tag)
     selected_category = str(category or "").strip()
     if selected_category not in _CATEGORIES:
@@ -450,6 +570,14 @@ def update_managed_clan(
             action="managed_clan_category_updated", entity_type="alliance_clan", entity_id=tag,
             details={"before": row["category"], "after": selected_category}, timestamp=timestamp,
         )
+        if actor["platform_admin"]:
+            _platform_audit(
+                conn, actor_user_id=int(actor["user_id"]),
+                action="managed_clan_category_updated", entity_type="alliance_clan",
+                entity_id=tag,
+                details={"alliance_id": int(alliance_id), "before": row["category"], "after": selected_category},
+                timestamp=timestamp,
+            )
     return {
         "clan_tag": tag, "clan_name": row["clan_name"], "category": selected_category,
         "verification_status": row["verification_status"], "status": "active",
@@ -462,9 +590,10 @@ def reorder_managed_clans(
     alliance_id: int,
     clan_tags: list[str],
     *,
+    platform: bool = False,
     now: datetime | None = None,
 ) -> dict:
-    actor = _managed_clan_actor(conn, openid, alliance_id, now=now)
+    actor = _managed_clan_actor(conn, openid, alliance_id, platform=platform, now=now)
     tags = [_clan_tag(tag) for tag in clan_tags]
     if len(tags) != len(set(tags)):
         raise AllianceOperationError("部落顺序中存在重复标签", status_code=422)
@@ -489,6 +618,12 @@ def reorder_managed_clans(
             action="managed_clans_reordered", entity_type="alliance_clan_order",
             details={"before": current_tags, "after": tags}, timestamp=timestamp,
         )
+        if actor["platform_admin"]:
+            _platform_audit(
+                conn, actor_user_id=int(actor["user_id"]), action="managed_clans_reordered",
+                entity_type="alliance_clan_order", entity_id=int(alliance_id),
+                details={"before": current_tags, "after": tags}, timestamp=timestamp,
+            )
     return {"clan_tags": tags}
 
 
@@ -498,9 +633,10 @@ def remove_managed_clan(
     alliance_id: int,
     clan_tag: str,
     *,
+    platform: bool = False,
     now: datetime | None = None,
 ) -> dict:
-    actor = _managed_clan_actor(conn, openid, alliance_id, now=now)
+    actor = _managed_clan_actor(conn, openid, alliance_id, platform=platform, now=now)
     tag = _clan_tag(clan_tag)
     row = conn.execute(
         """SELECT id, status, verification_status FROM alliance_clans
@@ -521,6 +657,13 @@ def remove_managed_clan(
             action="managed_clan_removed", entity_type="alliance_clan", entity_id=tag,
             details={"verification_before": row["verification_status"]}, timestamp=timestamp,
         )
+        if actor["platform_admin"]:
+            _platform_audit(
+                conn, actor_user_id=int(actor["user_id"]), action="managed_clan_removed",
+                entity_type="alliance_clan", entity_id=tag,
+                details={"alliance_id": int(alliance_id), "verification_before": row["verification_status"]},
+                timestamp=timestamp,
+            )
     return {"clan_tag": tag, "status": "removed"}
 
 

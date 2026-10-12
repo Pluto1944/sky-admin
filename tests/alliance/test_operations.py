@@ -5,13 +5,14 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from modules.alliance.access import resolve_alliance_context
-from modules.alliance.free_alliance import create_free_alliance, free_alliance_capability
+from modules.alliance.free_alliance import FreeAllianceError, create_free_alliance, free_alliance_capability
 from modules.alliance.migration import apply_sky_migration
 from modules.alliance.operations import (
     add_alliance_member_by_openid,
     add_managed_clan,
     AllianceOperationError,
     archive_suspended_alliance,
+    create_platform_alliance,
     create_share_link,
     delete_browsing_history,
     free_registration_policy,
@@ -109,19 +110,28 @@ def test_public_free_registration_is_capacity_controlled(ops):
     assert free_alliance_capability(db.conn, "blocked")["can_create"] is False
 
 
-def test_platform_admin_can_create_multiple_free_alliances(ops):
+def test_platform_admin_dropdown_still_allows_only_one_free_alliance(ops):
     db, _ = ops
     first = create_free_alliance(db.conn, "operator", name="平台测试一", now=NOW)
     capability = free_alliance_capability(db.conn, "operator")
-    assert capability["unlimited"] is True
-    assert capability["can_create"] is True
-    second = create_free_alliance(db.conn, "operator", name="平台测试二", now=NOW)
-    assert first != second
+    assert first > 0
+    assert capability["unlimited"] is False
+    assert capability["can_create"] is False
+    with pytest.raises(FreeAllianceError, match="只能创建一个"):
+        create_free_alliance(db.conn, "operator", name="平台测试二", now=NOW)
+
+
+def test_platform_admin_can_create_multiple_alliances_only_via_platform_operation(ops):
+    db, _ = ops
+    first = create_platform_alliance(db.conn, "operator", "平台一", now=NOW)
+    second = create_platform_alliance(db.conn, "operator", "平台二", now=NOW)
+    assert first["alliance_id"] != second["alliance_id"]
     assert db.conn.execute(
         """SELECT COUNT(*) FROM alliances
            WHERE created_by_user_id=(SELECT id FROM wechat_users WHERE openid='operator')
              AND status='active'"""
     ).fetchone()[0] == 2
+    assert free_alliance_capability(db.conn, "operator")["can_create"] is False
 
 
 def test_share_join_is_member_only_idempotent_and_blocked_users_stay_blocked(ops):
@@ -491,6 +501,48 @@ def test_paid_manager_can_reorder_active_clans(ops):
     ).fetchall()] == ["#9PY", "#2QQ"]
     with pytest.raises(AllianceOperationError, match="全部有效部落"):
         reorder_managed_clans(db.conn, "owner", alliance_id, ["#2QQ"], now=NOW)
+
+
+def test_platform_admin_manages_any_alliance_without_plan_clan_limit(ops):
+    db, ids = ops
+    alliance_id = _alliance(db, ids["owner"], "platform-unlimited", plan="free")
+    first = add_managed_clan(
+        db.conn, "operator", alliance_id, clan_tag="#2QQ", category="combat",
+        platform=True, now=NOW,
+    )
+    second = add_managed_clan(
+        db.conn, "operator", alliance_id, clan_tag="#9PY", category="farm",
+        platform=True, now=NOW,
+    )
+    assert first["clan_tag"] == "#2QQ"
+    assert second["clan_tag"] == "#9PY"
+    listed = list_managed_clans(db.conn, "operator", alliance_id, platform=True)
+    assert listed["actor_role"] == "platform_admin"
+    assert listed["unlimited"] is True
+    assert listed["can_add"] is True
+    assert listed["active_count"] == 2
+    assert db.conn.execute(
+        "SELECT clan_limit_override FROM alliances WHERE id=?", (alliance_id,),
+    ).fetchone()[0] == 2
+    with pytest.raises(AllianceOperationError, match="套餐"):
+        add_managed_clan(
+            db.conn, "owner", alliance_id, clan_tag="#8PR", category="normal", now=NOW,
+        )
+    update_managed_clan(
+        db.conn, "operator", alliance_id, "#9PY", category="flat",
+        platform=True, now=NOW,
+    )
+    reorder_managed_clans(
+        db.conn, "operator", alliance_id, ["#9PY", "#2QQ"],
+        platform=True, now=NOW,
+    )
+    remove_managed_clan(
+        db.conn, "operator", alliance_id, "#2QQ", platform=True, now=NOW,
+    )
+    assert db.conn.execute(
+        "SELECT category FROM alliance_clans WHERE alliance_id=? AND clan_tag='#9PY'",
+        (alliance_id,),
+    ).fetchone()[0] == "flat"
 
 
 def test_internal_or_member_cannot_manage_alliance_clans(ops):

@@ -19,7 +19,7 @@ from modules.sync_queue.config import active_live_resource_types
 from modules.sync_queue.planner import SyncPlanner
 from modules.sync_queue.repository import SyncQueueError, SyncQueueRepository
 
-from .operations import free_registration_policy, platform_admin_capability
+from .operations import free_registration_policy
 
 
 FREE_CATEGORIES = ("normal", "combat", "farm", "flat")
@@ -90,24 +90,23 @@ def free_alliance_capability(conn: sqlite3.Connection, openid: str) -> dict:
         ).fetchone()
     enabled = _enabled()
     policy = free_registration_policy(conn)
-    platform_admin = platform_admin_capability(conn, openid)["allowed"]
     internal_allowed = openid in _allowlist()
     public_allowed = policy["public_open"] and policy["has_capacity"]
-    allowed = enabled and (platform_admin or internal_allowed or public_allowed or bool(
+    allowed = enabled and (internal_allowed or public_allowed or bool(
         active_existing is not None
     ))
     return {
         "enabled": enabled,
         "allowed": allowed,
-        "mode": "platform" if platform_admin else (
-            "internal" if internal_allowed else ("public" if policy["public_open"] else "closed")
+        "mode": "internal" if internal_allowed else (
+            "public" if policy["public_open"] else "closed"
         ),
-        "unlimited": bool(platform_admin),
+        "unlimited": False,
         "public_open": policy["public_open"],
         "registration_limit": policy["limit"],
         "registration_remaining": policy["remaining"],
         "can_create": bool(
-            allowed and user is not None and (platform_admin or active_existing is None)
+            allowed and user is not None and active_existing is None
         ),
         "existing_alliance_id": int(existing["id"]) if existing else None,
         "existing_status": existing["status"] if existing else None,
