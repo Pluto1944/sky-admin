@@ -288,6 +288,94 @@ export function archiveFreeAlliance(allianceId) {
   return request(`/api/alliances/${encodeURIComponent(allianceId)}`, 'DELETE', {}, true)
 }
 
+export function getAllianceVerification(allianceId) {
+  return request(`/api/alliances/${encodeURIComponent(allianceId)}/verification`, 'GET', {}, true)
+}
+
+export function getAllianceManagedClans(allianceId) {
+  return request(`/api/alliances/${encodeURIComponent(allianceId)}/managed-clans`, 'GET', {}, true)
+}
+
+export function addAllianceManagedClan(allianceId, payload) {
+  return request(`/api/alliances/${encodeURIComponent(allianceId)}/managed-clans`, 'POST', payload, true)
+}
+
+export function removeAllianceManagedClan(allianceId, clanTag) {
+  return request(`/api/alliances/${encodeURIComponent(allianceId)}/managed-clans/${encodeURIComponent(clanTag)}`, 'DELETE', {}, true)
+}
+
+export function createAllianceShare(allianceId, expiresDays = 30) {
+  return request(`/api/alliances/${encodeURIComponent(allianceId)}/shares`, 'POST', { expires_days: expiresDays }, true)
+}
+
+export function getAllianceShares(allianceId) {
+  return request(`/api/alliances/${encodeURIComponent(allianceId)}/shares`, 'GET', {}, true)
+}
+
+export function revokeAllianceShare(allianceId, linkId) {
+  return request(`/api/alliances/${encodeURIComponent(allianceId)}/shares/${encodeURIComponent(linkId)}`, 'DELETE', {}, true)
+}
+
+export function previewAllianceShare(token) {
+  return request('/api/alliance-shares/preview', 'POST', { token })
+}
+
+export function joinAllianceShare(token) {
+  return request('/api/alliance-shares/join', 'POST', { token }, true)
+}
+
+export function getAllianceUserMembers(allianceId) {
+  return request(`/api/alliances/${encodeURIComponent(allianceId)}/user-members`, 'GET', {}, true)
+}
+
+export function updateAllianceUserRole(allianceId, memberId, role) {
+  return request(`/api/alliances/${encodeURIComponent(allianceId)}/user-members/${encodeURIComponent(memberId)}`, 'PATCH', { role }, true)
+}
+
+export function removeAllianceUser(allianceId, memberId, block = false) {
+  return request(`/api/alliances/${encodeURIComponent(allianceId)}/user-members/${encodeURIComponent(memberId)}?block=${block ? 'true' : 'false'}`, 'DELETE', {}, true)
+}
+
+export function leaveAlliance(allianceId) {
+  return request(`/api/alliances/${encodeURIComponent(allianceId)}/leave`, 'POST', {}, true)
+}
+
+export function getPlatformCapability() {
+  return request('/api/platform/capability', 'GET', {}, true)
+}
+
+export function getPlatformAlliances(search = '') {
+  const query = search ? `?search=${encodeURIComponent(search)}` : ''
+  return request(`/api/platform/alliances${query}`, 'GET', {}, true)
+}
+
+export function getPlatformAlliance(allianceId) {
+  return request(`/api/platform/alliances/${encodeURIComponent(allianceId)}`, 'GET', {}, true)
+}
+
+export function savePlatformFreeRegistration(enabled, limit) {
+  return request('/api/platform/settings/free-registration', 'PUT', {
+    free_registration_enabled: Boolean(enabled),
+    free_registration_limit: Number(limit)
+  }, true)
+}
+
+export function savePlatformVerification(allianceId, clanTag, status, note = '') {
+  return request(`/api/platform/alliances/${encodeURIComponent(allianceId)}/verification`, 'PUT', {
+    clan_tag: clanTag, status, note
+  }, true)
+}
+
+export function savePlatformPlan(allianceId, planCode, expiresAt, note = '') {
+  return request(`/api/platform/alliances/${encodeURIComponent(allianceId)}/plan`, 'PUT', {
+    plan_code: planCode, expires_at: expiresAt || null, note
+  }, true)
+}
+
+export function savePlatformAllianceStatus(allianceId, status, note = '') {
+  return request(`/api/platform/alliances/${encodeURIComponent(allianceId)}/status`, 'PUT', { status, note }, true)
+}
+
 /**
  * 绑定游戏账号
  * @param {string} accountName - 游戏内昵称

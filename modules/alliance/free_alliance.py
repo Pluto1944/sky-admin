@@ -19,6 +19,8 @@ from modules.sync_queue.config import active_live_resource_types
 from modules.sync_queue.planner import SyncPlanner
 from modules.sync_queue.repository import SyncQueueError, SyncQueueRepository
 
+from .operations import free_registration_policy
+
 
 FREE_CATEGORIES = ("normal", "combat", "farm", "flat")
 FREE_CATEGORY_LABELS = {
@@ -49,7 +51,11 @@ def _iso(value: datetime | None = None) -> str:
 
 
 def _enabled() -> bool:
-    return os.getenv("M5_FREE_ALLIANCE_ENABLED", "false").strip().lower() in {
+    raw = os.getenv(
+        "ALLIANCE_FREE_ENABLED",
+        os.getenv("M5_FREE_ALLIANCE_ENABLED", "false"),
+    )
+    return raw.strip().lower() in {
         "1", "true", "yes", "on",
     }
 
@@ -63,7 +69,7 @@ def _allowlist() -> set[str]:
 
 
 def free_alliance_capability(conn: sqlite3.Connection, openid: str) -> dict:
-    """Return an internal-gray capability without exposing the allowlist."""
+    """Return gray/public free registration capability without exposing allowlists."""
     user = conn.execute(
         "SELECT id FROM wechat_users WHERE openid = ?", (openid,),
     ).fetchone()
@@ -76,10 +82,19 @@ def free_alliance_capability(conn: sqlite3.Connection, openid: str) -> dict:
             (user["id"],),
         ).fetchone()
     enabled = _enabled()
-    allowed = enabled and openid in _allowlist()
+    policy = free_registration_policy(conn)
+    internal_allowed = openid in _allowlist()
+    public_allowed = policy["public_open"] and policy["has_capacity"]
+    allowed = enabled and (internal_allowed or public_allowed or bool(
+        existing is not None and existing["status"] == "active"
+    ))
     return {
         "enabled": enabled,
         "allowed": allowed,
+        "mode": "internal" if internal_allowed else ("public" if policy["public_open"] else "closed"),
+        "public_open": policy["public_open"],
+        "registration_limit": policy["limit"],
+        "registration_remaining": policy["remaining"],
         "can_create": bool(allowed and user is not None and not (
             existing is not None and existing["status"] == "active"
         )),
@@ -176,7 +191,7 @@ def create_free_alliance(
 ) -> int:
     capability = free_alliance_capability(conn, openid)
     if not capability["allowed"]:
-        raise FreeAllianceError("免费联盟目前仅对内部测试账号开放", status_code=403)
+        raise FreeAllianceError("免费联盟注册暂未开放或当前名额已满", status_code=403)
     if not capability["can_create"]:
         raise FreeAllianceError("每个用户只能创建一个有效的免费联盟", status_code=409)
     user = conn.execute(

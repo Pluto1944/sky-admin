@@ -74,6 +74,8 @@ class AllianceContext:
     sync_tier: str
     max_clans: int
     entitlements: dict
+    entitlement_status: str
+    entitlement_expires_at: str | None
     clans: tuple[AllianceClanAccess, ...]
 
     @property
@@ -110,6 +112,8 @@ class AllianceContext:
                 "sync_tier": self.sync_tier,
                 "max_clans": self.max_clans,
                 "entitlements": self.entitlements,
+                "status": self.entitlement_status,
+                "expires_at": self.entitlement_expires_at,
             },
             "clan_count": len(self.clans),
             "verified_clan_count": verified_count,
@@ -202,7 +206,23 @@ def _context_rows(
                    alliances.id AS alliance_id, alliances.alliance_key,
                    alliances.name AS alliance_name, members.role,
                    plans.plan_code, plans.display_name AS plan_name,
-                   plans.sync_tier, plans.max_clans, plans.entitlements_json
+                   CASE
+                     WHEN alliances.plan_code='paid' AND grants.id IS NOT NULL
+                      AND (grants.status!='active' OR
+                           (grants.expires_at IS NOT NULL AND datetime(grants.expires_at) <= datetime('now')))
+                     THEN 'low' ELSE plans.sync_tier
+                   END AS sync_tier,
+                   plans.max_clans, plans.entitlements_json,
+                   CASE
+                     WHEN grants.id IS NULL THEN
+                       CASE WHEN alliances.plan_code='paid' THEN 'legacy' ELSE 'active' END
+                     WHEN grants.status='active' AND
+                          (grants.expires_at IS NULL OR datetime(grants.expires_at) > datetime('now'))
+                     THEN 'active'
+                     WHEN grants.status='revoked' THEN 'revoked'
+                     ELSE 'expired'
+                   END AS entitlement_status,
+                   grants.expires_at AS entitlement_expires_at
             FROM wechat_users AS users
             JOIN alliance_members AS members
               ON members.user_id = users.id AND members.status = 'active'
@@ -210,6 +230,9 @@ def _context_rows(
               ON alliances.id = members.alliance_id AND alliances.status = 'active'
             JOIN alliance_plans AS plans
               ON plans.plan_code = alliances.plan_code AND plans.status = 'active'
+            LEFT JOIN alliance_plan_grants AS grants
+              ON grants.id=(SELECT MAX(g.id) FROM alliance_plan_grants AS g
+                            WHERE g.alliance_id=alliances.id)
             WHERE users.openid = ?{selected}
             ORDER BY CASE members.role
                          WHEN 'leader' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,
@@ -268,6 +291,8 @@ def _build_context(conn: sqlite3.Connection, row: sqlite3.Row) -> AllianceContex
         sync_tier=row["sync_tier"],
         max_clans=int(row["max_clans"]),
         entitlements=_load_json(row["entitlements_json"]),
+        entitlement_status=row["entitlement_status"],
+        entitlement_expires_at=row["entitlement_expires_at"],
         clans=_clans_for_context(conn, alliance_id, role),
     )
 

@@ -1052,7 +1052,16 @@ def _player_detail_clan_tags(db: Database) -> set[str]:
                JOIN alliances ON alliances.id=clans.alliance_id AND alliances.status='active'
                JOIN alliance_plans AS plans
                  ON plans.plan_code=alliances.plan_code AND plans.status='active'
-               WHERE clans.status='active' AND plans.sync_tier IN ('high','internal')"""
+               LEFT JOIN alliance_plan_grants AS grants
+                 ON grants.id=(SELECT MAX(g.id) FROM alliance_plan_grants AS g
+                               WHERE g.alliance_id=alliances.id)
+               WHERE clans.status='active'
+                 AND plans.sync_tier IN ('high','internal')
+                 AND NOT (
+                   alliances.plan_code='paid' AND grants.id IS NOT NULL
+                   AND (grants.status!='active' OR
+                        (grants.expires_at IS NOT NULL AND datetime(grants.expires_at) <= datetime('now')))
+                 )"""
         ).fetchall()
     }
     result.update(

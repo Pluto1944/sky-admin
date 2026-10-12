@@ -22,6 +22,7 @@ api_server/
 ├── deps.py            # 依赖注入（Database、PlayerRepository 单例）
 ├── routes.py          # 迁移期遗留单联盟 API
 ├── alliance_routes.py # M2 带联盟上下文和字段权限的新 API
+├── alliance_operations_routes.py # M6-M9 分享、人工认证、成员/套餐与平台运营 API
 └── __init__.py
 ```
 
@@ -464,8 +465,9 @@ DELETE /api/alliances/{alliance_id}
 修改 URL 中的 `alliance_id` 或 `clan_tag` 不能越过当前用户的有效联盟和订阅部落范围，
 无权访问统一返回 `404`，避免枚举其他联盟。
 
-M5 免费联盟写接口由 `M5_FREE_ALLIANCE_ENABLED=true` 与
-`M5_FREE_ALLIANCE_OPENIDS` 双重控制；未进入内部白名单的登录用户不会得到创建能力。创建者是联盟
+免费联盟写接口首先受 `ALLIANCE_FREE_ENABLED=true`（兼容旧名 `M5_FREE_ALLIANCE_ENABLED`）
+环境总开关控制。内部测试账号可由 `M5_FREE_ALLIANCE_OPENIDS` 允许；外部用户还必须满足平台后台
+`free_registration_enabled=true` 且未达到总配额。创建者是联盟
 首领，但新订阅部落固定为 `unverified`，因此业务数据权限仍封顶为成员。免费联盟最多一个部落，
 首版只允许修改同一部落的 `normal / combat / farm / flat` 标签，不允许在原联盟中自由替换 Tag。
 删除为可审计软删除，不清理公共缓存或历史。
@@ -492,8 +494,9 @@ M5 免费联盟写接口由 `M5_FREE_ALLIANCE_ENABLED=true` 与
 `combat_clans` 供后续多战营切换；没有战营部落时返回空统计，不回退到固定 `#2QQ` 或苍穹配置。
 该接口与普通战历史接口都只读 `war_history_cache`、`member_war_facts` 和成员快照。
 
-当前战争和当前月 CWL 属于协作数据，联盟成员可见。历史月份 CWL 和滚动联赛统计属于评价数据，
-要求联盟管理员或首领权限。联盟查询接口只读 SQLite 缓存；M5 写接口只写联盟关系、审计和持久化
+当前战争和当前月 CWL 属于协作数据，联盟成员可见。普通战成员历史、历史月份 CWL 和滚动联赛
+统计属于评价数据，要求联盟管理员或首领权限，且至少存在对应已认证部落。互刷接口对普通成员和
+未认证管理隐藏填坑号、不活跃与踢人候选。联盟查询接口只读 SQLite 缓存；写接口只写联盟关系、审计和持久化
 队列，也不在请求路径调用 COC。
 
 月度 CWL 队伍来自 `alliance_cwl_seasons`、`alliance_cwl_teams`，不要求出现在日常
@@ -516,6 +519,45 @@ M5 免费联盟写接口由 `M5_FREE_ALLIANCE_ENABLED=true` 与
 - `404` — 联盟、成员关系或订阅部落不在当前用户范围；
 - `409` — 免费联盟配额、生命周期或不允许的部落替换发生冲突；
 - `422` — 分页或查询参数不合法。
+
+### 5.1 分享、人工认证、成员和平台运营接口（M6～M9）
+
+```text
+POST   /api/alliance-shares/preview
+POST   /api/alliance-shares/join
+GET    /api/alliances/{alliance_id}/verification
+GET    /api/alliances/{alliance_id}/managed-clans
+POST   /api/alliances/{alliance_id}/managed-clans
+DELETE /api/alliances/{alliance_id}/managed-clans/{clan_tag}
+GET    /api/alliances/{alliance_id}/shares
+POST   /api/alliances/{alliance_id}/shares
+DELETE /api/alliances/{alliance_id}/shares/{link_id}
+GET    /api/alliances/{alliance_id}/user-members
+PATCH  /api/alliances/{alliance_id}/user-members/{member_id}
+DELETE /api/alliances/{alliance_id}/user-members/{member_id}
+POST   /api/alliances/{alliance_id}/leave
+
+GET /api/platform/capability
+GET /api/platform/alliances
+GET /api/platform/alliances/{alliance_id}
+PUT /api/platform/settings/free-registration
+PUT /api/platform/alliances/{alliance_id}/verification
+PUT /api/platform/alliances/{alliance_id}/plan
+PUT /api/platform/alliances/{alliance_id}/status
+```
+
+分享预览是唯一无需 JWT 的新接口，只返回联盟名称、套餐名称、部落数量和过期时间，不创建成员、
+不提交同步任务。令牌在 POST JSON 中传入，不放在 API URL；登录加入固定创建 `member`，不会继承
+分享者角色。被移除或封禁用户不能通过分享恢复。
+
+`verification` 用户接口只返回人工处理说明和当前状态。“申请部落认证”按钮不会调用验证码或自动
+认证接口。只有平台管理员可通过平台接口设置 `verified / disputed / revoked / unverified`；平台
+管理员来源为 `platform_admins`、`ALLIANCE_PLATFORM_ADMIN_OPENIDS`，迁移期可由 M5 内部白名单引导，
+任何平台权限都不会替代联盟成员关系和逐部落业务权限。
+
+联盟成员列表仅 `admin / leader` 可读且不返回 OpenID。首领可以调整管理员或移交首领；管理员只能
+移除普通成员。普通成员和管理员可主动退出；首领必须先移交。付费联盟只有有效权益下的管理员/首领可添加最多 10 个部落，新增部落默认未认证并
+通过 M4 队列初始化。平台套餐接口是人工运营入口，不是在线支付接口。
 
 ### 6. 绑定游戏账号
 

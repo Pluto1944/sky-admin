@@ -13,6 +13,7 @@ from shared.config.env_loader import load_env
 from shared.runtime_identity import capture_runtime_identity
 from .routes import router
 from .alliance_routes import router as alliance_router
+from .alliance_operations_routes import router as alliance_operations_router
 from .farm_system_routes import router as farm_system_router
 
 # 加载 .env 到 os.environ（必须在 create_app 之前）
@@ -51,6 +52,7 @@ def create_app() -> FastAPI:
 
     app.include_router(router)
     app.include_router(alliance_router)
+    app.include_router(alliance_operations_router)
     app.include_router(farm_system_router)
 
     return app

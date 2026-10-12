@@ -31,14 +31,14 @@
               <text class="account-id-label">账号标识</text>
               <text class="account-id-tip">仅用于运营方核对身份</text>
             </view>
-            <button class="openid-copy" size="mini" @tap="copyOpenId">复制</button>
+            <button class="openid-copy" size="mini" @tap="copyOpenId">复制OpenID</button>
           </view>
         </view>
 
         <template v-if="showFreeAllianceSection">
           <view class="section-heading">
             <text class="section-heading-title">我的部落</text>
-            <text class="free-gray-badge">内部测试</text>
+            <text class="free-gray-badge">{{ freeAllianceBadge }}</text>
           </view>
 
           <view class="free-alliance-card">
@@ -133,6 +133,24 @@
         <view class="menu-section">
           <view class="menu-title">其他管理</view>
           <view class="menu-list">
+            <view class="menu-item" @tap="openAllianceManagement">
+              <view class="menu-icon menu-icon-alliance">盟</view>
+              <view class="menu-copy">
+                <text class="menu-text">联盟管理</text>
+                <text class="menu-desc">认证状态、成员和分享加入</text>
+              </view>
+              <text class="menu-arrow">›</text>
+            </view>
+            <view class="menu-divider"></view>
+            <view v-if="isPlatformAdmin" class="menu-item" @tap="openPlatformManagement">
+              <view class="menu-icon menu-icon-platform">台</view>
+              <view class="menu-copy">
+                <text class="menu-text">平台管理</text>
+                <text class="menu-desc">人工认证、套餐与开放配额</text>
+              </view>
+              <text class="menu-arrow">›</text>
+            </view>
+            <view v-if="isPlatformAdmin" class="menu-divider"></view>
             <view v-if="canManageAlliance" class="menu-item" @tap="openCwlSettings">
               <view class="menu-icon menu-icon-league">赛</view>
               <view class="menu-copy">
@@ -272,7 +290,7 @@ import {
   saveFreeAllianceSubscription,
   wechatLogin
 } from '@/utils/api.js'
-import { clearAllianceContext, getCurrentAlliance, loadAllianceContext } from '@/utils/alliance.js'
+import { acceptPendingAllianceShare, clearAllianceContext, getCurrentAlliance, loadAllianceContext } from '@/utils/alliance.js'
 import { APP_VERSION } from '@/config/release.js'
 
 export default {
@@ -310,6 +328,13 @@ export default {
       const alliance = getCurrentAlliance()
       return alliance && ['admin', 'leader'].indexOf(alliance.role) >= 0
     },
+    isPlatformAdmin() {
+      return Boolean(this.allianceFeatures.platform_admin && this.allianceFeatures.platform_admin.allowed)
+    },
+    freeAllianceBadge() {
+      const feature = this.allianceFeatures.free_alliance || {}
+      return feature.public_open ? '免费版' : '内部测试'
+    },
     showFreeAllianceSection() {
       const feature = this.allianceFeatures.free_alliance || {}
       return Boolean(this.freeAlliance || feature.allowed)
@@ -331,6 +356,16 @@ export default {
     this.stopFreeStatusPoll()
   },
   methods: {
+    openAllianceManagement() {
+      if (!getCurrentAlliance()) {
+        uni.showToast({ title: '请先创建或加入联盟', icon: 'none' })
+        return
+      }
+      uni.navigateTo({ url: '/pages/settings/alliance-management' })
+    },
+    openPlatformManagement() {
+      uni.navigateTo({ url: '/pages/settings/platform-management' })
+    },
     openCwlSettings() {
       uni.navigateTo({ url: '/pages/settings/cwl-settings' })
     },
@@ -348,7 +383,16 @@ export default {
             // 预填已有信息
             if (res.account_name) this.bindAccountName = res.account_name
             if (res.player_tag) this.bindPlayerTag = res.player_tag
-            this.refreshFreeAlliancePanel()
+            acceptPendingAllianceShare()
+              .then((joined) => {
+                if (joined && joined.alliance) {
+                  uni.showToast({ title: `已加入${joined.alliance.name}`, icon: 'success' })
+                }
+              })
+              .catch((err) => {
+                uni.showToast({ title: err.message || '加入联盟失败', icon: 'none' })
+              })
+              .finally(() => this.refreshFreeAlliancePanel())
           })
           .catch(() => {
             this.isLoggedIn = false
@@ -382,7 +426,14 @@ export default {
               this.userInfo = res.user
               getApp().globalData.isLoggedIn = true
               getApp().globalData.userInfo = res.user
-              loadAllianceContext(null, true).catch(() => {})
+              loadAllianceContext(null, true)
+                .then(() => acceptPendingAllianceShare())
+                .then((joined) => {
+                  if (joined && joined.alliance) {
+                    uni.showToast({ title: `已加入${joined.alliance.name}`, icon: 'success' })
+                  }
+                })
+                .catch(() => {})
               this.loginLoading = false
 
               uni.showToast({ title: '登录成功', icon: 'success', duration: 1500 })

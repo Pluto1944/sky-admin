@@ -36,6 +36,11 @@
 | 联盟部落 | `alliance_clans` | `(alliance_id, clan_tag)` | 联盟订阅部落、业务标签、显示顺序和认证摘要 |
 | 联盟访问 | `alliance_visits` | `(alliance_id, user_id)` | 最近访问及默认联盟；访问记录本身不授予成员权限 |
 | 联盟审计 | `alliance_audit_events` | `id` / `event_key` | 联盟迁移及后续管理动作的幂等审计记录 |
+| 联盟邀请 | `alliance_share_links` | `id` / `token_hash` | 只保存邀请令牌摘要、来源联盟、创建者、状态、次数和过期时间 |
+| 联盟权益 | `alliance_plan_grants` | `id` | 人工套餐开通、开始/到期、状态、操作人和备注 |
+| 平台管理员 | `platform_admins` | `user_id` | 平台后台授权；不改变用户在各联盟中的角色 |
+| 平台设置 | `platform_settings` | `setting_key` | 免费注册开关、总配额等平台级安全设置 |
+| 平台审计 | `platform_audit_events` | `id` / `event_key` | 人工认证、套餐、联盟状态和平台设置操作 |
 | 联盟 CWL 月份 | `alliance_cwl_seasons` | `(alliance_id, period)` | 联盟月度联赛配置与生命周期 |
 | 联盟 CWL 队伍 | `alliance_cwl_teams` | `(season_id, team_index)` / `(season_id, clan_tag)` | 当月队伍、类别、顺序和来源 |
 | 都城贡献 | `capital_raid_member_results` | `(clan_tag, start_time, player_tag)` | 突袭周末成员事实 |
@@ -53,7 +58,7 @@
 
 `capital_raid_status_cache` 与都城成员贡献事实分离：它每个自有部落只保留一行最近周末状态，服务概览卡片的开启提醒，不保存成员明细。同步失败只更新错误与尝试时间，已有同周状态不会被空结果覆盖。
 
-## 联盟租户底座（M1–M5）
+## 联盟租户底座（M1–M9）
 
 M1 数据模型、M2 后端访问控制和 M3 小程序联盟切换均已实现。`config/settings.yaml` 继续作为苍穹
 遗留任务与编排流程的兼容来源；登录后的联盟页面以 `alliance_members`、`alliance_clans` 和联盟月度
@@ -67,6 +72,15 @@ CWL 配置作为范围与权限依据。公共 COC 事实仍按全局 Tag 保存
 - 部落数量约束由 SQLite trigger 执行，新增部落、重新启用部落、切换套餐或降低套餐配额都不能绕过；
 - `alliance_visits` 只记录入口和默认选择，不能替代 `alliance_members`；
 - `alliance_audit_events.event_key` 用于让同一份迁移清单重复应用时不产生重复审计。
+- 同一部落可被多个联盟未认证订阅；`alliance_clans` 的插入/更新 trigger 和联盟从暂停恢复为
+  `active` 时的 trigger 共同保证同一时间最多一个有效联盟拥有 `verified` 关系。历史遗留冲突不由迁移静默覆盖，
+  平台后台会列出供人工处理；
+- `alliance_share_links` 只存 SHA-256 摘要，原始令牌仅创建时返回；过期、撤销、被移除或封禁的
+  用户不能依赖旧链接恢复权限；
+- `alliance_plan_grants` 与 `alliances.plan_code` 分工：前者记录人工权益生命周期，后者选择套餐模板。
+  付费到期后权益状态变为 `expired`，额外部落转为 `inactive`，但联盟关系、审计和公共事实不删除；
+- `platform_admins`、环境白名单和平台设置都不赋予联盟角色。平台 API 仍单独检查平台管理员身份，
+  联盟业务 API 继续检查 `alliance_members` 和逐部落认证。
 
 M5 不新增一套“免费部落事实表”。免费联盟继续写上述核心表：创建者写为唯一有效 `leader`，
 订阅部落写入 `alliance_clans` 且保持 `unverified`，创建、改名、订阅/改标签、手动刷新和软删除均写

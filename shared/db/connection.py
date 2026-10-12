@@ -211,6 +211,57 @@ CREATE TABLE IF NOT EXISTS alliance_clans (
 CREATE INDEX IF NOT EXISTS idx_alliance_clans_tag_status
 ON alliance_clans(clan_tag, status);
 
+CREATE TRIGGER IF NOT EXISTS trg_alliance_clans_one_verified_insert
+BEFORE INSERT ON alliance_clans
+WHEN NEW.status = 'active' AND NEW.verification_status = 'verified'
+BEGIN
+    SELECT CASE WHEN EXISTS (
+        SELECT 1 FROM alliance_clans AS existing
+        JOIN alliances ON alliances.id = existing.alliance_id
+        WHERE existing.clan_tag = NEW.clan_tag
+          AND existing.status = 'active'
+          AND existing.verification_status = 'verified'
+          AND alliances.status = 'active'
+          AND existing.alliance_id != NEW.alliance_id
+    ) THEN RAISE(ABORT, 'clan already verified by another alliance') END;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_alliance_clans_one_verified_update
+BEFORE UPDATE OF alliance_id, clan_tag, status, verification_status ON alliance_clans
+WHEN NEW.status = 'active' AND NEW.verification_status = 'verified'
+BEGIN
+    SELECT CASE WHEN EXISTS (
+        SELECT 1 FROM alliance_clans AS existing
+        JOIN alliances ON alliances.id = existing.alliance_id
+        WHERE existing.clan_tag = NEW.clan_tag
+          AND existing.status = 'active'
+          AND existing.verification_status = 'verified'
+          AND alliances.status = 'active'
+          AND existing.id != OLD.id
+    ) THEN RAISE(ABORT, 'clan already verified by another alliance') END;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_alliances_one_verified_on_activate
+BEFORE UPDATE OF status ON alliances
+WHEN NEW.status = 'active' AND OLD.status != 'active'
+BEGIN
+    SELECT CASE WHEN EXISTS (
+        SELECT 1
+        FROM alliance_clans AS mine
+        JOIN alliance_clans AS other
+          ON other.clan_tag = mine.clan_tag
+         AND other.alliance_id != mine.alliance_id
+         AND other.status = 'active'
+         AND other.verification_status = 'verified'
+        JOIN alliances AS other_alliance
+          ON other_alliance.id = other.alliance_id
+         AND other_alliance.status = 'active'
+        WHERE mine.alliance_id = NEW.id
+          AND mine.status = 'active'
+          AND mine.verification_status = 'verified'
+    ) THEN RAISE(ABORT, 'verified clan conflict on alliance activation') END;
+END;
+
 CREATE TRIGGER IF NOT EXISTS trg_alliance_clans_active_limit_insert
 BEFORE INSERT ON alliance_clans
 WHEN NEW.status = 'active'
@@ -300,6 +351,84 @@ CREATE TABLE IF NOT EXISTS alliance_audit_events (
 
 CREATE INDEX IF NOT EXISTS idx_alliance_audit_alliance_created
 ON alliance_audit_events(alliance_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS alliance_share_links (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    token_hash         TEXT NOT NULL UNIQUE,
+    alliance_id        INTEGER NOT NULL,
+    created_by_user_id INTEGER NOT NULL,
+    visibility         TEXT NOT NULL DEFAULT 'member'
+                       CHECK(visibility IN ('member', 'public')),
+    status             TEXT NOT NULL DEFAULT 'active'
+                       CHECK(status IN ('active', 'revoked', 'expired')),
+    expires_at         TEXT NOT NULL,
+    use_count          INTEGER NOT NULL DEFAULT 0 CHECK(use_count >= 0),
+    last_used_at       TEXT,
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL,
+    FOREIGN KEY(alliance_id) REFERENCES alliances(id) ON DELETE CASCADE,
+    FOREIGN KEY(created_by_user_id) REFERENCES wechat_users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_alliance_share_links_alliance_status
+ON alliance_share_links(alliance_id, status, expires_at);
+
+CREATE TABLE IF NOT EXISTS alliance_plan_grants (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    alliance_id        INTEGER NOT NULL,
+    plan_code          TEXT NOT NULL,
+    status             TEXT NOT NULL DEFAULT 'active'
+                       CHECK(status IN ('active', 'expired', 'revoked')),
+    starts_at          TEXT NOT NULL,
+    expires_at         TEXT,
+    granted_by_user_id INTEGER,
+    note               TEXT,
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL,
+    FOREIGN KEY(alliance_id) REFERENCES alliances(id) ON DELETE CASCADE,
+    FOREIGN KEY(plan_code) REFERENCES alliance_plans(plan_code),
+    FOREIGN KEY(granted_by_user_id) REFERENCES wechat_users(id) ON DELETE SET NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_alliance_plan_grants_one_active
+ON alliance_plan_grants(alliance_id)
+WHERE status = 'active';
+
+CREATE INDEX IF NOT EXISTS idx_alliance_plan_grants_expiry
+ON alliance_plan_grants(status, expires_at);
+
+CREATE TABLE IF NOT EXISTS platform_admins (
+    user_id     INTEGER PRIMARY KEY,
+    status      TEXT NOT NULL DEFAULT 'active'
+                CHECK(status IN ('active', 'revoked')),
+    note        TEXT,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    FOREIGN KEY(user_id) REFERENCES wechat_users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS platform_settings (
+    setting_key TEXT PRIMARY KEY,
+    value_json  TEXT NOT NULL,
+    updated_by_user_id INTEGER,
+    updated_at  TEXT NOT NULL,
+    FOREIGN KEY(updated_by_user_id) REFERENCES wechat_users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS platform_audit_events (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_key     TEXT NOT NULL UNIQUE,
+    actor_user_id INTEGER,
+    action        TEXT NOT NULL,
+    entity_type   TEXT NOT NULL,
+    entity_id     TEXT,
+    details_json  TEXT NOT NULL DEFAULT '{}',
+    created_at    TEXT NOT NULL,
+    FOREIGN KEY(actor_user_id) REFERENCES wechat_users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_platform_audit_created
+ON platform_audit_events(created_at DESC);
 
 CREATE TABLE IF NOT EXISTS alliance_cwl_seasons (
     id                   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1438,6 +1567,8 @@ class Database:
             "farm_round_clans", "farm_rounds",
             "farm_audit_logs", "farm_clans", "farm_auth_accounts",
             "alliance_cwl_teams", "alliance_cwl_seasons",
+            "platform_audit_events", "platform_settings", "platform_admins",
+            "alliance_plan_grants", "alliance_share_links",
             "alliance_audit_events", "alliance_visits", "alliance_clans",
             "alliance_members", "alliances", "alliance_plans",
             "cwl_assembly_cache", "cwl_roster_snapshots",

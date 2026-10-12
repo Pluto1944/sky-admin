@@ -1,4 +1,4 @@
-import { getMyAlliances, visitAlliance } from './api.js'
+import { getMyAlliances, joinAllianceShare, previewAllianceShare, visitAlliance } from './api.js'
 import {
   ALLIANCE_CHANGED_EVENT,
   clearCurrentAlliance,
@@ -8,6 +8,9 @@ import {
 } from './alliance-state.js'
 
 export { ALLIANCE_CHANGED_EVENT, getCurrentAlliance, getCurrentAllianceId }
+
+const PENDING_SHARE_KEY = 'pendingAllianceShareToken'
+const SHARE_TOKEN_CACHE_KEY = 'allianceShareTokens'
 
 export function isSkyAlliance() {
   const current = getCurrentAlliance()
@@ -56,6 +59,24 @@ export async function selectAlliance(allianceId) {
 }
 
 export async function activateSharedAlliance(options) {
+  let shareToken = ''
+  try { shareToken = decodeURIComponent((options && options.share_token) || '') } catch (e) { shareToken = (options && options.share_token) || '' }
+  if (shareToken) {
+    uni.setStorageSync(PENDING_SHARE_KEY, shareToken)
+    if (!tokenExists()) {
+      let preview = null
+      try { preview = await previewAllianceShare(shareToken) } catch (e) {}
+      uni.switchTab({ url: '/pages/settings/settings' })
+      throw new Error(preview ? `登录后加入${preview.name}` : '请先登录后加入联盟')
+    }
+    const joined = await joinAllianceShare(shareToken)
+    uni.removeStorageSync(PENDING_SHARE_KEY)
+    const loaded = await loadAllianceContext(joined.alliance_id, true)
+    if (loaded.current && Number(loaded.current.id) === Number(joined.alliance_id)) {
+      loaded.current = await selectAlliance(joined.alliance_id)
+    }
+    return loaded
+  }
   const value = options && Number(options.alliance_id)
   if (!value || !tokenExists()) return loadAllianceContext(null, true)
   // 分享页进入时必须通知 TopBar 和已挂载组件，否则页面数据已切换而顶部仍显示旧联盟。
@@ -69,7 +90,31 @@ export async function activateSharedAlliance(options) {
   return loaded
 }
 
+export async function acceptPendingAllianceShare() {
+  const token = uni.getStorageSync(PENDING_SHARE_KEY)
+  if (!token || !tokenExists()) return null
+  const joined = await joinAllianceShare(token)
+  uni.removeStorageSync(PENDING_SHARE_KEY)
+  const loaded = await loadAllianceContext(joined.alliance_id, true)
+  if (loaded.current) loaded.current = await selectAlliance(joined.alliance_id)
+  return { ...joined, alliance: loaded.current }
+}
+
 export function allianceQuery() {
   const id = getCurrentAllianceId()
-  return id ? `alliance_id=${encodeURIComponent(id)}` : ''
+  if (!id) return ''
+  const query = [`alliance_id=${encodeURIComponent(id)}`]
+  const cache = uni.getStorageSync(SHARE_TOKEN_CACHE_KEY) || {}
+  const item = cache[String(id)]
+  if (item && item.token && item.expiresAt && Date.parse(item.expiresAt) > Date.now()) {
+    query.push(`share_token=${encodeURIComponent(item.token)}`)
+  }
+  return query.join('&')
+}
+
+export function rememberAllianceShareToken(allianceId, token, expiresAt) {
+  if (!allianceId || !token || !expiresAt) return
+  const cache = uni.getStorageSync(SHARE_TOKEN_CACHE_KEY) || {}
+  cache[String(allianceId)] = { token, expiresAt }
+  uni.setStorageSync(SHARE_TOKEN_CACHE_KEY, cache)
 }

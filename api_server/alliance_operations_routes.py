@@ -1,0 +1,358 @@
+"""M6-M9 alliance sharing, manual operations and platform administration API."""
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+
+from modules.alliance.operations import (
+    AllianceOperationError,
+    add_managed_clan,
+    create_share_link,
+    grant_alliance_plan,
+    join_from_share,
+    leave_alliance,
+    list_managed_clans,
+    list_alliance_members,
+    list_share_links,
+    manual_set_clan_verification,
+    platform_admin_capability,
+    platform_alliance_detail,
+    platform_dashboard,
+    remove_alliance_member,
+    remove_managed_clan,
+    revoke_share_link,
+    set_alliance_member_role,
+    set_alliance_status,
+    share_preview,
+    update_platform_settings,
+    verification_entry,
+)
+from modules.alliance.free_alliance import enqueue_initialization, reconcile_sync_targets
+from shared.db.connection import Database
+
+from .auth import require_user
+from .deps import get_db
+
+
+router = APIRouter(prefix="/api")
+
+
+class ShareCreateInput(BaseModel):
+    expires_days: int = Field(default=30, ge=1, le=30)
+
+
+class ShareTokenInput(BaseModel):
+    token: str = Field(min_length=20, max_length=200)
+
+
+class MemberRoleInput(BaseModel):
+    role: str
+
+
+class PlatformSettingsInput(BaseModel):
+    free_registration_enabled: bool
+    free_registration_limit: int = Field(ge=0, le=10000)
+
+
+class VerificationInput(BaseModel):
+    clan_tag: str
+    status: str
+    note: str = Field(default="", max_length=500)
+
+
+class PlanGrantInput(BaseModel):
+    plan_code: str
+    expires_at: str | None = None
+    note: str = Field(default="", max_length=500)
+
+
+class AllianceStatusInput(BaseModel):
+    status: str
+    note: str = Field(default="", max_length=500)
+
+
+class ManagedClanInput(BaseModel):
+    clan_tag: str
+    category: str
+    clan_name: str = Field(default="", max_length=40)
+
+
+def _error(exc: AllianceOperationError) -> HTTPException:
+    return HTTPException(status_code=exc.status_code, detail=str(exc))
+
+
+@router.post("/alliance-shares/preview")
+def preview_alliance_share(payload: ShareTokenInput, db: Database = Depends(get_db)):
+    """Public metadata only; resolving a token never creates membership or sync work."""
+    try:
+        return share_preview(db.conn, payload.token)
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.post("/alliance-shares/join")
+def join_alliance_share(
+    payload: ShareTokenInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        return join_from_share(db.conn, user["openid"], payload.token)
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.get("/alliances/{alliance_id}/verification")
+def alliance_verification_entry(
+    alliance_id: int,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        return verification_entry(db.conn, user["openid"], alliance_id)
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.get("/alliances/{alliance_id}/managed-clans")
+def alliance_managed_clans(
+    alliance_id: int,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        return list_managed_clans(db.conn, user["openid"], alliance_id)
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.post("/alliances/{alliance_id}/managed-clans", status_code=201)
+def create_alliance_managed_clan(
+    alliance_id: int,
+    payload: ManagedClanInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        clan = add_managed_clan(
+            db.conn, user["openid"], alliance_id, clan_tag=payload.clan_tag,
+            category=payload.category, clan_name=payload.clan_name,
+        )
+        actor = db.conn.execute(
+            "SELECT id FROM wechat_users WHERE openid=?", (user["openid"],),
+        ).fetchone()
+        initialization = enqueue_initialization(
+            db.conn, alliance_id=alliance_id, clan_tag=clan["clan_tag"],
+            actor_user_id=int(actor["id"]),
+        )
+        return {"clan": clan, "initialization": initialization}
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.delete("/alliances/{alliance_id}/managed-clans/{clan_tag}")
+def delete_alliance_managed_clan(
+    alliance_id: int,
+    clan_tag: str,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        result = remove_managed_clan(db.conn, user["openid"], alliance_id, clan_tag)
+        reconcile_sync_targets(db.conn)
+        return result
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.get("/alliances/{alliance_id}/shares")
+def alliance_shares(
+    alliance_id: int,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        return {"links": list_share_links(db.conn, user["openid"], alliance_id)}
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.post("/alliances/{alliance_id}/shares", status_code=201)
+def create_alliance_share(
+    alliance_id: int,
+    payload: ShareCreateInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        return create_share_link(
+            db.conn, user["openid"], alliance_id, expires_days=payload.expires_days,
+        )
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.delete("/alliances/{alliance_id}/shares/{link_id}")
+def delete_alliance_share(
+    alliance_id: int,
+    link_id: int,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        revoke_share_link(db.conn, user["openid"], alliance_id, link_id)
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+    return {"success": True, "link_id": link_id}
+
+
+@router.get("/alliances/{alliance_id}/user-members")
+def alliance_user_members(
+    alliance_id: int,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        return list_alliance_members(db.conn, user["openid"], alliance_id)
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.post("/alliances/{alliance_id}/leave")
+def leave_current_alliance(
+    alliance_id: int,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        return leave_alliance(db.conn, user["openid"], alliance_id)
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.patch("/alliances/{alliance_id}/user-members/{member_id}")
+def update_alliance_user_member(
+    alliance_id: int,
+    member_id: int,
+    payload: MemberRoleInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        return set_alliance_member_role(
+            db.conn, user["openid"], alliance_id, member_id, payload.role,
+        )
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.delete("/alliances/{alliance_id}/user-members/{member_id}")
+def delete_alliance_user_member(
+    alliance_id: int,
+    member_id: int,
+    block: bool = Query(default=False),
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        return remove_alliance_member(
+            db.conn, user["openid"], alliance_id, member_id, block=block,
+        )
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.get("/platform/capability")
+def platform_capability(
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    return platform_admin_capability(db.conn, user["openid"])
+
+
+@router.get("/platform/alliances")
+def platform_alliances(
+    search: str = "",
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        return platform_dashboard(db.conn, user["openid"], search=search)
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.get("/platform/alliances/{alliance_id}")
+def platform_alliance(
+    alliance_id: int,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        return platform_alliance_detail(db.conn, user["openid"], alliance_id)
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.put("/platform/settings/free-registration")
+def platform_free_registration(
+    payload: PlatformSettingsInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        return update_platform_settings(
+            db.conn, user["openid"],
+            free_registration_enabled=payload.free_registration_enabled,
+            free_registration_limit=payload.free_registration_limit,
+        )
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.put("/platform/alliances/{alliance_id}/verification")
+def platform_verification(
+    alliance_id: int,
+    payload: VerificationInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        return manual_set_clan_verification(
+            db.conn, user["openid"], alliance_id, payload.clan_tag,
+            payload.status, note=payload.note,
+        )
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.put("/platform/alliances/{alliance_id}/plan")
+def platform_plan(
+    alliance_id: int,
+    payload: PlanGrantInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        return grant_alliance_plan(
+            db.conn, user["openid"], alliance_id,
+            plan_code=payload.plan_code, expires_at=payload.expires_at,
+            note=payload.note,
+        )
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.put("/platform/alliances/{alliance_id}/status")
+def platform_status(
+    alliance_id: int,
+    payload: AllianceStatusInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        return set_alliance_status(
+            db.conn, user["openid"], alliance_id, payload.status, note=payload.note,
+        )
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc

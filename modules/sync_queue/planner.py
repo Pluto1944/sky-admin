@@ -91,10 +91,19 @@ class SyncPlanner:
         }
         rows = self.conn.execute(
             """SELECT clans.id, clans.alliance_id, clans.clan_tag, clans.category,
-                      alliances.plan_code, plans.sync_tier
+                      alliances.plan_code,
+                      CASE
+                        WHEN alliances.plan_code='paid' AND grants.id IS NOT NULL
+                         AND (grants.status!='active' OR
+                              (grants.expires_at IS NOT NULL AND datetime(grants.expires_at) <= datetime('now')))
+                        THEN 'low' ELSE plans.sync_tier
+                      END AS sync_tier
                FROM alliance_clans AS clans
                JOIN alliances ON alliances.id = clans.alliance_id
                JOIN alliance_plans AS plans ON plans.plan_code = alliances.plan_code
+               LEFT JOIN alliance_plan_grants AS grants
+                 ON grants.id=(SELECT MAX(g.id) FROM alliance_plan_grants AS g
+                               WHERE g.alliance_id=alliances.id)
                WHERE clans.status = 'active' AND alliances.status = 'active'
                  AND plans.status = 'active'
                ORDER BY clans.id"""
@@ -147,11 +156,19 @@ class SyncPlanner:
         rows = self.conn.execute(
             """SELECT teams.id, seasons.alliance_id, seasons.period,
                       teams.clan_tag, teams.category, alliances.plan_code,
-                      plans.sync_tier
+                      CASE
+                        WHEN alliances.plan_code='paid' AND grants.id IS NOT NULL
+                         AND (grants.status!='active' OR
+                              (grants.expires_at IS NOT NULL AND datetime(grants.expires_at) <= datetime('now')))
+                        THEN 'low' ELSE plans.sync_tier
+                      END AS sync_tier
                FROM alliance_cwl_teams AS teams
                JOIN alliance_cwl_seasons AS seasons ON seasons.id = teams.season_id
                JOIN alliances ON alliances.id = seasons.alliance_id
                JOIN alliance_plans AS plans ON plans.plan_code = alliances.plan_code
+               LEFT JOIN alliance_plan_grants AS grants
+                 ON grants.id=(SELECT MAX(g.id) FROM alliance_plan_grants AS g
+                               WHERE g.alliance_id=alliances.id)
                WHERE seasons.period = ?
                  AND seasons.status IN ('active', 'frozen', 'complete')
                  AND alliances.status = 'active' AND plans.status = 'active'
@@ -242,6 +259,11 @@ class SyncPlanner:
     ) -> dict:
         """Refresh interests and globally deduplicated targets without planning work."""
         current = _as_utc(now)
+        # Paid grants are an operational entitlement, not public COC data.  On
+        # expiry keep the oldest clan as the low-frequency fallback and retain
+        # every historical/public fact.
+        from modules.alliance.operations import reconcile_expired_plan_grants
+        reconcile_expired_plan_grants(self.conn, now=current)
         live_types = parse_resource_types(live_resource_types)
         interests = self._clan_interests(current) + self._cwl_interests(current)
         interest_result = self.queue.reconcile_interests(

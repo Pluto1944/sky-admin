@@ -45,6 +45,8 @@ from modules.alliance.free_alliance import (
     subscribe_free_clan,
     subscription_status,
 )
+from modules.alliance.operations import platform_admin_capability
+from modules.alliance.operations import AllianceOperationError, rename_alliance
 from modules.coc_sync.current_war import current_war_summary
 from modules.coc_sync.official.mapper import normalize_tag
 from modules.player.member_stats import member_summary_map
@@ -235,6 +237,9 @@ def my_alliances(user: dict = Depends(require_user), db: Database = Depends(get_
         "alliances": items,
         "features": {
             "free_alliance": free_alliance_capability(db.conn, user["openid"]),
+            "platform_admin": platform_admin_capability(db.conn, user["openid"]),
+            "alliance_sharing": {"enabled": True},
+            "self_service_verification": {"enabled": False, "mode": "manual"},
         },
     }
 
@@ -263,12 +268,16 @@ def rename_my_free_alliance(
     user: dict = Depends(require_user),
     db: Database = Depends(get_db),
 ):
+    context = _context(user, alliance_id, db)
     try:
-        rename_free_alliance(
-            db.conn, user["openid"], alliance_id, payload.name,
-        )
-    except FreeAllianceError as exc:
-        raise _free_error(exc) from exc
+        if context.plan_code == "free":
+            rename_free_alliance(
+                db.conn, user["openid"], alliance_id, payload.name,
+            )
+        else:
+            rename_alliance(db.conn, user["openid"], alliance_id, payload.name)
+    except (FreeAllianceError, AllianceOperationError) as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     return _context(user, alliance_id, db).as_dict()
 
 
@@ -487,6 +496,14 @@ def alliance_farm_config(
         if clan.category == "farm"
     ]
     result = legacy_routes._farm_config_for_clans(db, configured_clans)
+    access_by_tag = {clan.clan_tag: clan for clan in context.clans}
+    for item in result.get("clans", []):
+        access = access_by_tag.get(normalize_tag(item.get("clan_tag")))
+        if access is not None and not access.management_allowed:
+            item["replace_candidates"] = []
+            item["fill_accounts"] = []
+            item["inactive_members"] = []
+            item["management_hidden"] = True
     result["alliance_id"] = alliance_id
     return result
 
@@ -736,6 +753,9 @@ def alliance_war_history_detail(
         "category": clan.category,
     }
     result = legacy_routes._war_history_detail_for_clan(db, configured, war_key)
+    if not clan.management_allowed:
+        result["rows"] = []
+        result["management_hidden"] = True
     result["alliance_id"] = alliance_id
     return result
 
@@ -770,6 +790,7 @@ def alliance_war_stats(
             "updated_at": None,
             "history_coverage": {"available": 0, "target": 45, "complete": False},
         }
+    _management_required(context, selected.clan_tag)
     result = legacy_routes._war_stats_for_clan(db, {
         "tag": selected.clan_tag,
         "name": selected.clan_name,
@@ -789,8 +810,10 @@ def alliance_league_stats(
 ):
     """按联盟各月配置的实战队伍返回 CWL 滚动窗口统计。"""
     context = _context(user, alliance_id, db)
-    if context.role not in {"admin", "leader"}:
-        raise HTTPException(status_code=403, detail="联赛历史统计需要管理权限")
+    if context.role not in {"admin", "leader"} or not any(
+        clan.management_allowed for clan in context.clans
+    ):
+        raise HTTPException(status_code=403, detail="联赛历史统计需要已认证部落的管理权限")
     selected_period = period or legacy_routes._get_current_period()
     if not legacy_routes._valid_period(selected_period):
         raise HTTPException(status_code=400, detail="period 必须为 YYYY-MM")
@@ -882,8 +905,10 @@ def alliance_league_stats(
 def _historical_cwl_allowed(context: AllianceContext, period: str) -> None:
     if period == legacy_routes._current_cwl_live_period():
         return
-    if context.role not in {"admin", "leader"}:
-        raise HTTPException(status_code=403, detail="历史联赛数据需要管理权限")
+    if context.role not in {"admin", "leader"} or not any(
+        clan.management_allowed for clan in context.clans
+    ):
+        raise HTTPException(status_code=403, detail="历史联赛数据需要已认证部落的管理权限")
 
 
 def _cwl_config_error(exc: CwlConfigError) -> HTTPException:

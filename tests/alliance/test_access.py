@@ -83,7 +83,7 @@ def _war_archive(db, clan_tag: str, war_key: str, *, player_tag: str | None = No
         "attacks_per_member": 2,
         "end_time": "20261009T230000.000Z",
         "opponent": {"tag": "#ENEMY", "name": "对手"},
-        "rows": [],
+        "rows": [{"player_tag": "#SENSITIVE", "missed_attacks": 1}],
         "synced_at": NOW,
     }
     db.conn.execute(
@@ -329,6 +329,25 @@ def test_war_history_is_scoped_to_current_alliance(db):
     )
     assert detail["clan_tag"] == "#BBB"
     assert detail["is_history"] is True
+    assert detail["management_hidden"] is True
+    assert detail["rows"] == []
+
+    manager_id = _user(db, "history-manager")
+    _membership(db, paid_id, manager_id, "admin")
+    db.conn.execute(
+        """UPDATE alliance_clans
+           SET verification_status='verified', updated_at=?
+           WHERE alliance_id=? AND clan_tag='#BBB'""",
+        (NOW, paid_id),
+    )
+    db.conn.commit()
+    managed_detail = alliance_routes.alliance_war_history_detail(
+        paid_id, "#BBB", "war-bbb", user={"openid": "history-manager"}, db=db,
+    )
+    assert managed_detail["rows"] == [
+        {"player_tag": "#SENSITIVE", "missed_attacks": 1},
+    ]
+    assert "management_hidden" not in managed_detail
 
     with pytest.raises(HTTPException) as exc:
         alliance_routes.alliance_war_history_detail(
@@ -341,9 +360,11 @@ def test_war_stats_selects_current_alliance_combat_clan_without_sky_special_case
     apply_sky_migration(db.conn, CLANS, now=NOW)
     user_id = _user(db, "stats-user")
     paid_id = _paid_alliance(db)
-    _membership(db, paid_id, user_id, "member")
+    _membership(db, paid_id, user_id, "admin")
     _clan(db, paid_id, "#NORMAL", category="normal", order=0)
-    _clan(db, paid_id, "#CAMP", category="combat", order=1)
+    _clan(
+        db, paid_id, "#CAMP", category="combat", verification="verified", order=1,
+    )
     db.conn.execute(
         """INSERT INTO accounts
            (player_tag, account_name, town_hall_level, clan_tag, membership_status)
@@ -385,12 +406,27 @@ def test_war_stats_returns_empty_when_current_alliance_has_no_combat_clan(db):
     assert result["stats"] == []
 
 
+def test_war_stats_rejects_member_or_unverified_management_access(db):
+    apply_sky_migration(db.conn, CLANS, now=NOW)
+    user_id = _user(db, "restricted-stats-user")
+    paid_id = _paid_alliance(db)
+    _membership(db, paid_id, user_id, "admin")
+    _clan(db, paid_id, "#CAMP", category="combat", verification="unverified")
+    db.conn.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        alliance_routes.alliance_war_stats(
+            paid_id, user={"openid": "restricted-stats-user"}, db=db,
+        )
+    assert exc.value.status_code == 403
+
+
 def test_farm_config_only_returns_current_alliance_farm_clans(db):
     apply_sky_migration(db.conn, CLANS, now=NOW)
     user_id = _user(db, "farm-user")
     paid_id = _paid_alliance(db)
-    _membership(db, paid_id, user_id, "member")
-    _clan(db, paid_id, "#FARM", category="farm", order=1)
+    _membership(db, paid_id, user_id, "admin")
+    _clan(db, paid_id, "#FARM", category="farm", verification="verified", order=1)
     _clan(db, paid_id, "#COMBAT", category="combat", order=2)
     db.conn.executemany(
         """INSERT INTO farm_stats
@@ -410,6 +446,7 @@ def test_farm_config_only_returns_current_alliance_farm_clans(db):
     assert result["alliance_id"] == paid_id
     assert [item["clan_tag"] for item in result["clans"]] == ["#FARM"]
     assert result["clans"][0]["clan_name"] == "部落#FARM"
+    assert "management_hidden" not in result["clans"][0]
 
 
 def test_farm_config_returns_empty_when_alliance_has_no_farm_clan(db):
@@ -425,6 +462,31 @@ def test_farm_config_returns_empty_when_alliance_has_no_farm_clan(db):
     )
 
     assert result["clans"] == []
+
+
+def test_farm_config_hides_management_lists_from_unverified_member_access(db):
+    apply_sky_migration(db.conn, CLANS, now=NOW)
+    user_id = _user(db, "farm-restricted-user")
+    paid_id = _paid_alliance(db)
+    _membership(db, paid_id, user_id, "member")
+    _clan(db, paid_id, "#FARM", category="farm")
+    db.conn.execute(
+        """INSERT INTO farm_stats
+           (clan_tag, clan_name, category, member_count, stats_json, updated_at)
+           VALUES ('#FARM', '互刷部落', 'farm', 40,
+                   '{"replace_candidates":[{"player_tag":"#P1"}]}', ?)""",
+        (NOW,),
+    )
+    db.conn.commit()
+
+    result = alliance_routes.alliance_farm_config(
+        paid_id, user={"openid": "farm-restricted-user"}, db=db,
+    )
+    clan = result["clans"][0]
+    assert clan["replace_candidates"] == []
+    assert clan["fill_accounts"] == []
+    assert clan["inactive_members"] == []
+    assert clan["management_hidden"] is True
 
 
 def test_alliance_cwl_uses_monthly_config_instead_of_daily_clan_scope(db):
@@ -496,6 +558,7 @@ def test_alliance_league_stats_only_uses_its_monthly_combat_teams(db):
     user_id = _user(db, "paid-stats")
     alliance_id = _paid_alliance(db, key="paid-stats", name="统计联盟")
     _membership(db, alliance_id, user_id, "admin")
+    _clan(db, alliance_id, "#BBB", category="combat", verification="verified")
     season_id = db.conn.execute(
         """INSERT INTO alliance_cwl_seasons
            (alliance_id, period, status, created_at, updated_at, confirmed_at)
