@@ -689,22 +689,18 @@ def manual_set_clan_verification(
     ).fetchone()
     if row is None:
         raise AllianceOperationError("部落不在目标联盟订阅范围内", status_code=404)
+    also_verified: list[sqlite3.Row] = []
     if selected == "verified":
-        conflict = conn.execute(
-            """SELECT alliances.id, alliances.name
+        also_verified = conn.execute(
+            """SELECT alliances.id AS alliance_id, alliances.name
                FROM alliance_clans AS clans
                JOIN alliances ON alliances.id=clans.alliance_id
                WHERE clans.clan_tag=? AND clans.verification_status='verified'
                  AND clans.status='active' AND alliances.status='active'
                  AND alliances.id != ?
-               ORDER BY alliances.id LIMIT 1""",
+               ORDER BY alliances.id""",
             (tag, int(alliance_id)),
-        ).fetchone()
-        if conflict is not None:
-            raise AllianceOperationError(
-                f"该部落已由联盟“{conflict['name']}”认证，请先人工处理冲突",
-                status_code=409,
-            )
+        ).fetchall()
     timestamp = _iso(now)
     with conn:
         conn.execute(
@@ -718,7 +714,14 @@ def manual_set_clan_verification(
                 timestamp, row["id"],
             ),
         )
-        details = {"before": row["verification_status"], "after": selected, "note": note[:500]}
+        details = {
+            "before": row["verification_status"], "after": selected,
+            "also_verified_alliances": [
+                {"alliance_id": int(item["alliance_id"]), "alliance_name": item["name"]}
+                for item in also_verified
+            ],
+            "note": note[:500],
+        }
         _alliance_audit(
             conn, alliance_id=alliance_id, actor_user_id=int(actor["id"]),
             action="manual_clan_verification_updated", entity_type="alliance_clan",
@@ -732,6 +735,10 @@ def manual_set_clan_verification(
     return {
         "alliance_id": int(alliance_id), "clan_tag": tag,
         "verification_status": selected, "verified_at": timestamp if selected == "verified" else None,
+        "also_verified_alliances": [
+            {"alliance_id": int(item["alliance_id"]), "alliance_name": item["name"]}
+            for item in also_verified
+        ],
     }
 
 
@@ -1598,28 +1605,6 @@ def set_alliance_status(
         raise AllianceOperationError("联盟不存在", status_code=404)
     if row["status"] == "archived":
         raise AllianceOperationError("已删除联盟不能恢复", status_code=409)
-    if selected == "active":
-        conflict = conn.execute(
-            """SELECT mine.clan_tag, other_alliances.name
-               FROM alliance_clans AS mine
-               JOIN alliance_clans AS other
-                 ON other.clan_tag=mine.clan_tag
-                AND other.alliance_id != mine.alliance_id
-                AND other.status='active'
-                AND other.verification_status='verified'
-               JOIN alliances AS other_alliances
-                 ON other_alliances.id=other.alliance_id
-                AND other_alliances.status='active'
-               WHERE mine.alliance_id=? AND mine.status='active'
-                 AND mine.verification_status='verified'
-               ORDER BY mine.id LIMIT 1""",
-            (int(alliance_id),),
-        ).fetchone()
-        if conflict is not None:
-            raise AllianceOperationError(
-                f"部落 {conflict['clan_tag']} 已由联盟“{conflict['name']}”认证，请先处理认证冲突",
-                status_code=409,
-            )
     timestamp = _iso(now)
     with conn:
         conn.execute(
@@ -1739,7 +1724,7 @@ def platform_dashboard(conn: sqlite3.Connection, openid: str, *, search: str = "
             "SELECT mode, status, COUNT(*) AS count FROM sync_tasks GROUP BY mode, status"
         ).fetchall()
     }
-    conflicts = [dict(row) for row in conn.execute(
+    multi_alliance_verifications = [dict(row) for row in conn.execute(
         """SELECT clans.clan_tag, COUNT(DISTINCT clans.alliance_id) AS alliance_count,
                   GROUP_CONCAT(DISTINCT alliances.name) AS alliance_names
            FROM alliance_clans AS clans
@@ -1752,7 +1737,9 @@ def platform_dashboard(conn: sqlite3.Connection, openid: str, *, search: str = "
         "settings": free_registration_policy(conn),
         "alliances": [dict(row) for row in rows],
         "queue": queue,
-        "verification_conflicts": conflicts,
+        # 旧字段保留给已发布的小程序；新版使用符合当前业务语义的新字段。
+        "verification_conflicts": multi_alliance_verifications,
+        "multi_alliance_verifications": multi_alliance_verifications,
         "audit": [dict(row) for row in conn.execute(
             """SELECT action, entity_type, entity_id, created_at
                FROM platform_audit_events ORDER BY id DESC LIMIT 50"""

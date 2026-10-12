@@ -195,6 +195,32 @@ def test_database_allows_platform_admin_to_create_multiple_free_alliances(db):
     ).fetchone()[0] == 0
 
 
+def test_migration_removes_legacy_global_verification_triggers(db):
+    for name in (
+        "trg_alliance_clans_one_verified_insert",
+        "trg_alliance_clans_one_verified_update",
+        "trg_alliances_one_verified_on_activate",
+    ):
+        db.conn.execute(
+            f"""CREATE TRIGGER {name}
+                BEFORE UPDATE ON alliances
+                BEGIN SELECT 1; END"""
+        )
+    db.conn.commit()
+
+    db._migrate()
+
+    assert db.conn.execute(
+        """SELECT COUNT(*) FROM sqlite_master
+           WHERE type='trigger' AND name IN (?, ?, ?)""",
+        (
+            "trg_alliance_clans_one_verified_insert",
+            "trg_alliance_clans_one_verified_update",
+            "trg_alliances_one_verified_on_activate",
+        ),
+    ).fetchone()[0] == 0
+
+
 def test_plan_change_cannot_bypass_active_clan_limit(db):
     apply_sky_migration(db.conn, CLANS)
     with pytest.raises(sqlite3.IntegrityError, match="plan change"):
@@ -236,6 +262,31 @@ def test_memberships_and_subscriptions_are_isolated_by_alliance(db):
     assert [tuple(row) for row in roles] == [(sky_id, "member"), (paid_id, "admin")]
     assert db.conn.execute(
         "SELECT COUNT(*) FROM alliance_clans WHERE clan_tag = '#AAA' AND status = 'active'"
+    ).fetchone()[0] == 2
+
+
+def test_database_allows_same_clan_verified_by_multiple_alliances(db):
+    apply_sky_migration(db.conn, CLANS)
+    now = "2026-10-09T00:00:00+00:00"
+    db.conn.execute(
+        """INSERT INTO alliances
+           (alliance_key, name, status, plan_code, created_at, updated_at)
+           VALUES ('paid-verified', '认证测试联盟', 'active', 'paid', ?, ?)""",
+        (now, now),
+    )
+    paid_id = int(db.conn.execute(
+        "SELECT id FROM alliances WHERE alliance_key='paid-verified'"
+    ).fetchone()[0])
+    db.conn.execute(
+        """INSERT INTO alliance_clans
+           (alliance_id, clan_tag, status, verification_status, created_at, updated_at)
+           VALUES (?, '#AAA', 'active', 'verified', ?, ?)""",
+        (paid_id, now, now),
+    )
+
+    assert db.conn.execute(
+        """SELECT COUNT(*) FROM alliance_clans
+           WHERE clan_tag='#AAA' AND status='active' AND verification_status='verified'"""
     ).fetchone()[0] == 2
 
 

@@ -28,8 +28,9 @@
       </view>
 
       <template v-if="verificationConflicts.length">
-        <view class="section-title">认证冲突</view>
+        <view class="section-title">多联盟认证</view>
         <view class="card">
+          <text class="sub">允许保留；如需调整，请进入对应联盟逐个撤销认证。</text>
           <view v-for="item in verificationConflicts" :key="item.clan_tag" class="queue-row">
             <text>{{ item.clan_tag }}</text><text>{{ item.alliance_names }}</text>
           </view>
@@ -198,7 +199,7 @@ export default {
         this.alliances = result.alliances || []
         this.queue = result.queue || {}
         this.audits = result.audit || []
-        this.verificationConflicts = result.verification_conflicts || []
+        this.verificationConflicts = result.multi_alliance_verifications || result.verification_conflicts || []
       } catch (err) {
         uni.showModal({ title: '超级管理不可用', content: err.message || '请稍后重试', showCancel: false })
       } finally {

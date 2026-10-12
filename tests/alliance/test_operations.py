@@ -257,7 +257,7 @@ def test_share_list_marks_elapsed_link_expired_without_returning_token(ops, monk
     assert "token" not in links[0]
 
 
-def test_manual_verification_unlocks_management_and_rejects_conflict(ops):
+def test_platform_manual_verification_allows_same_clan_in_multiple_alliances(ops):
     db, ids = ops
     first = _alliance(db, ids["owner"], "verify-a")
     second = _alliance(db, ids["other-owner"], "verify-b")
@@ -269,13 +269,36 @@ def test_manual_verification_unlocks_management_and_rejects_conflict(ops):
     )
     assert result["verification_status"] == "verified"
     assert resolve_alliance_context(db.conn, "owner", first).clan("#2QQ").management_allowed
-    with pytest.raises(AllianceOperationError, match="已由联盟"):
+    duplicate = manual_set_clan_verification(
+        db.conn, "operator", second, "#2QQ", "verified", now=NOW,
+    )
+    assert duplicate["verification_status"] == "verified"
+    assert duplicate["also_verified_alliances"] == [
+        {"alliance_id": first, "alliance_name": "verify-a"},
+    ]
+    assert resolve_alliance_context(
+        db.conn, "other-owner", second,
+    ).clan("#2QQ").management_allowed
+    dashboard = platform_dashboard(db.conn, "operator")
+    duplicate_summary = dashboard["multi_alliance_verifications"]
+    assert len(duplicate_summary) == 1
+    assert duplicate_summary[0]["clan_tag"] == "#2QQ"
+    assert duplicate_summary[0]["alliance_count"] == 2
+    assert set(duplicate_summary[0]["alliance_names"].split(",")) == {"verify-a", "verify-b"}
+
+
+def test_non_platform_user_cannot_use_manual_verification(ops):
+    db, ids = ops
+    alliance_id = _alliance(db, ids["owner"], "verify-owner")
+    _clan(db, alliance_id, "#2QQ")
+
+    with pytest.raises(AllianceOperationError, match="平台管理员"):
         manual_set_clan_verification(
-            db.conn, "operator", second, "#2QQ", "verified", now=NOW,
+            db.conn, "member", alliance_id, "#2QQ", "verified", now=NOW,
         )
 
 
-def test_suspended_alliance_cannot_reactivate_with_verified_clan_conflict(ops):
+def test_suspended_alliance_can_reactivate_with_multi_alliance_verification(ops):
     db, ids = ops
     first = _alliance(db, ids["owner"], "restore-a")
     second = _alliance(db, ids["other-owner"], "restore-b")
@@ -285,11 +308,10 @@ def test_suspended_alliance_cannot_reactivate_with_verified_clan_conflict(ops):
     set_alliance_status(db.conn, "operator", first, "suspended", now=NOW)
     manual_set_clan_verification(db.conn, "operator", second, "#2QQ", "verified", now=NOW)
 
-    with pytest.raises(AllianceOperationError, match="认证冲突"):
-        set_alliance_status(db.conn, "operator", first, "active", now=NOW)
+    set_alliance_status(db.conn, "operator", first, "active", now=NOW)
     assert db.conn.execute(
         "SELECT status FROM alliances WHERE id=?", (first,),
-    ).fetchone()[0] == "suspended"
+    ).fetchone()[0] == "active"
 
 
 def test_platform_archive_requires_suspended_alliance_and_exact_name(ops):

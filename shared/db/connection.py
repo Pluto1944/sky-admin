@@ -208,57 +208,6 @@ CREATE TABLE IF NOT EXISTS alliance_clans (
 CREATE INDEX IF NOT EXISTS idx_alliance_clans_tag_status
 ON alliance_clans(clan_tag, status);
 
-CREATE TRIGGER IF NOT EXISTS trg_alliance_clans_one_verified_insert
-BEFORE INSERT ON alliance_clans
-WHEN NEW.status = 'active' AND NEW.verification_status = 'verified'
-BEGIN
-    SELECT CASE WHEN EXISTS (
-        SELECT 1 FROM alliance_clans AS existing
-        JOIN alliances ON alliances.id = existing.alliance_id
-        WHERE existing.clan_tag = NEW.clan_tag
-          AND existing.status = 'active'
-          AND existing.verification_status = 'verified'
-          AND alliances.status = 'active'
-          AND existing.alliance_id != NEW.alliance_id
-    ) THEN RAISE(ABORT, 'clan already verified by another alliance') END;
-END;
-
-CREATE TRIGGER IF NOT EXISTS trg_alliance_clans_one_verified_update
-BEFORE UPDATE OF alliance_id, clan_tag, status, verification_status ON alliance_clans
-WHEN NEW.status = 'active' AND NEW.verification_status = 'verified'
-BEGIN
-    SELECT CASE WHEN EXISTS (
-        SELECT 1 FROM alliance_clans AS existing
-        JOIN alliances ON alliances.id = existing.alliance_id
-        WHERE existing.clan_tag = NEW.clan_tag
-          AND existing.status = 'active'
-          AND existing.verification_status = 'verified'
-          AND alliances.status = 'active'
-          AND existing.id != OLD.id
-    ) THEN RAISE(ABORT, 'clan already verified by another alliance') END;
-END;
-
-CREATE TRIGGER IF NOT EXISTS trg_alliances_one_verified_on_activate
-BEFORE UPDATE OF status ON alliances
-WHEN NEW.status = 'active' AND OLD.status != 'active'
-BEGIN
-    SELECT CASE WHEN EXISTS (
-        SELECT 1
-        FROM alliance_clans AS mine
-        JOIN alliance_clans AS other
-          ON other.clan_tag = mine.clan_tag
-         AND other.alliance_id != mine.alliance_id
-         AND other.status = 'active'
-         AND other.verification_status = 'verified'
-        JOIN alliances AS other_alliance
-          ON other_alliance.id = other.alliance_id
-         AND other_alliance.status = 'active'
-        WHERE mine.alliance_id = NEW.id
-          AND mine.status = 'active'
-          AND mine.verification_status = 'verified'
-    ) THEN RAISE(ABORT, 'verified clan conflict on alliance activation') END;
-END;
-
 CREATE TRIGGER IF NOT EXISTS trg_alliance_clans_active_limit_insert
 BEFORE INSERT ON alliance_clans
 WHEN NEW.status = 'active'
@@ -1238,6 +1187,17 @@ class Database:
         # 普通用户“一人一个免费联盟”由服务层按角色校验；超级管理员可以从
         # 平台管理页创建多个联盟，因此旧的数据库唯一索引必须幂等移除。
         self.conn.execute("DROP INDEX IF EXISTS idx_alliances_one_active_free_per_creator")
+
+        # 部落认证以 (alliance_id, clan_tag) 为单位。普通用户的自助认证流程仍在
+        # 服务层拒绝已被其他联盟认证的 Tag；超级管理员可人工建立多联盟认证，
+        # 因此移除旧库中“同一 Tag 只能有一个 verified”的全局触发器。
+        self.conn.executescript(
+            """
+            DROP TRIGGER IF EXISTS trg_alliance_clans_one_verified_insert;
+            DROP TRIGGER IF EXISTS trg_alliance_clans_one_verified_update;
+            DROP TRIGGER IF EXISTS trg_alliances_one_verified_on_activate;
+            """
+        )
 
         # 平台超级管理员可以在“超级管理”内为单个联盟突破套餐部落数；普通入口
         # 仍由服务层按套餐上限校验。数据库触发器使用逐联盟 override 维持硬约束。
