@@ -157,7 +157,12 @@ export default {
     const menuLeft = menuButton.left || (info.windowWidth || 375) - 100
     this.topPadding = menuBottom
     this.allianceButtonStyle = `width:${Math.max(120, menuLeft - 24)}px;height:${menuHeight}px;`
-    this.allianceChangeHandler = alliance => { this.currentAlliance = alliance }
+    this.allianceChangeHandler = alliance => {
+      this.currentAlliance = alliance
+      // 同时向当前页面发送组件事件。部分小程序运行时在 tab 页中恢复全局事件
+      // 监听较慢，页面可通过这个事件立即按新的联盟 ID 刷新数据。
+      this.$emit('alliance-change', alliance)
+    }
     uni.$on(ALLIANCE_CHANGED_EVENT, this.allianceChangeHandler)
     this.refreshAlliances()
   },

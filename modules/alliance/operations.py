@@ -1446,11 +1446,15 @@ def set_alliance_status(
 ) -> dict:
     actor = require_platform_admin(conn, openid)
     selected = str(status or "").strip()
-    if selected not in {"active", "suspended", "archived"}:
+    if selected not in {"active", "suspended"}:
         raise AllianceOperationError("不支持的联盟状态", status_code=422)
-    row = conn.execute("SELECT status FROM alliances WHERE id=?", (int(alliance_id),)).fetchone()
+    row = conn.execute(
+        "SELECT status FROM alliances WHERE id=?", (int(alliance_id),),
+    ).fetchone()
     if row is None:
         raise AllianceOperationError("联盟不存在", status_code=404)
+    if row["status"] == "archived":
+        raise AllianceOperationError("已删除联盟不能恢复", status_code=409)
     if selected == "active":
         conflict = conn.execute(
             """SELECT mine.clan_tag, other_alliances.name
@@ -1488,6 +1492,77 @@ def set_alliance_status(
     return {"alliance_id": int(alliance_id), "status": selected}
 
 
+def archive_suspended_alliance(
+    conn: sqlite3.Connection,
+    openid: str,
+    alliance_id: int,
+    confirmation_name: str,
+    *,
+    now: datetime | None = None,
+) -> dict:
+    """由超级管理员软删除已停用联盟，保留历史事实和审计。"""
+    actor = require_platform_admin(conn, openid)
+    row = conn.execute(
+        "SELECT name, status FROM alliances WHERE id=?", (int(alliance_id),),
+    ).fetchone()
+    if row is None:
+        raise AllianceOperationError("联盟不存在", status_code=404)
+    if row["status"] != "suspended":
+        raise AllianceOperationError("请先停用联盟，再执行删除", status_code=409)
+    if str(confirmation_name or "").strip() != row["name"]:
+        raise AllianceOperationError("请输入完整联盟名称确认删除", status_code=422)
+
+    timestamp = _iso(now)
+    with conn:
+        conn.execute(
+            "UPDATE alliance_clans SET status='inactive', updated_at=? "
+            "WHERE alliance_id=? AND status='active'",
+            (timestamp, int(alliance_id)),
+        )
+        conn.execute(
+            "UPDATE alliance_members SET status='left', updated_at=? "
+            "WHERE alliance_id=? AND status='active'",
+            (timestamp, int(alliance_id)),
+        )
+        conn.execute(
+            "UPDATE alliance_share_links SET status='revoked', updated_at=? "
+            "WHERE alliance_id=? AND status='active'",
+            (timestamp, int(alliance_id)),
+        )
+        conn.execute(
+            "UPDATE alliance_join_requests SET status='cancelled', updated_at=? "
+            "WHERE alliance_id=? AND status='pending'",
+            (timestamp, int(alliance_id)),
+        )
+        conn.execute(
+            "UPDATE alliance_plan_grants SET status='revoked', updated_at=? "
+            "WHERE alliance_id=? AND status='active'",
+            (timestamp, int(alliance_id)),
+        )
+        conn.execute(
+            "UPDATE sync_interests SET status='inactive', updated_at=? "
+            "WHERE alliance_id=? AND status='active'",
+            (timestamp, int(alliance_id)),
+        )
+        conn.execute("DELETE FROM alliance_visits WHERE alliance_id=?", (int(alliance_id),))
+        conn.execute(
+            "UPDATE alliances SET status='archived', updated_at=? WHERE id=?",
+            (timestamp, int(alliance_id)),
+        )
+        details = {"before": "suspended", "after": "archived", "name": row["name"]}
+        _alliance_audit(
+            conn, alliance_id=int(alliance_id), actor_user_id=int(actor["id"]),
+            action="alliance_archived_by_platform", entity_type="alliance",
+            entity_id=int(alliance_id), details=details, timestamp=timestamp,
+        )
+        _platform_audit(
+            conn, actor_user_id=int(actor["id"]), action="alliance_archived",
+            entity_type="alliance", entity_id=int(alliance_id), details=details,
+            timestamp=timestamp,
+        )
+    return {"alliance_id": int(alliance_id), "status": "archived"}
+
+
 def platform_dashboard(conn: sqlite3.Connection, openid: str, *, search: str = "") -> dict:
     require_platform_admin(conn, openid)
     keyword = f"%{search.strip()}%"
@@ -1508,7 +1583,8 @@ def platform_dashboard(conn: sqlite3.Connection, openid: str, *, search: str = "
            LEFT JOIN alliance_clans AS clans ON clans.alliance_id=alliances.id
            LEFT JOIN alliance_plan_grants AS grants
              ON grants.id=(SELECT MAX(g.id) FROM alliance_plan_grants AS g WHERE g.alliance_id=alliances.id)
-           WHERE (?='' OR alliances.name LIKE ? OR alliances.alliance_key LIKE ?)
+           WHERE alliances.status != 'archived'
+             AND (?='' OR alliances.name LIKE ? OR alliances.alliance_key LIKE ?)
            GROUP BY alliances.id
            ORDER BY CASE alliances.status WHEN 'active' THEN 0 ELSE 1 END, alliances.id DESC
            LIMIT 200""",

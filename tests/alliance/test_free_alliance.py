@@ -41,13 +41,23 @@ def _user(db, openid: str) -> int:
 def m5(db, monkeypatch):
     apply_sky_migration(db.conn, SKY_CLANS, now=NOW_TEXT)
     monkeypatch.setenv("M5_FREE_ALLIANCE_ENABLED", "true")
-    monkeypatch.setenv("M5_FREE_ALLIANCE_OPENIDS", "owner-a,owner-b")
+    monkeypatch.setenv("M5_FREE_ALLIANCE_OPENIDS", "")
     monkeypatch.setenv("SYNC_QUEUE_WORKER_ENABLED", "true")
     monkeypatch.setenv(
         "SYNC_QUEUE_LIVE_TYPES", "clan_profile,clan_members,current_war,cwl_live",
     )
     _user(db, "owner-a")
     _user(db, "owner-b")
+    db.conn.executemany(
+        """INSERT INTO platform_settings
+           (setting_key, value_json, updated_by_user_id, updated_at)
+           VALUES (?, ?, NULL, ?)""",
+        (
+            ("free_registration_enabled", "true", NOW_TEXT),
+            ("free_registration_limit", "20", NOW_TEXT),
+        ),
+    )
+    db.conn.commit()
     return db
 
 

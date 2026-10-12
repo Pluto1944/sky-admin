@@ -8,6 +8,7 @@ from modules.alliance.operations import (
     AllianceOperationError,
     add_alliance_member_by_openid,
     add_managed_clan,
+    archive_suspended_alliance,
     create_share_link,
     delete_browsing_history,
     grant_alliance_plan,
@@ -497,3 +498,24 @@ def platform_status(
         )
     except AllianceOperationError as exc:
         raise _error(exc) from exc
+
+
+@router.delete("/platform/alliances/{alliance_id}")
+def platform_delete_alliance(
+    alliance_id: int,
+    confirmation_name: str = "",
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        result = archive_suspended_alliance(
+            db.conn, user["openid"], alliance_id, confirmation_name,
+        )
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+    try:
+        reconcile_sync_targets(db.conn)
+        result["sync_reconcile"] = "complete"
+    except Exception:  # noqa: BLE001 - archive is committed; planner will converge later
+        result["sync_reconcile"] = "pending"
+    return result

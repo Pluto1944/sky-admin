@@ -11,6 +11,7 @@ from modules.alliance.operations import (
     add_alliance_member_by_openid,
     add_managed_clan,
     AllianceOperationError,
+    archive_suspended_alliance,
     create_share_link,
     delete_browsing_history,
     free_registration_policy,
@@ -106,6 +107,21 @@ def test_public_free_registration_is_capacity_controlled(ops):
     created = create_free_alliance(db.conn, "member", now=NOW)
     assert created > 0
     assert free_alliance_capability(db.conn, "blocked")["can_create"] is False
+
+
+def test_platform_admin_can_create_multiple_free_alliances(ops):
+    db, _ = ops
+    first = create_free_alliance(db.conn, "operator", name="平台测试一", now=NOW)
+    capability = free_alliance_capability(db.conn, "operator")
+    assert capability["unlimited"] is True
+    assert capability["can_create"] is True
+    second = create_free_alliance(db.conn, "operator", name="平台测试二", now=NOW)
+    assert first != second
+    assert db.conn.execute(
+        """SELECT COUNT(*) FROM alliances
+           WHERE created_by_user_id=(SELECT id FROM wechat_users WHERE openid='operator')
+             AND status='active'"""
+    ).fetchone()[0] == 2
 
 
 def test_share_join_is_member_only_idempotent_and_blocked_users_stay_blocked(ops):
@@ -264,6 +280,50 @@ def test_suspended_alliance_cannot_reactivate_with_verified_clan_conflict(ops):
     assert db.conn.execute(
         "SELECT status FROM alliances WHERE id=?", (first,),
     ).fetchone()[0] == "suspended"
+
+
+def test_platform_archive_requires_suspended_alliance_and_exact_name(ops):
+    db, ids = ops
+    alliance_id = _alliance(db, ids["owner"], "delete-a")
+    _clan(db, alliance_id, "#2QQ")
+    shared = create_share_link(db.conn, "owner", alliance_id, now=NOW)
+    record_share_visit(db.conn, "member", shared["token"], now=NOW)
+    request_alliance_join(db.conn, "member", alliance_id, now=NOW)
+
+    with pytest.raises(AllianceOperationError, match="先停用"):
+        archive_suspended_alliance(db.conn, "operator", alliance_id, "delete-a", now=NOW)
+    with pytest.raises(AllianceOperationError, match="不支持"):
+        set_alliance_status(db.conn, "operator", alliance_id, "archived", now=NOW)
+
+    set_alliance_status(db.conn, "operator", alliance_id, "suspended", now=NOW)
+    with pytest.raises(AllianceOperationError, match="完整联盟名称"):
+        archive_suspended_alliance(db.conn, "operator", alliance_id, "wrong", now=NOW)
+
+    result = archive_suspended_alliance(
+        db.conn, "operator", alliance_id, "delete-a", now=NOW,
+    )
+    assert result["status"] == "archived"
+    assert db.conn.execute(
+        "SELECT status FROM alliances WHERE id=?", (alliance_id,),
+    ).fetchone()[0] == "archived"
+    assert db.conn.execute(
+        "SELECT status FROM alliance_clans WHERE alliance_id=?", (alliance_id,),
+    ).fetchone()[0] == "inactive"
+    assert db.conn.execute(
+        "SELECT status FROM alliance_members WHERE alliance_id=?", (alliance_id,),
+    ).fetchone()[0] == "left"
+    assert db.conn.execute(
+        "SELECT status FROM alliance_share_links WHERE alliance_id=?", (alliance_id,),
+    ).fetchone()[0] == "revoked"
+    assert db.conn.execute(
+        "SELECT status FROM alliance_join_requests WHERE alliance_id=?", (alliance_id,),
+    ).fetchone()[0] == "cancelled"
+    assert not any(
+        item["id"] == alliance_id
+        for item in platform_dashboard(db.conn, "operator")["alliances"]
+    )
+    with pytest.raises(AllianceOperationError, match="不能恢复"):
+        set_alliance_status(db.conn, "operator", alliance_id, "active", now=NOW)
 
 
 def test_leader_can_promote_transfer_and_remove_member(ops):

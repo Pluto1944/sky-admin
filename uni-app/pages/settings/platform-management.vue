@@ -75,8 +75,13 @@
         <view class="card action-card">
           <text class="name">联盟状态</text>
           <text class="sub">当前：{{ statusLabel(detail.alliance.status) }}</text>
-          <button v-if="detail.alliance.status === 'active'" class="secondary-btn danger-text" @tap="changeStatus('suspended')">暂停联盟</button>
-          <button v-else class="primary-btn" @tap="changeStatus('active')">恢复联盟</button>
+          <button v-if="detail.alliance.status === 'active'" class="secondary-btn danger-text" @tap="changeStatus('suspended')">停用联盟</button>
+          <template v-else-if="detail.alliance.status === 'suspended'">
+            <button class="primary-btn" @tap="changeStatus('active')">恢复联盟</button>
+            <button class="delete-btn" @tap="deleteAlliance">删除已停用联盟</button>
+            <text class="sub danger-tip">删除后不再显示在联盟列表中；历史事实和审计仍会保留。</text>
+          </template>
+          <text v-else class="sub">该联盟已经删除，不能恢复。</text>
         </view>
       </template>
 
@@ -96,6 +101,7 @@
 <script>
 import TopBar from '@/components/TopBar.vue'
 import {
+  deletePlatformAlliance,
   getPlatformAlliance,
   getPlatformAlliances,
   savePlatformAllianceStatus,
@@ -191,8 +197,8 @@ export default {
     },
     changeStatus(status) {
       uni.showModal({
-        title: status === 'active' ? '恢复联盟' : '暂停联盟',
-        content: status === 'active' ? '确认恢复该联盟？' : '暂停后成员将暂时无法访问，公共历史不会删除。',
+        title: status === 'active' ? '恢复联盟' : '停用联盟',
+        content: status === 'active' ? '确认恢复该联盟？' : '停用后成员将暂时无法访问，公共历史不会删除。',
         success: async res => {
           if (!res.confirm) return
           try {
@@ -205,7 +211,29 @@ export default {
         }
       })
     },
-    statusLabel(value) { return ({ active: '正常', suspended: '已暂停', archived: '已归档' }[value] || value) },
+    deleteAlliance() {
+      const alliance = this.detail && this.detail.alliance
+      if (!alliance || alliance.status !== 'suspended') return
+      uni.showModal({
+        title: '删除已停用联盟',
+        content: `请输入联盟名称“${alliance.name}”确认删除`,
+        editable: true,
+        placeholderText: '联盟名称',
+        confirmColor: '#c9797f',
+        success: async result => {
+          if (!result.confirm) return
+          try {
+            await deletePlatformAlliance(alliance.id, result.content)
+            this.detail = null
+            await this.loadDashboard()
+            uni.showToast({ title: '联盟已删除', icon: 'success' })
+          } catch (err) {
+            uni.showToast({ title: err.message || '删除失败', icon: 'none' })
+          }
+        }
+      })
+    },
+    statusLabel(value) { return ({ active: '正常', suspended: '已停用', archived: '已删除' }[value] || value) },
     verificationLabel(value) { return ({ verified: '已认证', disputed: '争议中', revoked: '已撤销', unverified: '未认证' }[value] || value) },
     shortDate(value) { return value ? String(value).replace('T', ' ').slice(0, 16) : '' }
   }
@@ -231,6 +259,8 @@ export default {
 .clan-row { min-height: 100rpx; border-bottom: 1rpx solid #25253e; }.clan-row:last-child { border-bottom: 0; }
 .mini-btn { margin: 0 0 0 8rpx; padding: 5rpx 12rpx; color: #7eb8f6; background: #202b42; line-height: 2; }.mini-btn.warn { color: #d4a665; }.mini-btn.danger { color: #c9797f; }
 .action-card { margin-top: 16rpx; }.danger-text { color: #c9797f; }
+.delete-btn { margin-top: 16rpx; border: 1rpx solid rgba(201, 121, 127, .45); border-radius: 9rpx; color: #d98c91; background: rgba(120, 45, 54, .18); font-size: 23rpx; line-height: 2.4; }
+.delete-btn::after { border: 0; }.danger-tip { margin-top: 12rpx; color: #91676f; }
 .audit-row { min-height: 58rpx; border-bottom: 1rpx solid #24243c; }.time { margin-left: 12rpx; color: #5f687e; font-size: 19rpx; }
 .bottom-space { height: 80rpx; }
 </style>

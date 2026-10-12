@@ -70,29 +70,50 @@ const overviewCache = Object.create(null)
 
 export default {
   name: 'ClanOverview',
+  props: {
+    allianceId: { type: [Number, String], default: 0 }
+  },
   data() {
-    return { loading: true, refreshing: false, error: '', clans: [], updatedAt: '' }
+    return { loading: true, refreshing: false, error: '', clans: [], updatedAt: '', requestSerial: 0 }
   },
   created() {
-    const cache = overviewCache[getCurrentAllianceId() || 'public']
-    if (cache) {
-      this.applyResponse(cache)
-      this.loading = false
-      this.fetchData(false)
-    } else {
-      this.fetchData()
+    this.loadAlliance()
+  },
+  watch: {
+    allianceId(next, previous) {
+      if (Number(next) !== Number(previous)) this.loadAlliance()
     }
   },
   computed: {
     canManageClans() {
       const alliance = getCurrentAlliance()
-      if (!alliance || ['admin', 'leader'].indexOf(alliance.role) < 0) return false
+      if (!alliance || Number(alliance.id) !== this.resolvedAllianceId() || ['admin', 'leader'].indexOf(alliance.role) < 0) return false
       const code = alliance.plan && alliance.plan.code
       const state = alliance.plan && alliance.plan.status
       return code === 'free' || (code === 'paid' && ['active', 'legacy'].indexOf(state) >= 0)
     }
   },
   methods: {
+    resolvedAllianceId() {
+      return Number(this.allianceId) || getCurrentAllianceId()
+    },
+    loadAlliance() {
+      // 立即清除上一联盟的可见内容，并使其尚未完成的请求失效。
+      this.requestSerial += 1
+      this.refreshing = false
+      this.error = ''
+      this.clans = []
+      this.updatedAt = ''
+      const cache = overviewCache[this.resolvedAllianceId() || 'public']
+      if (cache) {
+        this.applyResponse(cache)
+        this.loading = false
+        this.fetchData(false)
+      } else {
+        this.loading = true
+        this.fetchData()
+      }
+    },
     openClanManagement() {
       uni.navigateTo({ url: '/pages/settings/clan-management' })
     },
@@ -104,20 +125,25 @@ export default {
       this.fetchData(false)
     },
     async fetchData(showLoading = true) {
-      if (this.refreshing) return
-      const cacheKey = getCurrentAllianceId() || 'public'
+      const allianceId = this.resolvedAllianceId()
+      const cacheKey = allianceId || 'public'
+      const requestSerial = ++this.requestSerial
       this.refreshing = true
       if (showLoading && !this.clans.length) this.loading = true
       this.error = ''
       try {
-        const res = await getClanOverview()
+        const res = await getClanOverview(allianceId)
+        if (requestSerial !== this.requestSerial || allianceId !== this.resolvedAllianceId()) return
         overviewCache[cacheKey] = res
         this.applyResponse(res)
       } catch (e) {
+        if (requestSerial !== this.requestSerial) return
         this.error = e.message || '加载失败'
       } finally {
-        this.loading = false
-        this.refreshing = false
+        if (requestSerial === this.requestSerial) {
+          this.loading = false
+          this.refreshing = false
+        }
       }
     },
     formatTime(value) {

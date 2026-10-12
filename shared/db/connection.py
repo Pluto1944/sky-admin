@@ -159,10 +159,6 @@ CREATE TABLE IF NOT EXISTS alliances (
     FOREIGN KEY(created_by_user_id) REFERENCES wechat_users(id) ON DELETE SET NULL
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_alliances_one_active_free_per_creator
-ON alliances(created_by_user_id)
-WHERE plan_code = 'free' AND status = 'active' AND created_by_user_id IS NOT NULL;
-
 CREATE TABLE IF NOT EXISTS alliance_members (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     alliance_id INTEGER NOT NULL,
@@ -1236,6 +1232,10 @@ class Database:
         self.conn.commit()
         self.conn.execute("PRAGMA legacy_alter_table = ON")
         self.conn.execute("PRAGMA foreign_keys = OFF")
+
+        # 普通用户“一人一个免费联盟”由服务层按角色校验；超级管理员可以从
+        # 下拉菜单创建多个联盟，因此旧的数据库唯一索引必须幂等移除。
+        self.conn.execute("DROP INDEX IF EXISTS idx_alliances_one_active_free_per_creator")
 
         reg_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(registrations)")}
 

@@ -475,6 +475,8 @@ DELETE /api/alliances/{alliance_id}
 环境总开关控制。内部测试账号可由 `M5_FREE_ALLIANCE_OPENIDS` 允许；外部用户还必须满足平台后台
 `free_registration_enabled=true` 且未达到总配额。创建者是联盟
 首领，但新订阅部落固定为 `unverified`，因此业务数据权限仍封顶为成员。免费联盟最多一个有效部落；
+普通用户最多创建一个有效免费联盟；超级管理员通过同一创建接口和左上角联盟下拉菜单创建时不受该数量限制，
+但每个免费联盟仍最多只有一个有效部落。
 管理员或首领可修改 `normal / combat / farm / flat` 标签，也可先软移除再添加另一个 Tag。
 移除会撤销当前联盟的部落认证关系，但不清理共享公共缓存或历史。
 
@@ -557,6 +559,7 @@ PUT /api/platform/settings/free-registration
 PUT /api/platform/alliances/{alliance_id}/verification
 PUT /api/platform/alliances/{alliance_id}/plan
 PUT /api/platform/alliances/{alliance_id}/status
+DELETE /api/platform/alliances/{alliance_id}?confirmation_name=...
 ```
 
 分享预览无需 JWT，只返回联盟名称、套餐名称、部落数量、分享类型和过期时间，不创建成员、不提交
@@ -577,6 +580,11 @@ PUT /api/platform/alliances/{alliance_id}/status
 可通过统一接口新增、软移除、修改业务标签和调整顺序；免费套餐最多 1 个有效部落，付费套餐当前
 最多 10 个。新增或重新启用的部落默认未认证并通过 M4 队列初始化。`internal` 套餐由系统配置，
 不允许在小程序中修改，防止误改苍穹存量配置。平台套餐接口是人工运营入口，不是在线支付接口。
+
+超级管理的联盟删除采用“先停用、再删除”两阶段规则。状态接口只允许在 `active / suspended`
+之间切换；删除接口只接受已经停用且 `confirmation_name` 与联盟完整名称一致的目标。删除是软归档：
+撤销有效分享、取消待处理加入申请、停止联盟同步需求、退出当前成员并从普通平台列表移除，但不删除
+公共战争、联赛等历史事实及审计记录。已归档联盟不能通过状态接口恢复。
 
 ### 6. 绑定游戏账号
 

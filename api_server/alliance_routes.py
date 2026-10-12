@@ -337,7 +337,7 @@ def create_my_free_alliance(
     user: dict = Depends(require_user),
     db: Database = Depends(get_db),
 ):
-    """Create the current user's one internal-gray free alliance."""
+    """创建免费联盟；普通用户限一个，超级管理员不受数量限制。"""
     try:
         alliance_id = create_free_alliance(
             db.conn, user["openid"], name=payload.name,

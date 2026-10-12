@@ -1,8 +1,15 @@
 <template>
   <view class="clan-page">
-    <TopBar title="部落" :buttons="topButtons" @onSection="switchSection" />
+    <TopBar title="部落" :buttons="topButtons" @onSection="switchSection" @alliance-change="onAllianceChanged" />
     <view v-if="!contextReady" class="context-loading"><text>正在加载联盟...</text></view>
-    <ClanOverview v-else-if="activeSection === 'overview'" :key="'overview-' + allianceVersion" ref="overview" class="clan-section" @open-detail="openDetail" />
+    <ClanOverview
+      v-else-if="activeSection === 'overview'"
+      :key="'overview-' + activeAllianceId + '-' + allianceVersion"
+      ref="overview"
+      class="clan-section"
+      :alliance-id="activeAllianceId"
+      @open-detail="openDetail"
+    />
     <ClanMembers v-else-if="activeSection === 'members'" :key="'members-' + allianceVersion" class="clan-section" :initial-clan-tag="memberClanTag" />
     <ClanStats v-else-if="activeSection === 'stats'" :key="'stats-' + allianceVersion" class="clan-section" />
     <ClanFarm v-else-if="activeSection === 'farm'" :key="'farm-' + allianceVersion" class="clan-section" />
@@ -27,14 +34,14 @@ import ClanMembers from './components/ClanMembers.vue'
 import ClanStats from './components/ClanStats.vue'
 import ClanFarm from './components/ClanFarm.vue'
 import ClanDetail from './components/ClanDetail.vue'
-import { ALLIANCE_CHANGED_EVENT, activateSharedAlliance, allianceQuery } from '@/utils/alliance.js'
+import { ALLIANCE_CHANGED_EVENT, activateSharedAlliance, allianceQuery, getCurrentAllianceId } from '@/utils/alliance.js'
 
 const VALID_SECTIONS = ['overview', 'members', 'stats', 'farm', 'clan-detail']
 
 export default {
   components: { TopBar, ClanOverview, ClanMembers, ClanStats, ClanFarm, ClanDetail },
   data() {
-    return { activeSection: 'overview', selectedClanTag: '', selectedClanName: '', memberClanTag: '', allianceVersion: 0, allianceChangeHandler: null, contextReady: false }
+    return { activeSection: 'overview', selectedClanTag: '', selectedClanName: '', memberClanTag: '', activeAllianceId: getCurrentAllianceId(), allianceVersion: 0, allianceChangeHandler: null, contextReady: false }
   },
   computed: {
     topButtons() {
@@ -53,13 +60,8 @@ export default {
     } catch (e) {
       uni.showToast({ title: e.message || '联盟切换失败', icon: 'none' })
     }
-    this.allianceChangeHandler = () => {
-      this.allianceVersion += 1
-      this.selectedClanTag = ''
-      this.selectedClanName = ''
-      this.memberClanTag = ''
-      this.activeSection = 'overview'
-    }
+    this.activeAllianceId = getCurrentAllianceId()
+    this.allianceChangeHandler = this.onAllianceChanged
     uni.$on(ALLIANCE_CHANGED_EVENT, this.allianceChangeHandler)
     const requestedSection = options && options.section
     const section = VALID_SECTIONS.includes(requestedSection) ? requestedSection : 'overview'
@@ -83,6 +85,16 @@ export default {
   onShareAppMessage() { return { title: this.shareTitle(), path: this.sharePath() } },
   onShareTimeline() { return { title: this.shareTitle(), query: this.shareQuery() } },
   methods: {
+    onAllianceChanged(alliance) {
+      const nextAllianceId = Number(alliance && alliance.id) || getCurrentAllianceId()
+      if (!nextAllianceId || nextAllianceId === Number(this.activeAllianceId)) return
+      this.activeAllianceId = nextAllianceId
+      this.allianceVersion += 1
+      this.selectedClanTag = ''
+      this.selectedClanName = ''
+      this.memberClanTag = ''
+      this.activeSection = 'overview'
+    },
     switchSection(section) {
       if (!VALID_SECTIONS.includes(section) || section === 'clan-detail') return
       if (section !== 'members') this.memberClanTag = ''

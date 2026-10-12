@@ -161,7 +161,7 @@ def test_plan_limits_and_role_enums_are_database_constraints(db):
         )
 
 
-def test_one_active_free_alliance_per_creator(db):
+def test_database_allows_platform_admin_to_create_multiple_free_alliances(db):
     apply_sky_migration(db.conn, CLANS)
     user_id = _add_wechat_user(db, "creator")
     now = "2026-10-09T00:00:00+00:00"
@@ -171,13 +171,28 @@ def test_one_active_free_alliance_per_creator(db):
            VALUES ('free-a', 'A', 'active', 'free', ?, ?, ?)""",
         (user_id, now, now),
     )
-    with pytest.raises(sqlite3.IntegrityError, match="UNIQUE constraint"):
-        db.conn.execute(
-            """INSERT INTO alliances
-               (alliance_key, name, status, plan_code, created_by_user_id, created_at, updated_at)
-               VALUES ('free-b', 'B', 'active', 'free', ?, ?, ?)""",
-            (user_id, now, now),
-        )
+    db.conn.execute(
+        """CREATE UNIQUE INDEX idx_alliances_one_active_free_per_creator
+           ON alliances(created_by_user_id)
+           WHERE plan_code='free' AND status='active'
+             AND created_by_user_id IS NOT NULL"""
+    )
+    db.conn.commit()
+    db._migrate()
+    db.conn.execute(
+        """INSERT INTO alliances
+           (alliance_key, name, status, plan_code, created_by_user_id, created_at, updated_at)
+           VALUES ('free-b', 'B', 'active', 'free', ?, ?, ?)""",
+        (user_id, now, now),
+    )
+    assert db.conn.execute(
+        "SELECT COUNT(*) FROM alliances WHERE created_by_user_id=? AND status='active'",
+        (user_id,),
+    ).fetchone()[0] == 2
+    assert db.conn.execute(
+        """SELECT COUNT(*) FROM sqlite_master
+           WHERE type='index' AND name='idx_alliances_one_active_free_per_creator'"""
+    ).fetchone()[0] == 0
 
 
 def test_plan_change_cannot_bypass_active_clan_limit(db):

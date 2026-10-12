@@ -18,8 +18,7 @@ function currentAllianceId() {
   return storedAllianceId()
 }
 
-function scopedPath(suffix) {
-  const allianceId = currentAllianceId()
+function scopedPath(suffix, allianceId = currentAllianceId()) {
   return allianceId ? `/api/alliances/${allianceId}${suffix}` : ''
 }
 
@@ -438,6 +437,11 @@ export function savePlatformAllianceStatus(allianceId, status, note = '') {
   return request(`/api/platform/alliances/${encodeURIComponent(allianceId)}/status`, 'PUT', { status, note }, true)
 }
 
+export function deletePlatformAlliance(allianceId, confirmationName) {
+  const query = `?confirmation_name=${encodeURIComponent(confirmationName || '')}`
+  return request(`/api/platform/alliances/${encodeURIComponent(allianceId)}${query}`, 'DELETE', {}, true)
+}
+
 /**
  * 绑定游戏账号
  * @param {string} accountName - 游戏内昵称
@@ -472,8 +476,8 @@ export function getMembers(options = {}) {
 }
 
 /** 获取全部自有部落的概览卡片。 */
-export function getClanOverview() {
-  const scoped = scopedPath('/clans')
+export function getClanOverview(allianceId) {
+  const scoped = scopedPath('/clans', allianceId)
   return scoped ? request(scoped, 'GET', {}, true) : missingAlliance()
 }
 

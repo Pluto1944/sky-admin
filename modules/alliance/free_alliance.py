@@ -19,7 +19,7 @@ from modules.sync_queue.config import active_live_resource_types
 from modules.sync_queue.planner import SyncPlanner
 from modules.sync_queue.repository import SyncQueueError, SyncQueueRepository
 
-from .operations import free_registration_policy
+from .operations import free_registration_policy, platform_admin_capability
 
 
 FREE_CATEGORIES = ("normal", "combat", "farm", "flat")
@@ -74,6 +74,7 @@ def free_alliance_capability(conn: sqlite3.Connection, openid: str) -> dict:
         "SELECT id FROM wechat_users WHERE openid = ?", (openid,),
     ).fetchone()
     existing = None
+    active_existing = None
     if user is not None:
         existing = conn.execute(
             """SELECT id, name, status FROM alliances
@@ -81,23 +82,33 @@ def free_alliance_capability(conn: sqlite3.Connection, openid: str) -> dict:
                ORDER BY id DESC LIMIT 1""",
             (user["id"],),
         ).fetchone()
+        active_existing = conn.execute(
+            """SELECT id FROM alliances
+               WHERE created_by_user_id = ? AND plan_code = 'free' AND status = 'active'
+               ORDER BY id DESC LIMIT 1""",
+            (user["id"],),
+        ).fetchone()
     enabled = _enabled()
     policy = free_registration_policy(conn)
+    platform_admin = platform_admin_capability(conn, openid)["allowed"]
     internal_allowed = openid in _allowlist()
     public_allowed = policy["public_open"] and policy["has_capacity"]
-    allowed = enabled and (internal_allowed or public_allowed or bool(
-        existing is not None and existing["status"] == "active"
+    allowed = enabled and (platform_admin or internal_allowed or public_allowed or bool(
+        active_existing is not None
     ))
     return {
         "enabled": enabled,
         "allowed": allowed,
-        "mode": "internal" if internal_allowed else ("public" if policy["public_open"] else "closed"),
+        "mode": "platform" if platform_admin else (
+            "internal" if internal_allowed else ("public" if policy["public_open"] else "closed")
+        ),
+        "unlimited": bool(platform_admin),
         "public_open": policy["public_open"],
         "registration_limit": policy["limit"],
         "registration_remaining": policy["remaining"],
-        "can_create": bool(allowed and user is not None and not (
-            existing is not None and existing["status"] == "active"
-        )),
+        "can_create": bool(
+            allowed and user is not None and (platform_admin or active_existing is None)
+        ),
         "existing_alliance_id": int(existing["id"]) if existing else None,
         "existing_status": existing["status"] if existing else None,
     }
