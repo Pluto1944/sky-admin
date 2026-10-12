@@ -3,7 +3,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from fastapi import HTTPException
 
+import api_server.alliance_operations_routes as alliance_operations_routes
 import api_server.alliance_routes as alliance_routes
 import scripts.scheduler as scheduler
 from modules.alliance.access import resolve_alliance_context
@@ -241,6 +243,42 @@ def test_route_payload_exposes_capability_and_async_status(m5):
         "pending", "running", "retry_wait", "ready", "partial", "failed",
     }
     assert len(subscription_status(m5.conn, alliance_id, "#2QQ")) == 3
+
+    managed = alliance_operations_routes.alliance_managed_clans(
+        alliance_id, user={"openid": "owner-a"}, db=m5,
+    )
+    assert managed["manual_refresh_available"] is True
+    assert len(managed["clans"][0]["sync"]) == 3
+
+    refreshed = alliance_operations_routes.refresh_alliance_managed_clan(
+        alliance_id,
+        "#2QQ",
+        alliance_operations_routes.ManagedClanRefreshInput(),
+        user={"openid": "owner-a"},
+        db=m5,
+    )
+    assert refreshed["clan_tag"] == "#2QQ"
+    assert len(refreshed["sync"]) == 3
+
+    member_id = int(m5.conn.execute(
+        "SELECT id FROM wechat_users WHERE openid='owner-b'",
+    ).fetchone()[0])
+    m5.conn.execute(
+        """INSERT INTO alliance_members
+           (alliance_id, user_id, role, status, joined_at, created_at, updated_at)
+           VALUES (?, ?, 'member', 'active', ?, ?, ?)""",
+        (alliance_id, member_id, NOW_TEXT, NOW_TEXT, NOW_TEXT),
+    )
+    m5.conn.commit()
+    with pytest.raises(HTTPException) as exc_info:
+        alliance_operations_routes.refresh_alliance_managed_clan(
+            alliance_id,
+            "#2QQ",
+            alliance_operations_routes.ManagedClanRefreshInput(),
+            user={"openid": "owner-b"},
+            db=m5,
+        )
+    assert exc_info.value.status_code == 403
 
 
 def test_free_only_clan_is_excluded_from_daily_player_detail_scan(m5, monkeypatch):

@@ -539,6 +539,7 @@ POST   /api/alliances/{alliance_id}/managed-clans
 PUT    /api/alliances/{alliance_id}/managed-clans/order
 PATCH  /api/alliances/{alliance_id}/managed-clans/{clan_tag}
 DELETE /api/alliances/{alliance_id}/managed-clans/{clan_tag}
+POST   /api/alliances/{alliance_id}/managed-clans/{clan_tag}/refresh
 GET    /api/alliances/{alliance_id}/shares
 POST   /api/alliances/{alliance_id}/shares
 DELETE /api/alliances/{alliance_id}/shares/{link_id}
@@ -585,6 +586,11 @@ DELETE /api/platform/alliances/{alliance_id}?confirmation_name=...
 可通过统一接口新增、软移除、修改业务标签和调整顺序；免费套餐最多 1 个有效部落，付费套餐当前
 最多 10 个。新增或重新启用的部落默认未认证并通过 M4 队列初始化。`internal` 套餐由系统配置，
 不允许在小程序中修改，防止误改苍穹存量配置。平台套餐接口是人工运营入口，不是在线支付接口。
+
+通用部落管理响应为免费套餐的有效部落附带三项本地同步状态，并通过 `manual_refresh_available` 明确
+是否允许手动刷新。通用刷新接口当前只对免费联盟的管理员或首领开放，只向全局去重队列提交任务并遵守
+共享冷却，不在 HTTP 请求中调用 COC；普通成员返回 `403`，自动高频套餐返回 `409`。旧
+`/subscription` 三个接口继续兼容已发布小程序，新版前端不再使用其管理页面。
 
 平台部落管理使用 `/api/platform/alliances/{alliance_id}/managed-clans` 专用接口。它只接受超级管理员，
 不要求操作者先成为目标联盟成员，并可添加、软移除、修改标签和调整顺序。平台添加不受目标联盟套餐

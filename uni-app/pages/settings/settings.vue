@@ -35,72 +35,6 @@
           </view>
         </view>
 
-        <template v-if="showFreeAllianceSection">
-          <view class="section-heading">
-            <text class="section-heading-title">我的部落</text>
-            <text class="free-gray-badge">{{ freeAllianceBadge }}</text>
-          </view>
-
-          <view class="free-alliance-card">
-              <view class="free-card-head">
-                <view>
-                  <text class="free-card-title">{{ freeAlliance.name }}</text>
-                  <text class="free-card-meta">免费 · 首领 · {{ freeAlliance.verification_status === 'verified' ? '已认证' : '未认证' }}</text>
-                </view>
-                <text class="free-card-state">低频刷新</text>
-              </view>
-
-              <view class="free-form-block">
-                <text class="free-label">联盟名称</text>
-                <view class="free-inline-row">
-                  <input v-model="freeAllianceName" class="free-input free-inline-input" maxlength="30" />
-                  <button class="free-small-btn" :disabled="freeBusy" @tap="saveFreeAllianceName">保存</button>
-                </view>
-              </view>
-
-              <view v-if="freeSubscription && freeSubscription.clan" class="free-subscription">
-                <view class="free-clan-row">
-                  <view class="free-clan-main">
-                    <text class="free-clan-name">{{ freeSubscription.clan.clan_name }}</text>
-                    <text class="free-clan-tag">{{ freeSubscription.clan.clan_tag }}</text>
-                  </view>
-                  <picker :range="freeCategories" range-key="label" :value="freeCategoryIndex" @change="updateSavedFreeCategory">
-                    <text class="free-category-chip">{{ freeCategoryLabel(freeSubscription.clan.category) }}⌄</text>
-                  </picker>
-                </view>
-                <view class="free-sync-list">
-                  <view v-for="item in freeSubscription.sync" :key="item.resource_type" class="free-sync-row">
-                    <text>{{ freeResourceLabel(item.resource_type) }}</text>
-                    <view class="free-sync-value">
-                      <text :class="['free-sync-state', 'state-' + item.state]">{{ freeStateLabel(item.state) }}</text>
-                      <text v-if="item.cache_updated_at" class="free-sync-time">{{ shortTime(item.cache_updated_at) }}</text>
-                    </view>
-                  </view>
-                </view>
-                <button class="free-primary-btn" :loading="freeRefreshing" :disabled="freeBusy || freeRefreshing" @tap="refreshFreeWar">刷新战况</button>
-                <text class="free-action-tip">刷新请求会进入后台队列；同一部落共享冷却，不会阻塞页面。</text>
-              </view>
-
-              <view v-else class="free-form-block free-subscribe-form">
-                <text class="free-label">订阅部落</text>
-                <input
-                  v-model="freeClanTag"
-                  class="free-input"
-                  maxlength="15"
-                  placeholder="部落标签，例如 #2QQ"
-                  placeholder-style="color:#59637a"
-                />
-                <picker :range="freeCategories" range-key="label" :value="freeCategoryIndex" @change="changeFreeCategory">
-                  <view class="free-picker">业务标签：{{ freeCategories[freeCategoryIndex].label }} <text>⌄</text></view>
-                </picker>
-                <button class="free-primary-btn" :loading="freeBusy" :disabled="freeBusy || !freeClanTag.trim()" @tap="saveFreeClan">订阅并初始化</button>
-                <text class="free-action-tip">提交后异步读取部落资料、成员列表和当前战争；无缓存时会显示“正在初始化”。</text>
-              </view>
-
-              <button class="free-danger-btn" :disabled="freeBusy" @tap="confirmArchiveFreeAlliance">停用并删除联盟</button>
-          </view>
-        </template>
-
         <view class="section-heading">
           <text class="section-heading-title">互刷系统</text>
           <text class="farm-system-account">独立账号</text>
@@ -122,7 +56,7 @@
               <view class="menu-icon menu-icon-alliance">盟</view>
               <view class="menu-copy">
                 <text class="menu-text">管理联盟</text>
-                <text class="menu-desc">申请、邀请、成员和认证</text>
+                <text class="menu-desc">申请、邀请、成员和联盟设置</text>
               </view>
               <text class="menu-arrow">›</text>
             </view>
@@ -263,15 +197,10 @@
 <script>
 import TopBar from '@/components/TopBar.vue'
 import {
-  archiveFreeAlliance,
   bindAccount,
-  getFreeAllianceSubscription,
   getMyInfo,
   getServerInfo,
   getSystemVersion,
-  refreshFreeAllianceSubscription,
-  renameFreeAlliance,
-  saveFreeAllianceSubscription,
   wechatLogin
 } from '@/utils/api.js'
 import { ALLIANCE_CHANGED_EVENT, acceptPendingAllianceShare, clearAllianceContext, getCurrentAlliance, loadAllianceContext } from '@/utils/alliance.js'
@@ -292,21 +221,7 @@ export default {
       privacyAgreed: false,
       currentAlliance: getCurrentAlliance(),
       allianceChangeHandler: null,
-      allianceFeatures: {},
-      freeAlliance: null,
-      freeSubscription: null,
-      freeAllianceName: '',
-      freeClanTag: '',
-      freeCategories: [
-        { key: 'normal', label: '实战' },
-        { key: 'combat', label: '战营' },
-        { key: 'farm', label: '互刷' },
-        { key: 'flat', label: '偷矿' }
-      ],
-      freeCategoryIndex: 0,
-      freeBusy: false,
-      freeRefreshing: false,
-      freeStatusTimer: null
+      allianceFeatures: {}
     }
   },
   computed: {
@@ -316,13 +231,6 @@ export default {
     },
     isPlatformAdmin() {
       return Boolean(this.allianceFeatures.platform_admin && this.allianceFeatures.platform_admin.allowed)
-    },
-    freeAllianceBadge() {
-      const feature = this.allianceFeatures.free_alliance || {}
-      return feature.public_open ? '免费版' : '内部测试'
-    },
-    showFreeAllianceSection() {
-      return Boolean(this.freeAlliance)
     },
     displayName() {
       if (this.userInfo && this.userInfo.nickname) {
@@ -338,15 +246,10 @@ export default {
   created() {
     this.allianceChangeHandler = alliance => {
       this.currentAlliance = alliance
-      if (this.isLoggedIn) this.refreshFreeAlliancePanel()
     }
     uni.$on(ALLIANCE_CHANGED_EVENT, this.allianceChangeHandler)
   },
-  onHide() {
-    this.stopFreeStatusPoll()
-  },
   onUnload() {
-    this.stopFreeStatusPoll()
     if (this.allianceChangeHandler) uni.$off(ALLIANCE_CHANGED_EVENT, this.allianceChangeHandler)
   },
   methods: {
@@ -386,7 +289,7 @@ export default {
               .catch((err) => {
                 uni.showToast({ title: err.message || '加入联盟失败', icon: 'none' })
               })
-              .finally(() => this.refreshFreeAlliancePanel())
+              .finally(() => this.refreshAllianceContext())
           })
           .catch(() => {
             this.isLoggedIn = false
@@ -427,6 +330,7 @@ export default {
                     uni.showToast({ title: `已加入${joined.alliance.name}`, icon: 'success' })
                   }
                 })
+                .then(() => this.refreshAllianceContext())
                 .catch(() => {})
               this.loginLoading = false
 
@@ -475,166 +379,14 @@ export default {
       uni.navigateTo({ url: target })
     },
 
-    async refreshFreeAlliancePanel() {
+    async refreshAllianceContext() {
       try {
         const loaded = await loadAllianceContext()
         this.allianceFeatures = loaded.features || {}
-        this.freeAlliance = (loaded.alliances || []).find(item => item.plan && item.plan.code === 'free' && item.role === 'leader') || null
-        if (!this.freeAlliance) {
-          this.freeSubscription = null
-          if (!this.freeAllianceName) this.freeAllianceName = '我的部落'
-          return
-        }
-        this.freeAllianceName = this.freeAlliance.name
-        this.freeSubscription = await getFreeAllianceSubscription(this.freeAlliance.id)
-        if (this.freeSubscription.clan) {
-          this.freeClanTag = this.freeSubscription.clan.clan_tag
-          const index = this.freeCategories.findIndex(item => item.key === this.freeSubscription.clan.category)
-          if (index >= 0) this.freeCategoryIndex = index
-        }
-        this.scheduleFreeStatusPoll()
+        this.currentAlliance = loaded.current || getCurrentAlliance()
       } catch (err) {
-        this.freeSubscription = null
+        this.allianceFeatures = {}
       }
-    },
-
-    async saveFreeAllianceName() {
-      const name = this.freeAllianceName.trim()
-      if (!name || !this.freeAlliance || this.freeBusy) return
-      this.freeBusy = true
-      try {
-        await renameFreeAlliance(this.freeAlliance.id, name)
-        await this.refreshFreeAlliancePanel()
-        const current = getCurrentAlliance()
-        if (current && Number(current.id) === Number(this.freeAlliance.id)) {
-          uni.$emit('alliance-changed', this.freeAlliance)
-        }
-        uni.showToast({ title: '名称已保存', icon: 'success' })
-      } catch (err) {
-        uni.showToast({ title: err.message || '保存失败', icon: 'none' })
-      } finally {
-        this.freeBusy = false
-      }
-    },
-
-    changeFreeCategory(event) {
-      this.freeCategoryIndex = Number(event.detail.value) || 0
-    },
-
-    async updateSavedFreeCategory(event) {
-      if (!this.freeAlliance || !this.freeSubscription || !this.freeSubscription.clan || this.freeBusy) return
-      const index = Number(event.detail.value) || 0
-      this.freeBusy = true
-      try {
-        await saveFreeAllianceSubscription(this.freeAlliance.id, {
-          clan_tag: this.freeSubscription.clan.clan_tag,
-          clan_name: this.freeSubscription.clan.clan_name,
-          category: this.freeCategories[index].key
-        })
-        this.freeCategoryIndex = index
-        await this.refreshFreeAlliancePanel()
-        uni.showToast({ title: '标签已更新', icon: 'success' })
-      } catch (err) {
-        uni.showToast({ title: err.message || '更新失败', icon: 'none' })
-      } finally {
-        this.freeBusy = false
-      }
-    },
-
-    async saveFreeClan() {
-      if (!this.freeAlliance || this.freeBusy) return
-      const clanTag = this.freeClanTag.trim()
-      if (!clanTag) return
-      this.freeBusy = true
-      try {
-        await saveFreeAllianceSubscription(this.freeAlliance.id, {
-          clan_tag: clanTag,
-          category: this.freeCategories[this.freeCategoryIndex].key
-        })
-        await this.refreshFreeAlliancePanel()
-        uni.showToast({ title: '已提交初始化', icon: 'success' })
-      } catch (err) {
-        uni.showModal({ title: '订阅失败', content: err.message || '请稍后重试', showCancel: false })
-      } finally {
-        this.freeBusy = false
-      }
-    },
-
-    async refreshFreeWar() {
-      if (!this.freeAlliance || this.freeRefreshing) return
-      this.freeRefreshing = true
-      try {
-        const result = await refreshFreeAllianceSubscription(this.freeAlliance.id)
-        this.freeSubscription.sync = result.sync || []
-        this.scheduleFreeStatusPoll()
-        const accepted = (result.results || []).some(item => item.accepted)
-        uni.showToast({ title: accepted ? '刷新已提交' : '已在刷新或冷却中', icon: 'none' })
-      } catch (err) {
-        uni.showToast({ title: err.message || '刷新失败', icon: 'none' })
-      } finally {
-        this.freeRefreshing = false
-      }
-    },
-
-    confirmArchiveFreeAlliance() {
-      if (!this.freeAlliance || this.freeBusy) return
-      uni.showModal({
-        title: '停用并删除联盟',
-        content: `请输入联盟名称“${this.freeAlliance.name}”确认删除`,
-        editable: true,
-        placeholderText: '联盟名称',
-        confirmColor: '#d56b72',
-        success: async (result) => {
-          if (!result.confirm) return
-          this.freeBusy = true
-          try {
-            await archiveFreeAlliance(this.freeAlliance.id, result.content)
-            this.freeAlliance = null
-            this.freeSubscription = null
-            this.freeAllianceName = '我的部落'
-            await loadAllianceContext(null, true)
-            await this.refreshFreeAlliancePanel()
-            uni.showToast({ title: '联盟已停用', icon: 'success' })
-          } catch (err) {
-            uni.showToast({ title: err.message || '操作失败', icon: 'none' })
-          } finally {
-            this.freeBusy = false
-          }
-        }
-      })
-    },
-
-    freeCategoryLabel(value) {
-      const item = this.freeCategories.find(option => option.key === value)
-      return item ? item.label : value
-    },
-    freeResourceLabel(value) {
-      return ({ clan_profile: '部落资料', clan_members: '成员列表', current_war: '当前战争' }[value] || value)
-    },
-    freeStateLabel(value) {
-      return ({ pending: '正在初始化', running: '正在刷新', retry_wait: '等待重试', ready: '已就绪', partial: '使用缓存', failed: '刷新失败' }[value] || value)
-    },
-    shortTime(value) {
-      if (!value) return ''
-      return String(value).replace('T', ' ').slice(5, 16)
-    },
-    stopFreeStatusPoll() {
-      if (this.freeStatusTimer) clearTimeout(this.freeStatusTimer)
-      this.freeStatusTimer = null
-    },
-    scheduleFreeStatusPoll() {
-      this.stopFreeStatusPoll()
-      const rows = (this.freeSubscription && this.freeSubscription.sync) || []
-      if (!rows.some(item => ['pending', 'running', 'retry_wait'].indexOf(item.state) >= 0)) return
-      this.freeStatusTimer = setTimeout(async () => {
-        if (!this.freeAlliance) return
-        try {
-          this.freeSubscription = await getFreeAllianceSubscription(this.freeAlliance.id)
-        } catch (err) {
-          // 保留旧状态；下一次进入设置页会重新读取。
-        }
-        this.scheduleFreeStatusPoll()
-      }, 5000)
     },
 
     // ====== 绑定 ======
@@ -760,8 +512,6 @@ export default {
             this.bindAccountName = ''
             this.bindPlayerTag = ''
             this.allianceFeatures = {}
-            this.freeAlliance = null
-            this.freeSubscription = null
           }
         }
       })
@@ -925,138 +675,6 @@ export default {
 .openid-copy::after {
   border: 0;
 }
-
-.free-gray-badge {
-  padding: 4rpx 13rpx;
-  color: #78879d;
-  background: rgba(110, 126, 151, .08);
-  border: 1rpx solid rgba(110, 126, 151, .18);
-  border-radius: 18rpx;
-  font-size: 19rpx;
-}
-
-.free-alliance-card {
-  padding: 28rpx;
-  margin-bottom: 28rpx;
-  background: #191a33;
-  border: 1rpx solid #2d3153;
-  border-radius: 18rpx;
-  box-shadow: 0 10rpx 30rpx rgba(0, 0, 0, .12);
-}
-
-.free-card-head,
-.free-clan-row,
-.free-sync-row,
-.free-inline-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.free-card-title,
-.free-card-desc,
-.free-card-meta,
-.free-label,
-.free-action-tip,
-.free-clan-name,
-.free-clan-tag {
-  display: block;
-}
-
-.free-card-title { color: #e6e9f1; font-size: 29rpx; font-weight: 600; }
-.free-card-desc { margin-top: 12rpx; color: #7d879c; font-size: 22rpx; line-height: 1.6; }
-.free-card-meta { margin-top: 8rpx; color: #68748b; font-size: 20rpx; }
-.free-card-state { flex-shrink: 0; margin-left: 18rpx; color: #7f8ba2; font-size: 21rpx; }
-.free-form-block { margin-top: 24rpx; padding-top: 24rpx; border-top: 1rpx solid #292c49; }
-.free-subscribe-form { padding-top: 20rpx; }
-.free-label { margin-bottom: 12rpx; color: #929db1; font-size: 22rpx; }
-
-.free-input {
-  height: 72rpx;
-  padding: 0 20rpx;
-  margin-top: 18rpx;
-  color: #d9dde8;
-  background: #13142a;
-  border: 1rpx solid #303452;
-  border-radius: 10rpx;
-  box-sizing: border-box;
-  font-size: 24rpx;
-}
-
-.free-inline-row .free-input { margin-top: 0; }
-.free-inline-input { min-width: 0; flex: 1; }
-.free-small-btn {
-  flex-shrink: 0;
-  height: 64rpx;
-  margin: 0 0 0 14rpx;
-  padding: 0 24rpx;
-  color: #91bce8;
-  background: #202540;
-  border: 1rpx solid #37415f;
-  border-radius: 10rpx;
-  font-size: 22rpx;
-  line-height: 64rpx;
-}
-.free-small-btn::after { border: 0; }
-
-.free-picker {
-  height: 72rpx;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 20rpx;
-  margin-top: 16rpx;
-  color: #a8b0bf;
-  background: #13142a;
-  border: 1rpx solid #303452;
-  border-radius: 10rpx;
-  box-sizing: border-box;
-  font-size: 24rpx;
-}
-
-.free-primary-btn {
-  width: 100%;
-  height: 70rpx;
-  margin: 22rpx 0 0;
-  color: #dce9f7;
-  background: #263a55;
-  border: 1rpx solid #385372;
-  border-radius: 11rpx;
-  font-size: 24rpx;
-  line-height: 70rpx;
-}
-.free-primary-btn::after { border: 0; }
-.free-primary-btn[disabled] { opacity: .48; }
-.free-action-tip { margin-top: 12rpx; color: #606b82; font-size: 19rpx; line-height: 1.55; }
-
-.free-subscription { margin-top: 24rpx; padding-top: 22rpx; border-top: 1rpx solid #292c49; }
-.free-clan-main { min-width: 0; }
-.free-clan-name { overflow: hidden; color: #d9dde7; font-size: 26rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.free-clan-tag { margin-top: 6rpx; color: #66728a; font-size: 20rpx; }
-.free-category-chip { flex-shrink: 0; padding: 5rpx 13rpx; color: #829bb5; background: #232a43; border-radius: 8rpx; font-size: 20rpx; }
-.free-sync-list { margin-top: 20rpx; overflow: hidden; border: 1rpx solid #292d49; border-radius: 10rpx; }
-.free-sync-row { min-height: 64rpx; padding: 0 18rpx; color: #8994a8; border-bottom: 1rpx solid #262944; font-size: 21rpx; }
-.free-sync-row:last-child { border-bottom: 0; }
-.free-sync-value { display: flex; align-items: center; }
-.free-sync-state { color: #8190a7; }
-.free-sync-time { margin-left: 12rpx; color: #59647a; font-size: 18rpx; }
-.state-ready { color: #66a995; }
-.state-running { color: #6e9ec9; }
-.state-retry_wait, .state-partial { color: #b39a61; }
-.state-failed { color: #b66d72; }
-
-.free-danger-btn {
-  width: 100%;
-  height: 66rpx;
-  margin: 28rpx 0 0;
-  color: #a97278;
-  background: transparent;
-  border: 1rpx solid #55343f;
-  border-radius: 10rpx;
-  font-size: 22rpx;
-  line-height: 66rpx;
-}
-.free-danger-btn::after { border: 0; }
 
 .farm-system-entry {
   padding: 30rpx 28rpx 28rpx;

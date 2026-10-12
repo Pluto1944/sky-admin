@@ -283,9 +283,12 @@ export function createFreeAlliance(name) {
   return request('/api/me/alliances', 'POST', { name: name || undefined }, true)
 }
 
-export function renameFreeAlliance(allianceId, name) {
+export function renameAlliance(allianceId, name) {
   return request(`/api/alliances/${encodeURIComponent(allianceId)}`, 'PATCH', { name }, true)
 }
+
+// 兼容仍引用旧名称的页面；新代码统一使用联盟语义。
+export const renameFreeAlliance = renameAlliance
 
 export function getFreeAllianceSubscription(allianceId) {
   return request(`/api/alliances/${encodeURIComponent(allianceId)}/subscription`, 'GET', {}, true)
@@ -304,10 +307,13 @@ export function refreshFreeAllianceSubscription(allianceId, resourceTypes = ['cu
   )
 }
 
-export function archiveFreeAlliance(allianceId, confirmationName) {
+export function archiveAlliance(allianceId, confirmationName) {
   const query = `?confirmation_name=${encodeURIComponent(confirmationName || '')}`
   return request(`/api/alliances/${encodeURIComponent(allianceId)}${query}`, 'DELETE', {}, true)
 }
+
+// 兼容已存在的调用；后端删除接口适用于所有非 internal 联盟。
+export const archiveFreeAlliance = archiveAlliance
 
 export function getAllianceVerification(allianceId) {
   return request(`/api/alliances/${encodeURIComponent(allianceId)}/verification`, 'GET', {}, true)
@@ -331,6 +337,15 @@ export function reorderAllianceManagedClans(allianceId, clanTags) {
 
 export function removeAllianceManagedClan(allianceId, clanTag) {
   return request(`/api/alliances/${encodeURIComponent(allianceId)}/managed-clans/${encodeURIComponent(clanTag)}`, 'DELETE', {}, true)
+}
+
+export function refreshAllianceManagedClan(allianceId, clanTag, resourceTypes = ['current_war']) {
+  return request(
+    `/api/alliances/${encodeURIComponent(allianceId)}/managed-clans/${encodeURIComponent(clanTag)}/refresh`,
+    'POST',
+    { resource_types: resourceTypes },
+    true
+  )
 }
 
 export function createAllianceShare(allianceId, expiresDays = 30, shareType = 'invite') {

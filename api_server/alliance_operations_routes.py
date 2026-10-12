@@ -37,7 +37,13 @@ from modules.alliance.operations import (
     update_managed_clan,
     verification_entry,
 )
-from modules.alliance.free_alliance import enqueue_initialization, reconcile_sync_targets
+from modules.alliance.free_alliance import (
+    FreeAllianceError,
+    enqueue_initialization,
+    reconcile_sync_targets,
+    request_manual_refresh,
+    subscription_status,
+)
 from shared.db.connection import Database
 
 from .auth import require_user
@@ -109,6 +115,10 @@ class ManagedClanOrderInput(BaseModel):
     clan_tags: list[str]
 
 
+class ManagedClanRefreshInput(BaseModel):
+    resource_types: list[str] = Field(default_factory=lambda: ["current_war"])
+
+
 def _error(exc: AllianceOperationError) -> HTTPException:
     return HTTPException(status_code=exc.status_code, detail=str(exc))
 
@@ -166,7 +176,17 @@ def alliance_managed_clans(
     db: Database = Depends(get_db),
 ):
     try:
-        return list_managed_clans(db.conn, user["openid"], alliance_id)
+        result = list_managed_clans(db.conn, user["openid"], alliance_id)
+        if result["plan_code"] == "free":
+            for clan in result["clans"]:
+                if clan["status"] == "active":
+                    clan["sync"] = subscription_status(
+                        db.conn, alliance_id, clan["clan_tag"],
+                    )
+        result["manual_refresh_available"] = bool(
+            result["plan_code"] == "free" and result["can_manage"]
+        )
+        return result
     except AllianceOperationError as exc:
         raise _error(exc) from exc
 
@@ -242,6 +262,37 @@ def delete_alliance_managed_clan(
         return result
     except AllianceOperationError as exc:
         raise _error(exc) from exc
+
+
+@router.post(
+    "/alliances/{alliance_id}/managed-clans/{clan_tag}/refresh",
+    status_code=202,
+)
+def refresh_alliance_managed_clan(
+    alliance_id: int,
+    clan_tag: str,
+    payload: ManagedClanRefreshInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        management = list_managed_clans(db.conn, user["openid"], alliance_id)
+        if not management["can_manage"]:
+            raise AllianceOperationError("只有联盟管理员或首领可以刷新部落", status_code=403)
+        if management["plan_code"] != "free":
+            raise AllianceOperationError("当前套餐使用自动刷新，无需手动提交", status_code=409)
+        results = request_manual_refresh(
+            db.conn, user["openid"], alliance_id, clan_tag,
+            resource_types=payload.resource_types,
+        )
+        return {
+            "alliance_id": int(alliance_id),
+            "clan_tag": clan_tag,
+            "results": results,
+            "sync": subscription_status(db.conn, alliance_id, clan_tag),
+        }
+    except (AllianceOperationError, FreeAllianceError) as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
 @router.get("/alliances/{alliance_id}/shares")

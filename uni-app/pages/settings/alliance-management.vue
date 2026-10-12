@@ -17,20 +17,6 @@
           </view>
         </view>
 
-        <view class="section-title">部落认证</view>
-        <view class="card">
-          <view v-for="clan in verification.clans" :key="clan.clan_tag" class="clan-row">
-            <view class="grow">
-              <text class="name">{{ clan.clan_name || clan.clan_tag }}</text>
-              <text class="sub">{{ clan.clan_tag }}</text>
-            </view>
-            <text :class="['state', 'state-' + clan.verification_status]">{{ verificationLabel(clan.verification_status) }}</text>
-          </view>
-          <view v-if="!verification.clans || !verification.clans.length" class="empty compact">请先订阅部落</view>
-          <button v-if="verification.can_manage" class="secondary-btn" @tap="showVerificationNotice">申请部落认证</button>
-          <text class="tip">认证按钮暂时保留，当前由后台人工处理，不会自动读取或修改部落介绍。</text>
-        </view>
-
         <view class="section-title">加入申请</view>
         <view class="card">
           <view v-for="request in joinRequests" :key="request.id" class="request-row">
@@ -107,6 +93,10 @@
           <button class="danger-btn" @tap="confirmLeave">退出当前联盟</button>
           <text class="tip">退出后将失去当前联盟访问权限；以后可由新的有效邀请重新加入。</text>
         </view>
+        <view v-else-if="alliance.plan.code !== 'internal'" class="leave-section">
+          <button class="danger-btn" @tap="confirmArchive">删除当前联盟</button>
+          <text class="tip">需要输入完整联盟名称确认；公共历史数据不会删除。</text>
+        </view>
       </template>
       <view v-else class="empty">请先创建或加入联盟</view>
       <view class="bottom-space"></view>
@@ -118,14 +108,14 @@
 import TopBar from '@/components/TopBar.vue'
 import {
   addAllianceUserMember,
+  archiveAlliance,
   createAllianceShare,
   getAllianceJoinRequests,
   getAllianceShares,
   getAllianceUserMembers,
-  getAllianceVerification,
   leaveAlliance,
   removeAllianceUser,
-  renameFreeAlliance,
+  renameAlliance,
   reviewAllianceJoinRequest,
   revokeAllianceShare,
   updateAllianceUserRole
@@ -139,7 +129,6 @@ export default {
       loading: true,
       alliance: null,
       allianceName: '',
-      verification: { clans: [], can_manage: false },
       members: [],
       joinRequests: [],
       shareLinks: [],
@@ -191,33 +180,24 @@ export default {
         }
         this.allianceName = this.alliance.name
         const results = await Promise.all([
-          getAllianceVerification(this.alliance.id),
           getAllianceShares(this.alliance.id),
           getAllianceUserMembers(this.alliance.id),
           getAllianceJoinRequests(this.alliance.id)
         ])
-        this.verification = results[0]
-        this.shareLinks = results[1].links || []
-        this.members = results[2].members || []
-        this.joinRequests = (results[3].requests || []).filter(item => item.status === 'pending')
+        this.shareLinks = results[0].links || []
+        this.members = results[1].members || []
+        this.joinRequests = (results[2].requests || []).filter(item => item.status === 'pending')
       } catch (err) {
         uni.showToast({ title: err.message || '加载失败', icon: 'none' })
       } finally {
         this.loading = false
       }
     },
-    showVerificationNotice() {
-      uni.showModal({
-        title: '人工认证',
-        content: this.verification.message || '认证暂由后台人工处理，请联系作者微信 pluto1944606',
-        showCancel: false
-      })
-    },
     async saveName() {
       const name = this.allianceName.trim()
       if (!name || !this.alliance) return
       try {
-        await renameFreeAlliance(this.alliance.id, name)
+        await renameAlliance(this.alliance.id, name)
         await loadAllianceContext(this.alliance.id, true)
         await this.loadData()
         uni.showToast({ title: '名称已保存', icon: 'success' })
@@ -353,10 +333,31 @@ export default {
         }
       })
     },
+    confirmArchive() {
+      if (!this.alliance || this.alliance.role !== 'leader') return
+      uni.showModal({
+        title: '删除当前联盟',
+        content: `请输入联盟名称“${this.alliance.name}”确认删除`,
+        editable: true,
+        placeholderText: '联盟名称',
+        confirmColor: '#d56b72',
+        success: async result => {
+          if (!result.confirm) return
+          try {
+            await archiveAlliance(this.alliance.id, result.content)
+            const loaded = await loadAllianceContext(null, true)
+            if (loaded.current) uni.switchTab({ url: '/pages/clan/clan' })
+            else uni.switchTab({ url: '/pages/settings/settings' })
+            uni.showToast({ title: '联盟已删除', icon: 'success' })
+          } catch (err) {
+            uni.showToast({ title: err.message || '删除失败', icon: 'none' })
+          }
+        }
+      })
+    },
     roleIndex(value) { const index = this.roleOptions.findIndex(item => item.key === value); return index < 0 ? 0 : index },
     roleLabel(value) { return ({ leader: '首领', admin: '管理', member: '成员' }[value] || value) },
     statusLabel(value) { return ({ active: '有效', removed: '已移除', blocked: '已封禁', left: '已离开', invited: '待加入' }[value] || value) },
-    verificationLabel(value) { return ({ verified: '已认证', disputed: '存在争议', revoked: '已撤销', unverified: '未认证' }[value] || value) },
     shareStatusLabel(value) { return ({ active: '有效', revoked: '已撤销', expired: '已过期' }[value] || value) },
     planStateLabel(value) { return ({ active: '有效', legacy: '兼容权益', expired: '已到期', revoked: '已撤销' }[value] || value || '有效') },
     shortDate(value) { return value ? String(value).replace('T', ' ').slice(0, 16) : '' }

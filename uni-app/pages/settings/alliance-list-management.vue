@@ -31,7 +31,7 @@
 
 <script>
 import TopBar from '@/components/TopBar.vue'
-import { archiveFreeAlliance, deleteAllianceHistory, getMyAlliances, leaveAlliance } from '@/utils/api.js'
+import { archiveAlliance, deleteAllianceHistory, getMyAlliances, leaveAlliance } from '@/utils/api.js'
 import { loadAllianceContext } from '@/utils/alliance.js'
 
 export default {
@@ -64,7 +64,7 @@ export default {
           success: async result => {
             if (!result.confirm) return
             try {
-              await archiveFreeAlliance(item.id, result.content)
+              await archiveAlliance(item.id, result.content)
               await loadAllianceContext(null, true)
               await this.load()
               uni.showToast({ title: '联盟已删除', icon: 'success' })
