@@ -1,6 +1,6 @@
 <template>
   <view class="page">
-    <TopBar title="平台管理" :show-back="true" back-fallback="/pages/settings/settings" />
+    <TopBar title="超级管理" :show-back="true" back-fallback="/pages/settings/settings" />
     <scroll-view scroll-y class="content">
       <view class="section-title">免费联盟开放</view>
       <view class="card">
@@ -134,7 +134,7 @@ export default {
         this.audits = result.audit || []
         this.verificationConflicts = result.verification_conflicts || []
       } catch (err) {
-        uni.showModal({ title: '平台管理不可用', content: err.message || '请稍后重试', showCancel: false })
+        uni.showModal({ title: '超级管理不可用', content: err.message || '请稍后重试', showCancel: false })
       } finally {
         this.busy = false
       }

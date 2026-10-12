@@ -361,6 +361,8 @@ CREATE TABLE IF NOT EXISTS alliance_share_links (
     created_by_user_id INTEGER NOT NULL,
     visibility         TEXT NOT NULL DEFAULT 'member'
                        CHECK(visibility IN ('member', 'public')),
+    share_type         TEXT NOT NULL DEFAULT 'invite'
+                       CHECK(share_type IN ('browse', 'invite')),
     status             TEXT NOT NULL DEFAULT 'active'
                        CHECK(status IN ('active', 'revoked', 'expired')),
     expires_at         TEXT NOT NULL,
@@ -374,6 +376,28 @@ CREATE TABLE IF NOT EXISTS alliance_share_links (
 
 CREATE INDEX IF NOT EXISTS idx_alliance_share_links_alliance_status
 ON alliance_share_links(alliance_id, status, expires_at);
+
+CREATE TABLE IF NOT EXISTS alliance_join_requests (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    alliance_id         INTEGER NOT NULL,
+    user_id             INTEGER NOT NULL,
+    status              TEXT NOT NULL DEFAULT 'pending'
+                        CHECK(status IN ('pending', 'approved', 'rejected', 'cancelled')),
+    reviewed_by_user_id INTEGER,
+    reviewed_at         TEXT,
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL,
+    FOREIGN KEY(alliance_id) REFERENCES alliances(id) ON DELETE CASCADE,
+    FOREIGN KEY(user_id) REFERENCES wechat_users(id) ON DELETE CASCADE,
+    FOREIGN KEY(reviewed_by_user_id) REFERENCES wechat_users(id) ON DELETE SET NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_alliance_join_requests_one_pending
+ON alliance_join_requests(alliance_id, user_id)
+WHERE status = 'pending';
+
+CREATE INDEX IF NOT EXISTS idx_alliance_join_requests_alliance_status
+ON alliance_join_requests(alliance_id, status, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS alliance_plan_grants (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1457,6 +1481,42 @@ class Database:
         if visit_cols and "hidden_at" not in visit_cols:
             self.conn.execute("ALTER TABLE alliance_visits ADD COLUMN hidden_at TEXT")
 
+        # 浏览分享只记录访问，加入邀请才可直接建立成员关系。
+        # 旧链接是历史上的加入邀请，因此迁移默认为 invite。
+        share_cols = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(alliance_share_links)")
+        }
+        if share_cols and "share_type" not in share_cols:
+            self.conn.execute(
+                "ALTER TABLE alliance_share_links ADD COLUMN share_type TEXT "
+                "NOT NULL DEFAULT 'invite' CHECK(share_type IN ('browse', 'invite'))"
+            )
+        request_cols = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(alliance_join_requests)")
+        }
+        if not request_cols:
+            self.conn.executescript("""
+                CREATE TABLE alliance_join_requests (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    alliance_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending'
+                        CHECK(status IN ('pending', 'approved', 'rejected', 'cancelled')),
+                    reviewed_by_user_id INTEGER,
+                    reviewed_at TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(alliance_id) REFERENCES alliances(id) ON DELETE CASCADE,
+                    FOREIGN KEY(user_id) REFERENCES wechat_users(id) ON DELETE CASCADE,
+                    FOREIGN KEY(reviewed_by_user_id) REFERENCES wechat_users(id) ON DELETE SET NULL
+                );
+                CREATE UNIQUE INDEX idx_alliance_join_requests_one_pending
+                ON alliance_join_requests(alliance_id, user_id)
+                WHERE status = 'pending';
+                CREATE INDEX idx_alliance_join_requests_alliance_status
+                ON alliance_join_requests(alliance_id, status, created_at DESC);
+            """)
+
         # M3.1：为既有套餐补齐 CWL 权益。只合并缺失键，保留运营期间可能增加的
         # 其他 entitlement，不用一次 schema 初始化覆盖整份 JSON。
         cwl_entitlements = {
@@ -1583,7 +1643,7 @@ class Database:
             "farm_audit_logs", "farm_clans", "farm_auth_accounts",
             "alliance_cwl_teams", "alliance_cwl_seasons",
             "platform_audit_events", "platform_settings", "platform_admins",
-            "alliance_plan_grants", "alliance_share_links",
+            "alliance_plan_grants", "alliance_join_requests", "alliance_share_links",
             "alliance_audit_events", "alliance_visits", "alliance_clans",
             "alliance_members", "alliances", "alliance_plans",
             "cwl_assembly_cache", "cwl_roster_snapshots",

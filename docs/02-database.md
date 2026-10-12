@@ -36,7 +36,8 @@
 | 联盟部落 | `alliance_clans` | `(alliance_id, clan_tag)` | 联盟订阅部落、业务标签、显示顺序和认证摘要 |
 | 联盟访问 | `alliance_visits` | `(alliance_id, user_id)` | 最近访问及默认联盟；访问记录本身不授予成员权限 |
 | 联盟审计 | `alliance_audit_events` | `id` / `event_key` | 联盟迁移及后续管理动作的幂等审计记录 |
-| 联盟邀请 | `alliance_share_links` | `id` / `token_hash` | 只保存邀请令牌摘要、来源联盟、创建者、状态、次数和过期时间 |
+| 联盟分享 | `alliance_share_links` | `id` / `token_hash` | 只保存普通浏览或加入邀请令牌摘要、来源联盟、创建者、状态、次数和过期时间 |
+| 联盟加入申请 | `alliance_join_requests` | `id` | 非成员申请加入、审核人、审核状态与时间；同一用户同一联盟最多一个待处理申请 |
 | 联盟权益 | `alliance_plan_grants` | `id` | 人工套餐开通、开始/到期、状态、操作人和备注 |
 | 平台管理员 | `platform_admins` | `user_id` | 平台后台授权；不改变用户在各联盟中的角色 |
 | 平台设置 | `platform_settings` | `setting_key` | 免费注册开关、总配额等平台级安全设置 |
@@ -70,13 +71,14 @@ CWL 配置作为范围与权限依据。公共 COC 事实仍按全局 Tag 保存
 - 固定配置迁入的 12 个苍穹自有部落作为内部可信存量标记为已认证，确保 M2 接入权限后现有用户可见范围不突然收窄；该规则不适用于以后新增的免费或付费联盟部落；
 - 一个创建者最多创建一个有效免费联盟；免费、付费套餐的有效部落上限分别为 1、10，内部套餐为苍穹迁移保留更高上限；
 - 部落数量约束由 SQLite trigger 执行，新增部落、重新启用部落、切换套餐或降低套餐配额都不能绕过；
-- `alliance_visits` 只记录入口和默认选择，不能替代 `alliance_members`；
+- `alliance_visits` 记录已登录用户最多 50 条浏览历史、最近访问和默认选择；它可以授权普通只读访问，但不能替代 `alliance_members`，也不能授权写操作或管理数据；
 - `alliance_audit_events.event_key` 用于让同一份迁移清单重复应用时不产生重复审计。
 - 同一部落可被多个联盟未认证订阅；`alliance_clans` 的插入/更新 trigger 和联盟从暂停恢复为
   `active` 时的 trigger 共同保证同一时间最多一个有效联盟拥有 `verified` 关系。历史遗留冲突不由迁移静默覆盖，
   平台后台会列出供人工处理；
-- `alliance_share_links` 只存 SHA-256 摘要，原始令牌仅创建时返回；过期、撤销、被移除或封禁的
-  用户不能依赖旧链接恢复权限；
+- `alliance_share_links.share_type` 区分 `browse / invite`，只存 SHA-256 摘要，原始令牌仅创建时返回；
+  普通分享只建立浏览历史，邀请经接收者确认后固定加入为 `member`。被移除用户需重新申请，`blocked`
+  用户不能依赖链接或申请恢复权限；
 - `alliance_plan_grants` 与 `alliances.plan_code` 分工：前者记录人工权益生命周期，后者选择套餐模板。
   付费到期后权益状态变为 `expired`，额外部落转为 `inactive`，但联盟关系、审计和公共事实不删除；
 - `platform_admins`、环境白名单和平台设置都不赋予联盟角色。平台 API 仍单独检查平台管理员身份，

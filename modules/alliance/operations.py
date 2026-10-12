@@ -597,10 +597,17 @@ def create_share_link(
     openid: str,
     alliance_id: int,
     *,
+    share_type: str = "invite",
     expires_days: int = 30,
     now: datetime | None = None,
 ) -> dict:
-    actor = _member(conn, openid, alliance_id)
+    selected_type = str(share_type or "invite").strip()
+    if selected_type not in {"browse", "invite"}:
+        raise AllianceOperationError("不支持的分享类型", status_code=422)
+    actor = _member(
+        conn, openid, alliance_id,
+        roles={"admin", "leader"} if selected_type == "invite" else None,
+    )
     days = int(expires_days)
     if days < 1 or days > 30:
         raise AllianceOperationError("分享有效期必须在 1 到 30 天之间", status_code=422)
@@ -609,28 +616,39 @@ def create_share_link(
     expires_at = _iso(current + timedelta(days=days))
     active_links = int(conn.execute(
         """SELECT COUNT(*) FROM alliance_share_links
-           WHERE alliance_id=? AND status='active' AND expires_at>?""",
-        (int(alliance_id), timestamp),
+           WHERE alliance_id=? AND share_type=? AND status='active' AND expires_at>?""",
+        (int(alliance_id), selected_type, timestamp),
     ).fetchone()[0])
-    if active_links >= 5:
+    if selected_type == "invite" and active_links >= 5:
         raise AllianceOperationError("当前联盟最多保留 5 个有效邀请，请先撤销旧邀请", status_code=409)
+    if selected_type == "browse":
+        with conn:
+            conn.execute(
+                """UPDATE alliance_share_links SET status='revoked', updated_at=?
+                   WHERE alliance_id=? AND created_by_user_id=?
+                     AND share_type='browse' AND status='active'""",
+                (timestamp, int(alliance_id), int(actor["user_id"])),
+            )
     raw_token = secrets.token_urlsafe(24)
     digest = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
     with conn:
         cursor = conn.execute(
             """INSERT INTO alliance_share_links
-               (token_hash, alliance_id, created_by_user_id, visibility, status,
+               (token_hash, alliance_id, created_by_user_id, visibility, share_type, status,
                 expires_at, created_at, updated_at)
-               VALUES (?, ?, ?, 'member', 'active', ?, ?, ?)""",
-            (digest, int(alliance_id), actor["user_id"], expires_at, timestamp, timestamp),
+               VALUES (?, ?, ?, 'member', ?, 'active', ?, ?, ?)""",
+            (digest, int(alliance_id), actor["user_id"], selected_type, expires_at, timestamp, timestamp),
         )
         _alliance_audit(
             conn, alliance_id=alliance_id, actor_user_id=int(actor["user_id"]),
             action="alliance_share_created", entity_type="alliance_share_link",
-            entity_id=int(cursor.lastrowid), details={"expires_at": expires_at},
+            entity_id=int(cursor.lastrowid), details={"expires_at": expires_at, "share_type": selected_type},
             timestamp=timestamp,
         )
-    return {"token": raw_token, "expires_at": expires_at, "alliance_id": int(alliance_id)}
+    return {
+        "token": raw_token, "expires_at": expires_at,
+        "alliance_id": int(alliance_id), "share_type": selected_type,
+    }
 
 
 def _share_row(conn: sqlite3.Connection, token: str, current: datetime) -> sqlite3.Row:
@@ -666,7 +684,66 @@ def share_preview(conn: sqlite3.Connection, token: str, *, now: datetime | None 
     return {
         "alliance_id": int(row["alliance_id"]), "name": row["alliance_name"],
         "plan_name": row["plan_name"], "clan_count": clan_count,
-        "expires_at": row["expires_at"], "can_join": True,
+        "expires_at": row["expires_at"], "share_type": row["share_type"],
+        "can_join": row["share_type"] == "invite",
+    }
+
+
+def share_alliance_id(
+    conn: sqlite3.Connection,
+    token: str,
+    *,
+    now: datetime | None = None,
+) -> int:
+    return int(_share_row(conn, token, _now(now))["alliance_id"])
+
+
+def record_share_visit(
+    conn: sqlite3.Connection,
+    openid: str,
+    token: str,
+    *,
+    make_default: bool = True,
+    now: datetime | None = None,
+) -> dict:
+    current = _now(now)
+    timestamp = _iso(current)
+    link = _share_row(conn, token, current)
+    user = _user(conn, openid)
+    alliance_id = int(link["alliance_id"])
+    with conn:
+        if make_default:
+            conn.execute("UPDATE alliance_visits SET is_default=0 WHERE user_id=?", (user["id"],))
+        conn.execute(
+            """INSERT INTO alliance_visits
+               (alliance_id, user_id, is_default, is_hidden, hidden_at,
+                first_visited_at, last_visited_at)
+               VALUES (?, ?, ?, 0, NULL, ?, ?)
+               ON CONFLICT(alliance_id, user_id) DO UPDATE SET
+                   is_default=excluded.is_default, is_hidden=0, hidden_at=NULL,
+                   last_visited_at=excluded.last_visited_at""",
+            (alliance_id, user["id"], 1 if make_default else 0, timestamp, timestamp),
+        )
+        stale = conn.execute(
+            """SELECT visits.alliance_id
+               FROM alliance_visits AS visits
+               LEFT JOIN alliance_members AS members
+                 ON members.alliance_id=visits.alliance_id
+                AND members.user_id=visits.user_id AND members.status='active'
+               WHERE visits.user_id=? AND members.id IS NULL
+               ORDER BY visits.last_visited_at DESC, visits.alliance_id DESC
+               LIMIT -1 OFFSET 50""",
+            (user["id"],),
+        ).fetchall()
+        if stale:
+            conn.executemany(
+                "DELETE FROM alliance_visits WHERE user_id=? AND alliance_id=?",
+                [(user["id"], row["alliance_id"]) for row in stale],
+            )
+    return {
+        "alliance_id": alliance_id,
+        "share_type": link["share_type"],
+        "last_visited_at": timestamp,
     }
 
 
@@ -680,6 +757,8 @@ def join_from_share(
     current = _now(now)
     timestamp = _iso(current)
     link = _share_row(conn, token, current)
+    if link["share_type"] != "invite":
+        raise AllianceOperationError("普通分享不能直接加入，请先申请", status_code=409)
     user = _user(conn, openid)
     alliance_id = int(link["alliance_id"])
     membership = conn.execute(
@@ -749,6 +828,173 @@ def join_from_share(
     return {"alliance_id": alliance_id, "joined": joined, "role": "member"}
 
 
+def request_alliance_join(
+    conn: sqlite3.Connection,
+    openid: str,
+    alliance_id: int,
+    *,
+    now: datetime | None = None,
+) -> dict:
+    user = _user(conn, openid)
+    alliance = conn.execute(
+        "SELECT id FROM alliances WHERE id=? AND status='active'",
+        (int(alliance_id),),
+    ).fetchone()
+    if alliance is None:
+        raise AllianceOperationError("联盟不存在", status_code=404)
+    membership = conn.execute(
+        "SELECT role, status FROM alliance_members WHERE alliance_id=? AND user_id=?",
+        (int(alliance_id), int(user["id"])),
+    ).fetchone()
+    if membership is not None and membership["status"] == "active":
+        raise AllianceOperationError("你已经是该联盟成员", status_code=409)
+    if membership is not None and membership["status"] == "blocked":
+        raise AllianceOperationError("你已被该联盟封禁，无法申请", status_code=403)
+    visit = conn.execute(
+        "SELECT 1 FROM alliance_visits WHERE alliance_id=? AND user_id=?",
+        (int(alliance_id), int(user["id"])),
+    ).fetchone()
+    if visit is None:
+        raise AllianceOperationError("请先通过有效分享打开该联盟", status_code=403)
+    current = _now(now)
+    timestamp = _iso(current)
+    existing = conn.execute(
+        """SELECT id, status, updated_at FROM alliance_join_requests
+           WHERE alliance_id=? AND user_id=? ORDER BY id DESC LIMIT 1""",
+        (int(alliance_id), int(user["id"])),
+    ).fetchone()
+    if existing is not None and existing["status"] == "pending":
+        return {"id": int(existing["id"]), "alliance_id": int(alliance_id), "status": "pending"}
+    if existing is not None and existing["status"] == "rejected":
+        rejected_at = _parse_time(existing["updated_at"])
+        if rejected_at and rejected_at > current - timedelta(hours=24):
+            raise AllianceOperationError("申请被拒绝后 24 小时内不能重复提交", status_code=429)
+    with conn:
+        cursor = conn.execute(
+            """INSERT INTO alliance_join_requests
+               (alliance_id, user_id, status, created_at, updated_at)
+               VALUES (?, ?, 'pending', ?, ?)""",
+            (int(alliance_id), int(user["id"]), timestamp, timestamp),
+        )
+        _alliance_audit(
+            conn, alliance_id=alliance_id, actor_user_id=int(user["id"]),
+            action="alliance_join_requested", entity_type="alliance_join_request",
+            entity_id=int(cursor.lastrowid), timestamp=timestamp,
+        )
+    return {"id": int(cursor.lastrowid), "alliance_id": int(alliance_id), "status": "pending"}
+
+
+def list_join_requests(
+    conn: sqlite3.Connection,
+    openid: str,
+    alliance_id: int,
+) -> dict:
+    actor = _member(conn, openid, alliance_id, roles={"admin", "leader"})
+    rows = conn.execute(
+        """SELECT requests.id, requests.status, requests.created_at, requests.updated_at,
+                  users.nickname, users.account_name, users.player_tag
+           FROM alliance_join_requests AS requests
+           JOIN wechat_users AS users ON users.id=requests.user_id
+           WHERE requests.alliance_id=?
+           ORDER BY CASE requests.status WHEN 'pending' THEN 0 ELSE 1 END,
+                    requests.created_at DESC LIMIT 100""",
+        (int(alliance_id),),
+    ).fetchall()
+    return {
+        "alliance_id": int(alliance_id), "actor_role": actor["role"],
+        "requests": [
+            {
+                "id": int(row["id"]), "status": row["status"],
+                "created_at": row["created_at"], "updated_at": row["updated_at"],
+                "display_name": row["nickname"] or row["account_name"] or f"微信用户{row['id']}",
+                "player_tag": row["player_tag"],
+            }
+            for row in rows
+        ],
+    }
+
+
+def review_join_request(
+    conn: sqlite3.Connection,
+    openid: str,
+    alliance_id: int,
+    request_id: int,
+    action: str,
+    *,
+    now: datetime | None = None,
+) -> dict:
+    actor = _member(conn, openid, alliance_id, roles={"admin", "leader"})
+    selected = str(action or "").strip()
+    if selected not in {"approve", "reject"}:
+        raise AllianceOperationError("只能批准或拒绝申请", status_code=422)
+    row = conn.execute(
+        """SELECT * FROM alliance_join_requests
+           WHERE id=? AND alliance_id=? AND status='pending'""",
+        (int(request_id), int(alliance_id)),
+    ).fetchone()
+    if row is None:
+        raise AllianceOperationError("待处理申请不存在", status_code=404)
+    membership = conn.execute(
+        "SELECT id, status FROM alliance_members WHERE alliance_id=? AND user_id=?",
+        (int(alliance_id), int(row["user_id"])),
+    ).fetchone()
+    if membership is not None and membership["status"] == "blocked":
+        raise AllianceOperationError("已封禁用户不能通过申请恢复", status_code=409)
+    timestamp = _iso(now)
+    status = "approved" if selected == "approve" else "rejected"
+    with conn:
+        conn.execute(
+            """UPDATE alliance_join_requests
+               SET status=?, reviewed_by_user_id=?, reviewed_at=?, updated_at=?
+               WHERE id=?""",
+            (status, int(actor["user_id"]), timestamp, timestamp, int(request_id)),
+        )
+        if selected == "approve":
+            if membership is None:
+                conn.execute(
+                    """INSERT INTO alliance_members
+                       (alliance_id, user_id, role, status, joined_at, created_at, updated_at)
+                       VALUES (?, ?, 'member', 'active', ?, ?, ?)""",
+                    (int(alliance_id), int(row["user_id"]), timestamp, timestamp, timestamp),
+                )
+            else:
+                conn.execute(
+                    """UPDATE alliance_members SET role='member', status='active',
+                              joined_at=?, updated_at=? WHERE id=?""",
+                    (timestamp, timestamp, int(membership["id"])),
+                )
+        _alliance_audit(
+            conn, alliance_id=alliance_id, actor_user_id=int(actor["user_id"]),
+            action=f"alliance_join_request_{status}", entity_type="alliance_join_request",
+            entity_id=int(request_id), details={"user_id": int(row["user_id"])},
+            timestamp=timestamp,
+        )
+    return {"id": int(request_id), "status": status}
+
+
+def delete_browsing_history(
+    conn: sqlite3.Connection,
+    openid: str,
+    alliance_id: int,
+) -> dict:
+    user = _user(conn, openid)
+    active = conn.execute(
+        """SELECT 1 FROM alliance_members
+           WHERE alliance_id=? AND user_id=? AND status='active'""",
+        (int(alliance_id), int(user["id"])),
+    ).fetchone()
+    if active is not None:
+        raise AllianceOperationError("已加入联盟请使用退出功能", status_code=409)
+    with conn:
+        cursor = conn.execute(
+            "DELETE FROM alliance_visits WHERE alliance_id=? AND user_id=?",
+            (int(alliance_id), int(user["id"])),
+        )
+    if not cursor.rowcount:
+        raise AllianceOperationError("浏览记录不存在", status_code=404)
+    return {"alliance_id": int(alliance_id), "removed": True}
+
+
 def revoke_share_link(
     conn: sqlite3.Connection,
     openid: str,
@@ -787,7 +1033,7 @@ def list_share_links(
     actor = _member(conn, openid, alliance_id)
     current = _now()
     rows = conn.execute(
-        """SELECT id, created_by_user_id, status, expires_at, use_count,
+        """SELECT id, created_by_user_id, share_type, status, expires_at, use_count,
                   last_used_at, created_at
            FROM alliance_share_links WHERE alliance_id=?
            ORDER BY id DESC LIMIT 50""",
@@ -801,6 +1047,7 @@ def list_share_links(
             effective_status = "expired"
         result.append({
             "id": int(row["id"]), "status": effective_status,
+            "share_type": row["share_type"],
             "expires_at": row["expires_at"], "use_count": int(row["use_count"]),
             "last_used_at": row["last_used_at"], "created_at": row["created_at"],
             "can_revoke": effective_status == "active" and (
@@ -840,6 +1087,75 @@ def list_alliance_members(
             for row in rows
         ],
     }
+
+
+def add_alliance_member_by_openid(
+    conn: sqlite3.Connection,
+    openid: str,
+    alliance_id: int,
+    target_openid: str,
+    role: str = "member",
+    *,
+    now: datetime | None = None,
+) -> dict:
+    actor = _member(conn, openid, alliance_id, roles={"admin", "leader"})
+    selected_role = str(role or "member").strip()
+    if selected_role not in {"member", "admin"}:
+        raise AllianceOperationError("只能添加普通成员或管理员", status_code=422)
+    if actor["role"] == "admin" and selected_role != "member":
+        raise AllianceOperationError("管理员只能添加普通成员", status_code=403)
+    normalized_openid = str(target_openid or "").strip()
+    if not normalized_openid:
+        raise AllianceOperationError("请输入 OpenID", status_code=422)
+    target = conn.execute(
+        "SELECT id FROM wechat_users WHERE openid=?", (normalized_openid,),
+    ).fetchone()
+    if target is None:
+        raise AllianceOperationError("未找到该用户，请让对方先登录小程序", status_code=404)
+    existing = conn.execute(
+        "SELECT id, role, status FROM alliance_members WHERE alliance_id=? AND user_id=?",
+        (int(alliance_id), int(target["id"])),
+    ).fetchone()
+    if existing is not None and existing["status"] == "blocked":
+        raise AllianceOperationError("该用户已被联盟封禁，请先由后台处理", status_code=409)
+    timestamp = _iso(now)
+    with conn:
+        if existing is None:
+            cursor = conn.execute(
+                """INSERT INTO alliance_members
+                   (alliance_id, user_id, role, status, joined_at, created_at, updated_at)
+                   VALUES (?, ?, ?, 'active', ?, ?, ?)""",
+                (
+                    int(alliance_id), int(target["id"]), selected_role,
+                    timestamp, timestamp, timestamp,
+                ),
+            )
+            member_id = int(cursor.lastrowid)
+        else:
+            member_id = int(existing["id"])
+            conn.execute(
+                """UPDATE alliance_members
+                   SET role=?, status='active', joined_at=COALESCE(joined_at, ?), updated_at=?
+                   WHERE id=?""",
+                (selected_role, timestamp, timestamp, member_id),
+            )
+        conn.execute(
+            "DELETE FROM alliance_join_requests WHERE alliance_id=? AND user_id=? AND status='pending'",
+            (int(alliance_id), int(target["id"])),
+        )
+        conn.execute(
+            """INSERT INTO alliance_visits
+               (user_id, alliance_id, is_default, first_visited_at, last_visited_at)
+               VALUES (?, ?, 0, ?, ?)
+               ON CONFLICT(user_id, alliance_id) DO UPDATE SET last_visited_at=excluded.last_visited_at""",
+            (int(target["id"]), int(alliance_id), timestamp, timestamp),
+        )
+        _alliance_audit(
+            conn, alliance_id=alliance_id, actor_user_id=int(actor["user_id"]),
+            action="alliance_member_added_by_openid", entity_type="alliance_member",
+            entity_id=member_id, details={"role": selected_role}, timestamp=timestamp,
+        )
+    return {"member_id": member_id, "role": selected_role, "status": "active"}
 
 
 def set_alliance_member_role(
@@ -917,7 +1233,7 @@ def remove_alliance_member(
             (selected, timestamp, int(member_id)),
         )
         conn.execute(
-            "UPDATE alliance_visits SET is_default=0 WHERE alliance_id=? AND user_id=?",
+            "DELETE FROM alliance_visits WHERE alliance_id=? AND user_id=?",
             (int(alliance_id), int(target["user_id"])),
         )
         _alliance_audit(
@@ -946,7 +1262,7 @@ def leave_alliance(
             (timestamp, int(actor["member_id"])),
         )
         conn.execute(
-            "UPDATE alliance_visits SET is_default=0 WHERE alliance_id=? AND user_id=?",
+            "DELETE FROM alliance_visits WHERE alliance_id=? AND user_id=?",
             (int(alliance_id), int(actor["user_id"])),
         )
         _alliance_audit(
@@ -956,6 +1272,42 @@ def leave_alliance(
             details={"previous_role": actor["role"]}, timestamp=timestamp,
         )
     return {"alliance_id": int(alliance_id), "status": "left"}
+
+
+def archive_alliance(
+    conn: sqlite3.Connection,
+    openid: str,
+    alliance_id: int,
+    confirmation_name: str,
+    *,
+    now: datetime | None = None,
+) -> dict:
+    actor = _member(conn, openid, alliance_id, roles={"leader"})
+    if actor["plan_code"] == "internal":
+        raise AllianceOperationError("内置联盟不能在小程序中删除", status_code=403)
+    if str(confirmation_name or "").strip() != actor["name"]:
+        raise AllianceOperationError("请输入完整联盟名称确认删除", status_code=422)
+    timestamp = _iso(now)
+    with conn:
+        _alliance_audit(
+            conn, alliance_id=alliance_id, actor_user_id=int(actor["user_id"]),
+            action="alliance_archived", entity_type="alliance",
+            entity_id=int(alliance_id), details={"name": actor["name"]}, timestamp=timestamp,
+        )
+        conn.execute(
+            "UPDATE alliance_clans SET status='inactive', updated_at=? WHERE alliance_id=? AND status='active'",
+            (timestamp, int(alliance_id)),
+        )
+        conn.execute(
+            "UPDATE alliance_members SET status='left', updated_at=? WHERE alliance_id=? AND status='active'",
+            (timestamp, int(alliance_id)),
+        )
+        conn.execute("DELETE FROM alliance_visits WHERE alliance_id=?", (int(alliance_id),))
+        conn.execute(
+            "UPDATE alliances SET status='archived', updated_at=? WHERE id=?",
+            (timestamp, int(alliance_id)),
+        )
+    return {"alliance_id": int(alliance_id), "status": "archived"}
 
 
 def grant_alliance_plan(

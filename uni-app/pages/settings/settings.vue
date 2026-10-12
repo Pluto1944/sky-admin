@@ -118,20 +118,20 @@
         <view class="menu-section">
           <view class="menu-title">其他管理</view>
           <view class="menu-list">
-            <view class="menu-item" @tap="openAllianceManagement">
+            <view v-if="canManageAlliance" class="menu-item" @tap="openAllianceManagement">
               <view class="menu-icon menu-icon-alliance">盟</view>
               <view class="menu-copy">
-                <text class="menu-text">联盟管理</text>
-                <text class="menu-desc">认证状态、成员和分享加入</text>
+                <text class="menu-text">管理联盟</text>
+                <text class="menu-desc">申请、邀请、成员和认证</text>
               </view>
               <text class="menu-arrow">›</text>
             </view>
-            <view class="menu-divider"></view>
+            <view v-if="canManageAlliance" class="menu-divider"></view>
             <view v-if="isPlatformAdmin" class="menu-item" @tap="openPlatformManagement">
               <view class="menu-icon menu-icon-platform">台</view>
               <view class="menu-copy">
-                <text class="menu-text">平台管理</text>
-                <text class="menu-desc">人工认证、套餐与开放配额</text>
+                <text class="menu-text">超级管理</text>
+                <text class="menu-desc">全部联盟、认证、成员与权益</text>
               </view>
               <text class="menu-arrow">›</text>
             </view>
@@ -274,7 +274,7 @@ import {
   saveFreeAllianceSubscription,
   wechatLogin
 } from '@/utils/api.js'
-import { acceptPendingAllianceShare, clearAllianceContext, getCurrentAlliance, loadAllianceContext } from '@/utils/alliance.js'
+import { ALLIANCE_CHANGED_EVENT, acceptPendingAllianceShare, clearAllianceContext, getCurrentAlliance, loadAllianceContext } from '@/utils/alliance.js'
 import { APP_VERSION } from '@/config/release.js'
 
 export default {
@@ -290,6 +290,8 @@ export default {
       bindPlayerTag: '',
       bindSubmitting: false,
       privacyAgreed: false,
+      currentAlliance: getCurrentAlliance(),
+      allianceChangeHandler: null,
       allianceFeatures: {},
       freeAlliance: null,
       freeSubscription: null,
@@ -309,7 +311,7 @@ export default {
   },
   computed: {
     canManageAlliance() {
-      const alliance = getCurrentAlliance()
+      const alliance = this.currentAlliance
       return alliance && ['admin', 'leader'].indexOf(alliance.role) >= 0
     },
     isPlatformAdmin() {
@@ -330,17 +332,26 @@ export default {
     }
   },
   onShow() {
+    this.currentAlliance = getCurrentAlliance()
     this.refreshLoginState()
+  },
+  created() {
+    this.allianceChangeHandler = alliance => {
+      this.currentAlliance = alliance
+      if (this.isLoggedIn) this.refreshFreeAlliancePanel()
+    }
+    uni.$on(ALLIANCE_CHANGED_EVENT, this.allianceChangeHandler)
   },
   onHide() {
     this.stopFreeStatusPoll()
   },
   onUnload() {
     this.stopFreeStatusPoll()
+    if (this.allianceChangeHandler) uni.$off(ALLIANCE_CHANGED_EVENT, this.allianceChangeHandler)
   },
   methods: {
     openAllianceManagement() {
-      if (!getCurrentAlliance()) {
+      if (!this.currentAlliance) {
         uni.showToast({ title: '请先创建或加入联盟', icon: 'none' })
         return
       }
@@ -368,7 +379,7 @@ export default {
             if (res.player_tag) this.bindPlayerTag = res.player_tag
             acceptPendingAllianceShare()
               .then((joined) => {
-                if (joined && joined.alliance) {
+                if (joined && joined.joined && joined.alliance) {
                   uni.showToast({ title: `已加入${joined.alliance.name}`, icon: 'success' })
                 }
               })
@@ -412,7 +423,7 @@ export default {
               loadAllianceContext(null, true)
                 .then(() => acceptPendingAllianceShare())
                 .then((joined) => {
-                  if (joined && joined.alliance) {
+                  if (joined && joined.joined && joined.alliance) {
                     uni.showToast({ title: `已加入${joined.alliance.name}`, icon: 'success' })
                   }
                 })
@@ -569,13 +580,15 @@ export default {
       if (!this.freeAlliance || this.freeBusy) return
       uni.showModal({
         title: '停用并删除联盟',
-        content: '联盟将从切换菜单移除，公共战争历史不会删除。确定继续吗？',
+        content: `请输入联盟名称“${this.freeAlliance.name}”确认删除`,
+        editable: true,
+        placeholderText: '联盟名称',
         confirmColor: '#d56b72',
         success: async (result) => {
           if (!result.confirm) return
           this.freeBusy = true
           try {
-            await archiveFreeAlliance(this.freeAlliance.id)
+            await archiveFreeAlliance(this.freeAlliance.id, result.content)
             this.freeAlliance = null
             this.freeSubscription = null
             this.freeAllianceName = '我的部落'

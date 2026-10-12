@@ -460,14 +460,16 @@ POST /api/alliances/{alliance_id}/subscription/refresh
 DELETE /api/alliances/{alliance_id}
 ```
 
-`GET /api/me/alliances` 只列出有效成员关系；单纯存在 `alliance_visits` 不授予访问权。响应把当前用户
-可见项放在 `alliances`，个人隐藏项放在 `hidden_alliances`。隐藏仅是当前用户的列表偏好，不改变
-成员关系、角色和数据权限；至少保留一个可见联盟。`PATCH .../visibility` 使用 `{ "hidden": true/false }`
-隐藏或恢复，重新通过有效分享进入隐藏联盟时会自动恢复显示。
-`POST /api/me/alliances/{alliance_id}/visit` 仅将已有有效成员关系对应的联盟记为最近访问和
-默认联盟，并自动恢复该联盟显示；不会创建成员关系或提升角色。每个用户最多只有一个默认联盟。
-修改 URL 中的 `alliance_id` 或 `clan_tag` 不能越过当前用户的有效联盟和订阅部落范围，
-无权访问统一返回 `404`，避免枚举其他联盟。
+`GET /api/me/alliances` 分别返回 `alliances`（首领、管理员、成员）和 `browsed_alliances`（无活跃成员
+关系的浏览历史），两组各按最近访问倒序。浏览历史最多保留 50 条。旧 `hidden_alliances` 字段在迁移期
+保留为空数组，前端不再使用隐藏/恢复模型。
+`POST /api/me/alliances/{alliance_id}/visit` 可切换到有效成员关系或已有浏览历史，并记为最近访问和
+默认联盟；不会创建成员关系或提升角色。`DELETE /api/me/alliance-history/{alliance_id}` 只删除非成员的
+浏览历史；成员需使用退出接口，首领需输入联盟名称软删除联盟。
+
+普通只读接口接受三类上下文：有效成员关系、已登录用户的浏览历史，或请求头 `X-Alliance-Share`
+携带的有效分享令牌。三者的普通字段一致；访客上下文永远不授予管理字段。修改 URL 中的
+`alliance_id` 或 `clan_tag` 仍不能越过令牌来源联盟和该联盟订阅部落范围，无权访问统一返回 `404`。
 
 免费联盟写接口首先受 `ALLIANCE_FREE_ENABLED=true`（兼容旧名 `M5_FREE_ALLIANCE_ENABLED`）
 环境总开关控制。内部测试账号可由 `M5_FREE_ALLIANCE_OPENIDS` 允许；外部用户还必须满足平台后台
@@ -512,9 +514,8 @@ DELETE /api/alliances/{alliance_id}
 幂等同步到新表；临时壳子无需加入日常 12 部落。通用 CWL 汇总和详情不按联盟名称特判，也不从
 日常订阅范围推断联赛队伍。
 
-苍穹迁移期有一条已确认兼容规则：登录用户若在固定 `sky-internal` 尚无任何成员记录，
-自动新增为管理员并记录审计；已有成员、降级、移除或封禁记录绝不覆盖或自动恢复。该
-特殊规则不适用于其他免费或付费联盟。
+苍穹只保留 M1 存量迁移兼容：迁移时已有微信用户被映射为管理员。迁移完成后的新微信登录不会
+自动加入苍穹；普通分享只写浏览历史，加入必须通过申请审核或管理员/首领邀请。
 
 **错误码**：
 
@@ -528,6 +529,7 @@ DELETE /api/alliances/{alliance_id}
 
 ```text
 POST   /api/alliance-shares/preview
+POST   /api/alliance-shares/open
 POST   /api/alliance-shares/join
 GET    /api/alliances/{alliance_id}/verification
 GET    /api/alliances/{alliance_id}/managed-clans
@@ -539,9 +541,14 @@ GET    /api/alliances/{alliance_id}/shares
 POST   /api/alliances/{alliance_id}/shares
 DELETE /api/alliances/{alliance_id}/shares/{link_id}
 GET    /api/alliances/{alliance_id}/user-members
+POST   /api/alliances/{alliance_id}/user-members
 PATCH  /api/alliances/{alliance_id}/user-members/{member_id}
 DELETE /api/alliances/{alliance_id}/user-members/{member_id}
+POST   /api/alliances/{alliance_id}/join-requests
+GET    /api/alliances/{alliance_id}/join-requests
+PATCH  /api/alliances/{alliance_id}/join-requests/{request_id}
 POST   /api/alliances/{alliance_id}/leave
+DELETE /api/me/alliance-history/{alliance_id}
 
 GET /api/platform/capability
 GET /api/platform/alliances
@@ -552,17 +559,21 @@ PUT /api/platform/alliances/{alliance_id}/plan
 PUT /api/platform/alliances/{alliance_id}/status
 ```
 
-分享预览是唯一无需 JWT 的新接口，只返回联盟名称、套餐名称、部落数量和过期时间，不创建成员、
-不提交同步任务。令牌在 POST JSON 中传入，不放在 API URL；登录加入固定创建 `member`，不会继承
-分享者角色。被移除或封禁用户不能通过分享恢复。
+分享预览无需 JWT，只返回联盟名称、套餐名称、部落数量、分享类型和过期时间，不创建成员、不提交
+同步任务。`open` 为已登录用户记录浏览历史，不自动加入；普通 `browse` 分享不能调用 `join`。
+管理员或首领创建的 `invite` 在接收者确认后固定创建 `member`，不会继承分享者角色。`removed` 用户
+需重新申请，`blocked` 用户不能通过邀请或申请恢复。令牌在 POST JSON 或普通只读请求头中传入，
+数据库只保存摘要。
 
 `verification` 用户接口只返回人工处理说明和当前状态。“申请部落认证”按钮不会调用验证码或自动
 认证接口。只有平台管理员可通过平台接口设置 `verified / disputed / revoked / unverified`；平台
 管理员来源为 `platform_admins`、`ALLIANCE_PLATFORM_ADMIN_OPENIDS`，迁移期可由 M5 内部白名单引导，
 任何平台权限都不会替代联盟成员关系和逐部落业务权限。
 
-联盟成员列表仅 `admin / leader` 可读且不返回 OpenID。首领可以调整管理员或移交首领；管理员只能
-移除普通成员。普通成员和管理员可主动退出；首领必须先移交。免费或有效付费联盟的管理员/首领
+联盟成员列表仅 `admin / leader` 可读且不返回他人的 OpenID。用户可在设置页复制自己的 OpenID，
+首领据此直接添加普通成员或管理员，管理员只能添加普通成员。首领可以调整管理员或移交首领；
+管理员只能移除普通成员。加入申请由管理员或首领批准或拒绝。普通成员和管理员可主动退出；首领
+必须先移交或输入联盟名称软删除联盟。免费或有效付费联盟的管理员/首领
 可通过统一接口新增、软移除、修改业务标签和调整顺序；免费套餐最多 1 个有效部落，付费套餐当前
 最多 10 个。新增或重新启用的部落默认未认证并通过 M4 队列初始化。`internal` 套餐由系统配置，
 不允许在小程序中修改，防止误改苍穹存量配置。平台套餐接口是人工运营入口，不是在线支付接口。

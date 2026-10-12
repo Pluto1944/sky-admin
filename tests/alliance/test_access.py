@@ -14,6 +14,7 @@ from modules.alliance.access import (
 )
 from modules.alliance.migration import SKY_ALLIANCE_KEY, apply_sky_migration
 from modules.alliance.cwl_config import sync_sky_league_teams
+from modules.alliance.operations import create_share_link
 
 
 CLANS = [
@@ -36,6 +37,12 @@ def _sky_id(db) -> int:
     return int(db.conn.execute(
         "SELECT id FROM alliances WHERE alliance_key = ?", (SKY_ALLIANCE_KEY,)
     ).fetchone()[0])
+
+
+def _context(db, openid: str, alliance_id: int):
+    context = resolve_alliance_context(db.conn, openid, alliance_id)
+    assert context is not None
+    return context
 
 
 def _paid_alliance(db, key: str = "paid-a", name: str = "A联盟") -> int:
@@ -135,7 +142,7 @@ def test_sky_join_grants_admin_once_but_never_repromotes_or_restores(db):
     assert resolve_alliance_context(db.conn, "new-sky-user", _sky_id(db)) is None
 
 
-def test_wechat_login_adds_new_sky_user_without_overwriting_existing_role(db, monkeypatch):
+def test_wechat_login_does_not_auto_join_sky_alliance(db, monkeypatch):
     apply_sky_migration(db.conn, CLANS, now=NOW)
     monkeypatch.setattr(legacy_routes, "_wechat_code2openid", lambda _code: "login-user")
 
@@ -147,16 +154,11 @@ def test_wechat_login_adds_new_sky_user_without_overwriting_existing_role(db, mo
         "SELECT role FROM alliance_members WHERE user_id = ?", (user_id,)
     ).fetchone()
     assert response["token"]
-    assert membership["role"] == "admin"
-
-    db.conn.execute(
-        "UPDATE alliance_members SET role='member' WHERE user_id = ?", (user_id,)
-    )
-    db.conn.commit()
+    assert membership is None
     legacy_routes.wechat_login({"code": "test-code"}, db)
     assert db.conn.execute(
         "SELECT role FROM alliance_members WHERE user_id = ?", (user_id,)
-    ).fetchone()[0] == "member"
+    ).fetchone() is None
 
 
 def test_context_uses_per_alliance_roles_and_caps_unverified_admin(db):
@@ -230,7 +232,7 @@ def test_visit_switches_default_only_for_active_membership(db):
     assert exc.value.status_code == 404
 
 
-def test_hide_and_restore_alliance_only_changes_user_visibility(db):
+def test_legacy_hide_flag_does_not_remove_active_membership_from_my_alliances(db):
     apply_sky_migration(db.conn, CLANS, now=NOW)
     user_id = _user(db, "visibility-user")
     sky_id = _sky_id(db)
@@ -252,8 +254,8 @@ def test_hide_and_restore_alliance_only_changes_user_visibility(db):
     )
     assert hidden["hidden"] is True
     assert hidden["next_alliance"]["id"] == sky_id
-    assert [item["id"] for item in listing["alliances"]] == [sky_id]
-    assert [item["id"] for item in listing["hidden_alliances"]] == [paid_id]
+    assert {item["id"] for item in listing["alliances"]} == {sky_id, paid_id}
+    assert listing["hidden_alliances"] == []
     membership = db.conn.execute(
         "SELECT role, status FROM alliance_members WHERE alliance_id=? AND user_id=?",
         (paid_id, user_id),
@@ -308,10 +310,10 @@ def test_members_endpoint_whitelists_management_fields_per_clan(db):
     db.conn.commit()
 
     admin = alliance_routes.alliance_members(
-        paid_id, user={"openid": "admin"}, db=db,
+        paid_id, context=_context(db, "admin", paid_id), db=db,
     )["members"][0]
     ordinary = alliance_routes.alliance_members(
-        paid_id, user={"openid": "member"}, db=db,
+        paid_id, context=_context(db, "member", paid_id), db=db,
     )["members"][0]
 
     assert admin["data_level"] == "management"
@@ -333,15 +335,46 @@ def test_unverified_admin_and_cross_alliance_url_cannot_read_management(db):
     db.conn.commit()
 
     response = alliance_routes.alliance_members(
-        paid_id, user={"openid": "admin"}, db=db,
+        paid_id, context=_context(db, "admin", paid_id), db=db,
     )
     assert response["members"] == []
 
     with pytest.raises(HTTPException) as exc:
-        alliance_routes.alliance_clans(
-            paid_id, user={"openid": "outsider"}, db=db,
+        alliance_routes.alliance_view_context(
+            paid_id, user={"openid": "outsider"}, share_token=None, db=db,
         )
     assert exc.value.status_code == 404
+
+
+def test_share_token_grants_visitor_read_without_management_fields(db):
+    apply_sky_migration(db.conn, CLANS, now=NOW)
+    leader_id = _user(db, "share-leader")
+    paid_id = _paid_alliance(db, key="shared", name="分享联盟")
+    _membership(db, paid_id, leader_id, "leader")
+    _clan(db, paid_id, "#BBB", verification="verified")
+    db.conn.execute(
+        """INSERT INTO accounts
+           (player_tag, account_name, town_hall_level, clan_tag, player_name,
+            membership_status, last_synced_at)
+           VALUES ('#P1', '访客可见成员', 18, '#BBB', '内部归属人', 'member', ?)""",
+        (NOW,),
+    )
+    db.conn.commit()
+    shared = create_share_link(
+        db.conn, "share-leader", paid_id, share_type="browse",
+    )
+
+    context = alliance_routes.alliance_view_context(
+        paid_id, user=None, share_token=shared["token"], db=db,
+    )
+    assert context.role == "visitor"
+    member = alliance_routes.alliance_members(
+        paid_id, context=context, db=db,
+    )["members"][0]
+    assert member["account_name"] == "访客可见成员"
+    assert member["data_level"] == "member"
+    assert "management" not in member
+    assert "player_name" not in member
 
 
 def test_current_wars_are_scoped_to_subscribed_clans(db):
@@ -353,14 +386,14 @@ def test_current_wars_are_scoped_to_subscribed_clans(db):
     db.conn.commit()
 
     result = alliance_routes.alliance_current_wars(
-        paid_id, user={"openid": "paid-user"}, db=db,
+        paid_id, context=_context(db, "paid-user", paid_id), db=db,
     )
     assert [item["clan_tag"] for item in result["clans"]] == ["#BBB"]
     assert result["clans"][0]["status"] == "sync_pending"
 
     with pytest.raises(HTTPException) as exc:
         alliance_routes.alliance_current_war_detail(
-            paid_id, "#AAA", user={"openid": "paid-user"}, db=db,
+            paid_id, "#AAA", context=_context(db, "paid-user", paid_id), db=db,
         )
     assert exc.value.status_code == 404
 
@@ -376,13 +409,13 @@ def test_war_history_is_scoped_to_current_alliance(db):
     db.conn.commit()
 
     result = alliance_routes.alliance_war_history(
-        paid_id, user={"openid": "history-user"}, db=db,
+        paid_id, context=_context(db, "history-user", paid_id), db=db,
     )
     assert [item["clan_tag"] for item in result["wars"]] == ["#BBB"]
     assert result["alliance_id"] == paid_id
 
     detail = alliance_routes.alliance_war_history_detail(
-        paid_id, "#BBB", "war-bbb", user={"openid": "history-user"}, db=db,
+        paid_id, "#BBB", "war-bbb", context=_context(db, "history-user", paid_id), db=db,
     )
     assert detail["clan_tag"] == "#BBB"
     assert detail["is_history"] is True
@@ -399,7 +432,7 @@ def test_war_history_is_scoped_to_current_alliance(db):
     )
     db.conn.commit()
     managed_detail = alliance_routes.alliance_war_history_detail(
-        paid_id, "#BBB", "war-bbb", user={"openid": "history-manager"}, db=db,
+        paid_id, "#BBB", "war-bbb", context=_context(db, "history-manager", paid_id), db=db,
     )
     assert managed_detail["rows"] == [
         {"player_tag": "#SENSITIVE", "missed_attacks": 1},
@@ -408,7 +441,7 @@ def test_war_history_is_scoped_to_current_alliance(db):
 
     with pytest.raises(HTTPException) as exc:
         alliance_routes.alliance_war_history_detail(
-            paid_id, "#AAA", "war-aaa", user={"openid": "history-user"}, db=db,
+            paid_id, "#AAA", "war-aaa", context=_context(db, "history-user", paid_id), db=db,
         )
     assert exc.value.status_code == 404
 
@@ -431,7 +464,7 @@ def test_war_stats_selects_current_alliance_combat_clan_without_sky_special_case
     db.conn.commit()
 
     result = alliance_routes.alliance_war_stats(
-        paid_id, user={"openid": "stats-user"}, db=db,
+        paid_id, context=_context(db, "stats-user", paid_id), db=db,
     )
     assert result["alliance_id"] == paid_id
     assert result["clan_tag"] == "#CAMP"
@@ -442,7 +475,7 @@ def test_war_stats_selects_current_alliance_combat_clan_without_sky_special_case
 
     with pytest.raises(HTTPException) as exc:
         alliance_routes.alliance_war_stats(
-            paid_id, clan_tag="#NORMAL", user={"openid": "stats-user"}, db=db,
+            paid_id, clan_tag="#NORMAL", context=_context(db, "stats-user", paid_id), db=db,
         )
     assert exc.value.status_code == 404
 
@@ -456,7 +489,7 @@ def test_war_stats_returns_empty_when_current_alliance_has_no_combat_clan(db):
     db.conn.commit()
 
     result = alliance_routes.alliance_war_stats(
-        paid_id, user={"openid": "no-camp-user"}, db=db,
+        paid_id, context=_context(db, "no-camp-user", paid_id), db=db,
     )
     assert result["clan_tag"] is None
     assert result["combat_clans"] == []
@@ -473,7 +506,7 @@ def test_war_stats_rejects_member_or_unverified_management_access(db):
 
     with pytest.raises(HTTPException) as exc:
         alliance_routes.alliance_war_stats(
-            paid_id, user={"openid": "restricted-stats-user"}, db=db,
+            paid_id, context=_context(db, "restricted-stats-user", paid_id), db=db,
         )
     assert exc.value.status_code == 403
 
@@ -497,7 +530,7 @@ def test_farm_config_only_returns_current_alliance_farm_clans(db):
     db.conn.commit()
 
     result = alliance_routes.alliance_farm_config(
-        paid_id, user={"openid": "farm-user"}, db=db,
+        paid_id, context=_context(db, "farm-user", paid_id), db=db,
     )
 
     assert result["alliance_id"] == paid_id
@@ -515,7 +548,7 @@ def test_farm_config_returns_empty_when_alliance_has_no_farm_clan(db):
     db.conn.commit()
 
     result = alliance_routes.alliance_farm_config(
-        paid_id, user={"openid": "no-farm-user"}, db=db,
+        paid_id, context=_context(db, "no-farm-user", paid_id), db=db,
     )
 
     assert result["clans"] == []
@@ -537,7 +570,7 @@ def test_farm_config_hides_management_lists_from_unverified_member_access(db):
     db.conn.commit()
 
     result = alliance_routes.alliance_farm_config(
-        paid_id, user={"openid": "farm-restricted-user"}, db=db,
+        paid_id, context=_context(db, "farm-restricted-user", paid_id), db=db,
     )
     clan = result["clans"][0]
     assert clan["replace_candidates"] == []
@@ -583,16 +616,16 @@ def test_alliance_cwl_uses_monthly_config_instead_of_daily_clan_scope(db):
     db.conn.commit()
 
     sky = alliance_routes.alliance_cwl_live(
-        sky_id, user={"openid": "sky-cwl"}, db=db,
+        sky_id, context=_context(db, "sky-cwl", sky_id), db=db,
     )
     assert {item["clan_tag"] for item in sky["clans"]} == {"#CWLX", "#BBB"}
     detail = alliance_routes.alliance_cwl_live_detail(
-        sky_id, "#CWLX", user={"openid": "sky-cwl"}, db=db,
+        sky_id, "#CWLX", context=_context(db, "sky-cwl", sky_id), db=db,
     )
     assert detail["summary"]["clan_tag"] == "#CWLX"
 
     paid = alliance_routes.alliance_cwl_live(
-        paid_id, user={"openid": "paid-cwl"}, db=db,
+        paid_id, context=_context(db, "paid-cwl", paid_id), db=db,
     )
     assert [item["clan_tag"] for item in paid["clans"]] == ["#BBB"]
     sky_shared = next(item for item in sky["clans"] if item["clan_tag"] == "#BBB")
@@ -605,7 +638,7 @@ def test_alliance_cwl_uses_monthly_config_instead_of_daily_clan_scope(db):
         assert sky_shared[field] == paid_shared[field]
     with pytest.raises(HTTPException) as exc:
         alliance_routes.alliance_cwl_live_detail(
-            paid_id, "#CWLX", user={"openid": "paid-cwl"}, db=db,
+            paid_id, "#CWLX", context=_context(db, "paid-cwl", paid_id), db=db,
         )
     assert exc.value.status_code == 404
 
@@ -648,7 +681,7 @@ def test_alliance_league_stats_only_uses_its_monthly_combat_teams(db):
     result = alliance_routes.alliance_league_stats(
         alliance_id,
         period="2026-09",
-        user={"openid": "paid-stats"},
+        context=_context(db, "paid-stats", alliance_id),
         db=db,
     )
 

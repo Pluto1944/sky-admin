@@ -1,6 +1,6 @@
 <template>
   <view class="page">
-    <TopBar title="联盟管理" :show-back="true" back-fallback="/pages/settings/settings" />
+    <TopBar title="管理联盟" :show-back="true" back-fallback="/pages/settings/settings" />
     <scroll-view scroll-y class="content">
       <view v-if="loading" class="empty">正在加载...</view>
       <template v-else-if="alliance">
@@ -31,7 +31,20 @@
           <text class="tip">认证按钮暂时保留，当前由后台人工处理，不会自动读取或修改部落介绍。</text>
         </view>
 
-        <view class="section-title">分享加入</view>
+        <view class="section-title">加入申请</view>
+        <view class="card">
+          <view v-for="request in joinRequests" :key="request.id" class="request-row">
+            <view class="grow">
+              <text class="name">{{ request.display_name }}</text>
+              <text class="sub">申请于 {{ shortDate(request.created_at) }}</text>
+            </view>
+            <text class="review reject" @tap="reviewRequest(request, 'reject')">拒绝</text>
+            <text class="review approve" @tap="reviewRequest(request, 'approve')">同意</text>
+          </view>
+          <view v-if="!joinRequests.length" class="empty compact">暂无待处理申请</view>
+        </view>
+
+        <view class="section-title">邀请加入</view>
         <view class="card">
           <text class="body">生成联盟邀请后，其他用户登录打开分享将以普通成员身份加入，不会继承分享人的管理权限。</text>
           <button class="primary-btn" :loading="shareBusy" @tap="generateShare">生成30天邀请</button>
@@ -55,6 +68,16 @@
         <template v-if="canManageMembers">
           <view class="section-title">联盟成员</view>
           <view class="card member-card">
+            <view class="openid-add">
+              <text class="body">通过用户复制给你的 OpenID 添加成员。首领可直接添加管理员，管理员只能添加普通成员。</text>
+              <input v-model="memberOpenid" class="input" maxlength="200" placeholder="粘贴用户 OpenID" placeholder-style="color:#59637a" />
+              <view class="openid-actions">
+                <picker :range="availableAddRoles" range-key="label" :value="addRoleIndex" @change="changeAddRole">
+                  <view class="picker add-role-picker">添加为：{{ availableAddRoles[addRoleIndex].label }}⌄</view>
+                </picker>
+                <button class="mini-save add-member-btn" :loading="memberAddBusy" :disabled="memberAddBusy || !memberOpenid.trim()" @tap="addMemberByOpenid">添加</button>
+              </view>
+            </view>
             <view v-for="member in members" :key="member.id" class="member-row">
               <view class="grow">
                 <text class="name">{{ member.display_name }}</text>
@@ -94,13 +117,16 @@
 <script>
 import TopBar from '@/components/TopBar.vue'
 import {
+  addAllianceUserMember,
   createAllianceShare,
+  getAllianceJoinRequests,
   getAllianceShares,
   getAllianceUserMembers,
   getAllianceVerification,
   leaveAlliance,
   removeAllianceUser,
   renameFreeAlliance,
+  reviewAllianceJoinRequest,
   revokeAllianceShare,
   updateAllianceUserRole
 } from '@/utils/api.js'
@@ -115,10 +141,14 @@ export default {
       allianceName: '',
       verification: { clans: [], can_manage: false },
       members: [],
+      joinRequests: [],
       shareLinks: [],
       shareToken: '',
       shareExpiresAt: '',
       shareBusy: false,
+      memberOpenid: '',
+      memberAddBusy: false,
+      addRoleIndex: 0,
       roleOptions: [
         { key: 'member', label: '成员' },
         { key: 'admin', label: '管理' },
@@ -129,6 +159,11 @@ export default {
   computed: {
     canManageMembers() {
       return this.alliance && ['admin', 'leader'].indexOf(this.alliance.role) >= 0
+    },
+    availableAddRoles() {
+      const roles = [{ key: 'member', label: '成员' }]
+      if (this.alliance && this.alliance.role === 'leader') roles.push({ key: 'admin', label: '管理员' })
+      return roles
     }
   },
   async onLoad() { await this.loadData() },
@@ -149,15 +184,22 @@ export default {
         const loaded = await loadAllianceContext()
         this.alliance = loaded.current || getCurrentAlliance()
         if (!this.alliance) return
+        if (['admin', 'leader'].indexOf(this.alliance.role) < 0) {
+          uni.showToast({ title: '没有联盟管理权限', icon: 'none' })
+          setTimeout(() => uni.navigateBack(), 500)
+          return
+        }
         this.allianceName = this.alliance.name
         const results = await Promise.all([
           getAllianceVerification(this.alliance.id),
           getAllianceShares(this.alliance.id),
-          this.canManageMembers ? getAllianceUserMembers(this.alliance.id) : Promise.resolve({ members: [] })
+          getAllianceUserMembers(this.alliance.id),
+          getAllianceJoinRequests(this.alliance.id)
         ])
         this.verification = results[0]
         this.shareLinks = results[1].links || []
         this.members = results[2].members || []
+        this.joinRequests = (results[3].requests || []).filter(item => item.status === 'pending')
       } catch (err) {
         uni.showToast({ title: err.message || '加载失败', icon: 'none' })
       } finally {
@@ -190,7 +232,7 @@ export default {
         const result = await createAllianceShare(this.alliance.id, 30)
         this.shareToken = result.token
         this.shareExpiresAt = result.expires_at
-        rememberAllianceShareToken(this.alliance.id, result.token, result.expires_at)
+        rememberAllianceShareToken(this.alliance.id, result.token, result.expires_at, 'invite')
         const links = await getAllianceShares(this.alliance.id)
         this.shareLinks = links.links || []
         uni.showToast({ title: '邀请已生成', icon: 'success' })
@@ -198,6 +240,36 @@ export default {
         uni.showToast({ title: err.message || '生成失败', icon: 'none' })
       } finally {
         this.shareBusy = false
+      }
+    },
+    async reviewRequest(request, action) {
+      if (!request || !this.alliance) return
+      try {
+        await reviewAllianceJoinRequest(this.alliance.id, request.id, action)
+        await this.loadData()
+        uni.showToast({ title: action === 'approve' ? '已同意' : '已拒绝', icon: 'success' })
+      } catch (err) {
+        uni.showToast({ title: err.message || '处理失败', icon: 'none' })
+      }
+    },
+    changeAddRole(event) {
+      this.addRoleIndex = Number(event.detail.value) || 0
+    },
+    async addMemberByOpenid() {
+      const targetOpenid = this.memberOpenid.trim()
+      const selected = this.availableAddRoles[this.addRoleIndex] || this.availableAddRoles[0]
+      if (!targetOpenid || !this.alliance || this.memberAddBusy) return
+      this.memberAddBusy = true
+      try {
+        await addAllianceUserMember(this.alliance.id, targetOpenid, selected.key)
+        this.memberOpenid = ''
+        this.addRoleIndex = 0
+        await this.loadData()
+        uni.showToast({ title: '成员已添加', icon: 'success' })
+      } catch (err) {
+        uni.showToast({ title: err.message || '添加失败', icon: 'none' })
+      } finally {
+        this.memberAddBusy = false
       }
     },
     copySharePath() {
@@ -298,13 +370,13 @@ export default {
 .section-title { margin: 30rpx 8rpx 14rpx; color: #7f8aa2; font-size: 23rpx; }
 .card { padding: 24rpx; border: 1rpx solid #292945; border-radius: 14rpx; background: #18182d; }
 .summary-card { margin-top: 4rpx; }
-.title-row, .clan-row, .member-row { display: flex; align-items: center; }
+.title-row, .clan-row, .member-row, .request-row { display: flex; align-items: center; }
 .title { color: #fff; font-size: 32rpx; font-weight: 700; }
 .role { margin-left: 12rpx; color: #5fa8ff; font-size: 22rpx; }
 .meta, .sub, .tip, .body { display: block; color: #788197; font-size: 22rpx; line-height: 1.6; }
 .meta { margin-top: 8rpx; }
-.clan-row, .member-row { min-height: 92rpx; border-bottom: 1rpx solid #25253e; }
-.clan-row:last-of-type, .member-row:last-of-type { border-bottom: 0; }
+.clan-row, .member-row, .request-row { min-height: 92rpx; border-bottom: 1rpx solid #25253e; }
+.clan-row:last-of-type, .member-row:last-of-type, .request-row:last-of-type { border-bottom: 0; }
 .grow { flex: 1; min-width: 0; }
 .name { display: block; overflow: hidden; color: #e5e8f0; font-size: 26rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .state, .role-chip { margin-left: 12rpx; color: #91a0b9; font-size: 22rpx; }
@@ -317,6 +389,8 @@ export default {
 .tip { margin-top: 14rpx; }.body { color: #a6aec0; }
 .role-chip { padding: 8rpx 12rpx; border-radius: 8rpx; background: #22223a; }.role-chip.passive { background: transparent; }
 .remove { margin-left: 12rpx; color: #bd7479; font-size: 21rpx; }
+.review { margin-left: 18rpx; font-size: 22rpx; }.review.reject { color: #a47d82; }.review.approve { color: #69a7e6; }
+.openid-add { margin-bottom: 12rpx; padding-bottom: 20rpx; border-bottom: 1rpx solid #25253e; }.openid-actions { display: flex; align-items: center; margin-top: 12rpx; }.add-role-picker { min-width: 220rpx; margin-top: 0; }.add-member-btn { margin-top: 0; }
 .restore { margin-left: 12rpx; color: #69a7e6; font-size: 21rpx; }
 .share-history { margin-top: 20rpx; border-top: 1rpx solid #25253e; }.share-row { display: flex; align-items: center; min-height: 82rpx; border-bottom: 1rpx solid #25253e; }
 .leave-section { margin-top: 36rpx; }.danger-btn { border: 1rpx solid #57363f; border-radius: 10rpx; color: #c9797f; background: transparent; font-size: 24rpx; line-height: 2.4; }.danger-btn::after { border: 0; }

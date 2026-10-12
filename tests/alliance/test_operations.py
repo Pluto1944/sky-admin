@@ -8,9 +8,11 @@ from modules.alliance.access import resolve_alliance_context
 from modules.alliance.free_alliance import create_free_alliance, free_alliance_capability
 from modules.alliance.migration import apply_sky_migration
 from modules.alliance.operations import (
+    add_alliance_member_by_openid,
     add_managed_clan,
     AllianceOperationError,
     create_share_link,
+    delete_browsing_history,
     free_registration_policy,
     grant_alliance_plan,
     join_from_share,
@@ -18,13 +20,17 @@ from modules.alliance.operations import (
     list_managed_clans,
     list_alliance_members,
     list_share_links,
+    list_join_requests,
     manual_set_clan_verification,
     platform_admin_capability,
     platform_dashboard,
+    record_share_visit,
     reconcile_expired_plan_grants,
     remove_managed_clan,
     reorder_managed_clans,
     remove_alliance_member,
+    request_alliance_join,
+    review_join_request,
     set_alliance_member_role,
     set_alliance_status,
     share_preview,
@@ -150,6 +156,64 @@ def test_expired_share_cannot_join(ops):
     shared = create_share_link(db.conn, "owner", alliance_id, expires_days=1, now=NOW)
     with pytest.raises(AllianceOperationError, match="已过期"):
         join_from_share(db.conn, "member", shared["token"], now=NOW + timedelta(days=2))
+
+
+def test_browse_share_records_history_and_join_requires_approval(ops):
+    db, ids = ops
+    alliance_id = _alliance(db, ids["owner"], "browse-a")
+    shared = create_share_link(
+        db.conn, "owner", alliance_id, share_type="browse", now=NOW,
+    )
+    preview = share_preview(db.conn, shared["token"], now=NOW)
+    assert preview["share_type"] == "browse"
+    assert preview["can_join"] is False
+
+    opened = record_share_visit(db.conn, "member", shared["token"], now=NOW)
+    assert opened["alliance_id"] == alliance_id
+    assert resolve_alliance_context(db.conn, "member", alliance_id) is None
+    with pytest.raises(AllianceOperationError, match="不能直接加入"):
+        join_from_share(db.conn, "member", shared["token"], now=NOW)
+
+    requested = request_alliance_join(db.conn, "member", alliance_id, now=NOW)
+    assert requested["status"] == "pending"
+    pending = list_join_requests(db.conn, "owner", alliance_id)["requests"]
+    assert [item["id"] for item in pending if item["status"] == "pending"] == [requested["id"]]
+    reviewed = review_join_request(
+        db.conn, "owner", alliance_id, requested["id"], "approve", now=NOW,
+    )
+    assert reviewed["status"] == "approved"
+    assert resolve_alliance_context(db.conn, "member", alliance_id).role == "member"
+
+
+def test_browsing_history_can_be_removed_without_changing_membership(ops):
+    db, ids = ops
+    alliance_id = _alliance(db, ids["owner"], "history-a")
+    shared = create_share_link(
+        db.conn, "owner", alliance_id, share_type="browse", now=NOW,
+    )
+    record_share_visit(db.conn, "member", shared["token"], now=NOW)
+    assert delete_browsing_history(db.conn, "member", alliance_id)["removed"] is True
+    assert db.conn.execute(
+        "SELECT 1 FROM alliance_visits WHERE alliance_id=? AND user_id=?",
+        (alliance_id, ids["member"]),
+    ).fetchone() is None
+
+
+def test_leader_adds_admin_by_openid_but_admin_can_only_add_member(ops):
+    db, ids = ops
+    alliance_id = _alliance(db, ids["owner"], "openid-a")
+    added = add_alliance_member_by_openid(
+        db.conn, "owner", alliance_id, "member", "admin", now=NOW,
+    )
+    assert added["role"] == "admin"
+    with pytest.raises(AllianceOperationError, match="只能添加普通成员"):
+        add_alliance_member_by_openid(
+            db.conn, "member", alliance_id, "other-owner", "admin", now=NOW,
+        )
+    ordinary = add_alliance_member_by_openid(
+        db.conn, "member", alliance_id, "other-owner", "member", now=NOW,
+    )
+    assert ordinary["role"] == "member"
 
 
 def test_share_list_marks_elapsed_link_expired_without_returning_token(ops, monkeypatch):

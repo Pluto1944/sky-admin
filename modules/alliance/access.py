@@ -17,6 +17,7 @@ from .migration import SKY_ALLIANCE_KEY
 
 
 ROLE_LABELS = {
+    "visitor": "浏览",
     "member": "成员",
     "admin": "管理",
     "leader": "首领",
@@ -294,6 +295,74 @@ def _build_context(conn: sqlite3.Connection, row: sqlite3.Row) -> AllianceContex
         entitlement_status=row["entitlement_status"],
         entitlement_expires_at=row["entitlement_expires_at"],
         clans=_clans_for_context(conn, alliance_id, role),
+    )
+
+
+def resolve_alliance_public_context(
+    conn: sqlite3.Connection,
+    alliance_id: int,
+    *,
+    management: bool = False,
+    openid: str = "",
+) -> AllianceContext | None:
+    """构建只读访客上下文。
+
+    普通分享和无成员关系的历史访问按 member 数据边界组装；
+    超级管理员读取时可显式跳过逐部落认证限制。
+    """
+    row = conn.execute(
+        """SELECT alliances.id AS alliance_id, alliances.alliance_key,
+                  alliances.name AS alliance_name, plans.plan_code,
+                  plans.display_name AS plan_name, plans.sync_tier,
+                  plans.max_clans, plans.entitlements_json,
+                  CASE
+                    WHEN grants.id IS NULL THEN
+                      CASE WHEN alliances.plan_code='paid' THEN 'legacy' ELSE 'active' END
+                    WHEN grants.status='active' AND
+                         (grants.expires_at IS NULL OR datetime(grants.expires_at) > datetime('now'))
+                    THEN 'active'
+                    WHEN grants.status='revoked' THEN 'revoked'
+                    ELSE 'expired'
+                  END AS entitlement_status,
+                  grants.expires_at AS entitlement_expires_at
+           FROM alliances
+           JOIN alliance_plans AS plans
+             ON plans.plan_code=alliances.plan_code AND plans.status='active'
+           LEFT JOIN alliance_plan_grants AS grants
+             ON grants.id=(SELECT MAX(g.id) FROM alliance_plan_grants AS g
+                           WHERE g.alliance_id=alliances.id)
+           WHERE alliances.id=? AND alliances.status='active'""",
+        (int(alliance_id),),
+    ).fetchone()
+    if row is None:
+        return None
+    role = "leader" if management else "visitor"
+    clans = _clans_for_context(conn, int(alliance_id), "leader" if management else "member")
+    if management:
+        clans = tuple(
+            AllianceClanAccess(
+                id=item.id, clan_tag=item.clan_tag, clan_name=item.clan_name,
+                category=item.category, sort_order=item.sort_order,
+                verification_status=item.verification_status,
+                effective_access="management",
+            )
+            for item in clans
+        )
+    return AllianceContext(
+        user_id=0,
+        openid=openid,
+        alliance_id=int(row["alliance_id"]),
+        alliance_key=row["alliance_key"],
+        alliance_name=row["alliance_name"],
+        role=role,
+        plan_code=row["plan_code"],
+        plan_name=row["plan_name"],
+        sync_tier=row["sync_tier"],
+        max_clans=int(row["max_clans"]),
+        entitlements=_load_json(row["entitlements_json"]),
+        entitlement_status=row["entitlement_status"],
+        entitlement_expires_at=row["entitlement_expires_at"],
+        clans=clans,
     )
 
 

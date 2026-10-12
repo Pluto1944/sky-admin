@@ -43,6 +43,13 @@
       }
     },
     {
+      "path": "pages/settings/alliance-list-management",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "管理联盟列表"
+      }
+    },
+    {
       "path": "pages/settings/clan-management",
       "style": {
         "navigationStyle": "custom",
@@ -53,7 +60,7 @@
       "path": "pages/settings/platform-management",
       "style": {
         "navigationStyle": "custom",
-        "navigationBarTitleText": "平台管理"
+        "navigationBarTitleText": "超级管理"
       }
     },
     {

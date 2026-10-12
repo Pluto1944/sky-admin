@@ -18,6 +18,7 @@ JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_DAYS = 30
 
 security = HTTPBearer()
+optional_security = HTTPBearer(auto_error=False)
 
 
 def _get_jwt_secret() -> str:
@@ -56,4 +57,13 @@ def require_user(
         def me(user = Depends(require_user)):
             return {"openid": user["openid"], "role": user["role"]}
     """
+    return decode_token(credentials.credentials)
+
+
+def optional_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(optional_security),
+) -> dict | None:
+    """可选登录身份：无 Authorization 时返回 None，伪造或过期令牌仍返回 401。"""
+    if credentials is None:
+        return None
     return decode_token(credentials.credentials)

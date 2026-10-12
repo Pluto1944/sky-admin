@@ -15,12 +15,16 @@ import {
 const BASE_URL = 'https://api.skycoc.cc'
 
 function currentAllianceId() {
-  return uni.getStorageSync('token') ? storedAllianceId() : 0
+  return storedAllianceId()
 }
 
 function scopedPath(suffix) {
   const allianceId = currentAllianceId()
   return allianceId ? `/api/alliances/${allianceId}${suffix}` : ''
+}
+
+function missingAlliance() {
+  return Promise.reject(new Error('请先创建、加入或通过分享打开一个联盟'))
 }
 
 function legacySkyRequest(path) {
@@ -53,6 +57,13 @@ function request(url, method = 'GET', data = {}, needAuth = false) {
   return new Promise((resolve, reject) => {
     const header = {
       'Content-Type': 'application/json'
+    }
+
+    const shareTokens = uni.getStorageSync('allianceShareTokens') || {}
+    const allianceId = storedAllianceId()
+    const shared = shareTokens[String(allianceId)]
+    if (shared && shared.token && shared.expiresAt && Date.parse(shared.expiresAt) > Date.now()) {
+      header['X-Alliance-Share'] = shared.token
     }
 
     // 需要认证时自动添加 token
@@ -294,8 +305,9 @@ export function refreshFreeAllianceSubscription(allianceId, resourceTypes = ['cu
   )
 }
 
-export function archiveFreeAlliance(allianceId) {
-  return request(`/api/alliances/${encodeURIComponent(allianceId)}`, 'DELETE', {}, true)
+export function archiveFreeAlliance(allianceId, confirmationName) {
+  const query = `?confirmation_name=${encodeURIComponent(confirmationName || '')}`
+  return request(`/api/alliances/${encodeURIComponent(allianceId)}${query}`, 'DELETE', {}, true)
 }
 
 export function getAllianceVerification(allianceId) {
@@ -322,8 +334,11 @@ export function removeAllianceManagedClan(allianceId, clanTag) {
   return request(`/api/alliances/${encodeURIComponent(allianceId)}/managed-clans/${encodeURIComponent(clanTag)}`, 'DELETE', {}, true)
 }
 
-export function createAllianceShare(allianceId, expiresDays = 30) {
-  return request(`/api/alliances/${encodeURIComponent(allianceId)}/shares`, 'POST', { expires_days: expiresDays }, true)
+export function createAllianceShare(allianceId, expiresDays = 30, shareType = 'invite') {
+  return request(`/api/alliances/${encodeURIComponent(allianceId)}/shares`, 'POST', {
+    expires_days: expiresDays,
+    share_type: shareType
+  }, true)
 }
 
 export function getAllianceShares(allianceId) {
@@ -342,8 +357,37 @@ export function joinAllianceShare(token) {
   return request('/api/alliance-shares/join', 'POST', { token }, true)
 }
 
+export function openAllianceShare(token) {
+  return request('/api/alliance-shares/open', 'POST', { token }, true)
+}
+
+export function requestAllianceJoin(allianceId) {
+  return request(`/api/alliances/${encodeURIComponent(allianceId)}/join-requests`, 'POST', {}, true)
+}
+
+export function getAllianceJoinRequests(allianceId) {
+  return request(`/api/alliances/${encodeURIComponent(allianceId)}/join-requests`, 'GET', {}, true)
+}
+
+export function reviewAllianceJoinRequest(allianceId, requestId, action) {
+  return request(
+    `/api/alliances/${encodeURIComponent(allianceId)}/join-requests/${encodeURIComponent(requestId)}`,
+    'PATCH',
+    { action },
+    true
+  )
+}
+
+export function deleteAllianceHistory(allianceId) {
+  return request(`/api/me/alliance-history/${encodeURIComponent(allianceId)}`, 'DELETE', {}, true)
+}
+
 export function getAllianceUserMembers(allianceId) {
   return request(`/api/alliances/${encodeURIComponent(allianceId)}/user-members`, 'GET', {}, true)
+}
+
+export function addAllianceUserMember(allianceId, openid, role = 'member') {
+  return request(`/api/alliances/${encodeURIComponent(allianceId)}/user-members`, 'POST', { openid, role }, true)
 }
 
 export function updateAllianceUserRole(allianceId, memberId, role) {
@@ -423,13 +467,14 @@ export function getMembers(options = {}) {
   if (options.clanTags && options.clanTags.length) query.push(`clan_tags=${encodeURIComponent(options.clanTags.join(','))}`)
   if (options.search) query.push(`search=${encodeURIComponent(options.search)}`)
   const scoped = scopedPath('/members')
-  return request(`${scoped || '/api/members'}?${query.join('&')}`, 'GET', {}, Boolean(scoped))
+  if (!scoped) return missingAlliance()
+  return request(`${scoped}?${query.join('&')}`, 'GET', {}, true)
 }
 
 /** 获取全部自有部落的概览卡片。 */
 export function getClanOverview() {
   const scoped = scopedPath('/clans')
-  return request(scoped || '/api/clan/overview', 'GET', {}, Boolean(scoped))
+  return scoped ? request(scoped, 'GET', {}, true) : missingAlliance()
 }
 
 /** 获取单个自有部落的聚合详情。 */
@@ -437,7 +482,7 @@ export function getClanOverviewDetail(clanTag) {
   const scoped = scopedPath(`/clans/${encodeURIComponent(clanTag)}`)
   return scoped
     ? request(scoped, 'GET', {}, true)
-    : request(`/api/clan/overview/${encodeURIComponent(clanTag)}`)
+    : missingAlliance()
 }
 
 /**
@@ -448,7 +493,7 @@ export function getClanOverviewDetail(clanTag) {
 export function getLeagueStats(period) {
   const query = period ? `?period=${period}` : ''
   const scoped = scopedPath('/league-stats')
-  return request(`${scoped || '/api/clan/league-stats'}${query}`, 'GET', {}, Boolean(scoped))
+  return scoped ? request(`${scoped}${query}`, 'GET', {}, true) : missingAlliance()
 }
 
 /**
@@ -459,7 +504,7 @@ export function getLeagueStats(period) {
 export function getWarStats(clanTag) {
   const query = clanTag ? `?clan_tag=${encodeURIComponent(clanTag)}` : ''
   const scoped = scopedPath('/war-stats')
-  return request(`${scoped || '/api/clan/war-stats'}${query}`, 'GET', {}, Boolean(scoped))
+  return scoped ? request(`${scoped}${query}`, 'GET', {}, true) : missingAlliance()
 }
 
 /**
@@ -468,13 +513,13 @@ export function getWarStats(clanTag) {
  */
 export function getFarmConfig() {
   const scoped = scopedPath('/farm-config')
-  return request(scoped || '/api/clan/farm-config', 'GET', {}, Boolean(scoped))
+  return scoped ? request(scoped, 'GET', {}, true) : missingAlliance()
 }
 
 /** 获取全部自有部落的当前战争摘要。 */
 export function getCurrentWars() {
   const scoped = scopedPath('/wars/current')
-  return request(scoped || '/api/clan/current-wars', 'GET', {}, Boolean(scoped))
+  return scoped ? request(scoped, 'GET', {}, true) : missingAlliance()
 }
 
 /** 获取单个自有部落的当前战争详情。 */
@@ -482,14 +527,14 @@ export function getCurrentWar(clanTag) {
   const scoped = scopedPath(`/wars/current/${encodeURIComponent(clanTag)}`)
   return scoped
     ? request(scoped, 'GET', {}, true)
-    : request(`/api/clan/current-wars/${encodeURIComponent(clanTag)}`)
+    : missingAlliance()
 }
 
 /** 获取全部自有部落最近 15 场已结束普通部落战摘要。 */
 export function getWarHistory(clanTag) {
   const query = clanTag ? `?clan_tag=${encodeURIComponent(clanTag)}` : ''
   const scoped = scopedPath('/wars/history')
-  return request(`${scoped || '/api/clan/war-history'}${query}`, 'GET', {}, Boolean(scoped))
+  return scoped ? request(`${scoped}${query}`, 'GET', {}, true) : missingAlliance()
 }
 
 /** 获取一场已归档普通部落战的完整详情。 */
@@ -498,14 +543,14 @@ export function getWarHistoryDetail(clanTag, warKey) {
   const scoped = scopedPath(suffix)
   return scoped
     ? request(scoped, 'GET', {}, true)
-    : request(`/api/clan/war-history/${encodeURIComponent(clanTag)}/${encodeURIComponent(warKey)}`)
+    : missingAlliance()
 }
 
 /** 获取当前月份 CWL 参赛部落摘要。 */
 export function getCwlLive(period) {
   const query = period ? `?period=${encodeURIComponent(period)}` : ''
   const scoped = scopedPath('/cwl/live')
-  return request(`${scoped || '/api/clan/cwl-live'}${query}`, 'GET', {}, Boolean(scoped))
+  return scoped ? request(`${scoped}${query}`, 'GET', {}, true) : missingAlliance()
 }
 
 /** 获取当月各联赛队伍的当前战斗日未出刀成员及已结束场次漏刀记录。 */
@@ -530,10 +575,8 @@ export function getCwlLiveDetail(clanTag, period, round, view) {
   if (round) query.push(`round=${encodeURIComponent(round)}`)
   if (view) query.push(`view=${encodeURIComponent(view)}`)
   const scoped = scopedPath(`/cwl/live/${encodeURIComponent(clanTag)}`)
-  return request(
-    `${scoped || '/api/clan/cwl-live/' + encodeURIComponent(clanTag)}${query.length ? '?' + query.join('&') : ''}`,
-    'GET', {}, Boolean(scoped)
-  )
+  if (!scoped) return missingAlliance()
+  return request(`${scoped}${query.length ? '?' + query.join('&') : ''}`, 'GET', {}, true)
 }
 
 /** 读取当前联盟的月度联赛配置。 */

@@ -10,14 +10,14 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from modules.alliance.access import (
     AllianceContext,
-    ensure_sky_admin_membership,
     list_alliance_contexts,
     resolve_alliance_context,
+    resolve_alliance_public_context,
 )
 from modules.alliance.cwl_config import (
     CwlConfigError,
@@ -35,7 +35,6 @@ from modules.alliance.free_alliance import (
     FREE_CATEGORIES,
     FREE_CATEGORY_LABELS,
     FreeAllianceError,
-    archive_free_alliance,
     create_free_alliance,
     enqueue_initialization,
     free_alliance_capability,
@@ -46,7 +45,12 @@ from modules.alliance.free_alliance import (
     subscription_status,
 )
 from modules.alliance.operations import platform_admin_capability
-from modules.alliance.operations import AllianceOperationError, rename_alliance
+from modules.alliance.operations import (
+    AllianceOperationError,
+    archive_alliance,
+    rename_alliance,
+    share_alliance_id,
+)
 from modules.coc_sync.current_war import current_war_summary
 from modules.coc_sync.official.mapper import normalize_tag
 from modules.player.member_stats import member_summary_map
@@ -54,7 +58,7 @@ from shared.db.connection import Database
 from config import CLAN_CATEGORY_LABELS
 
 from . import routes as legacy_routes
-from .auth import require_user
+from .auth import optional_user, require_user
 from .deps import get_db
 
 
@@ -106,6 +110,47 @@ def _context(user: dict, alliance_id: int, db: Database) -> AllianceContext:
         # 统一返回 404，避免枚举其他联盟是否存在。
         raise HTTPException(status_code=404, detail="联盟不存在或当前用户无权访问")
     return context
+
+
+def alliance_view_context(
+    alliance_id: int,
+    user: dict | None = Depends(optional_user),
+    share_token: str | None = Header(default=None, alias="X-Alliance-Share"),
+    db: Database = Depends(get_db),
+) -> AllianceContext:
+    """通用只读上下文：成员关系、超级管理、历史访问或有效分享任一成立即可读。"""
+    if user is not None:
+        context = resolve_alliance_context(db.conn, user["openid"], alliance_id)
+        if context is not None:
+            return context
+        if platform_admin_capability(db.conn, user["openid"])["allowed"]:
+            context = resolve_alliance_public_context(
+                db.conn, alliance_id, management=True, openid=user["openid"],
+            )
+            if context is not None:
+                return context
+        visit = db.conn.execute(
+            """SELECT 1 FROM alliance_visits AS visits
+               JOIN wechat_users AS users ON users.id=visits.user_id
+               WHERE users.openid=? AND visits.alliance_id=?""",
+            (user["openid"], int(alliance_id)),
+        ).fetchone()
+        if visit is not None:
+            context = resolve_alliance_public_context(
+                db.conn, alliance_id, openid=user["openid"],
+            )
+            if context is not None:
+                return context
+    if share_token:
+        try:
+            shared_alliance_id = share_alliance_id(db.conn, share_token)
+        except AllianceOperationError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        if int(shared_alliance_id) == int(alliance_id):
+            context = resolve_alliance_public_context(db.conn, alliance_id)
+            if context is not None:
+                return context
+    raise HTTPException(status_code=404, detail="联盟不存在或当前用户无权访问")
 
 
 def _free_error(exc: FreeAllianceError) -> HTTPException:
@@ -218,8 +263,7 @@ def _alliance_clan_overviews(db: Database, context: AllianceContext) -> list[dic
 
 @router.get("/me/alliances")
 def my_alliances(user: dict = Depends(require_user), db: Database = Depends(get_db)):
-    """列出当前用户的有效联盟；访问记录本身不授予联盟成员资格。"""
-    ensure_sky_admin_membership(db.conn, user["openid"])
+    """按“我的联盟 / 浏览过的联盟”列出当前用户的个人列表。"""
     contexts = list_alliance_contexts(db.conn, user["openid"])
     visit_rows = db.conn.execute(
         """SELECT visits.alliance_id, visits.is_default, visits.is_hidden,
@@ -230,25 +274,54 @@ def my_alliances(user: dict = Depends(require_user), db: Database = Depends(get_
         (user["openid"],),
     ).fetchall()
     visits = {int(row["alliance_id"]): row for row in visit_rows}
+    membership_times = {
+        int(row["alliance_id"]): row["membership_at"]
+        for row in db.conn.execute(
+            """SELECT members.alliance_id,
+                      COALESCE(members.joined_at, members.created_at) AS membership_at
+               FROM alliance_members AS members
+               JOIN wechat_users AS users ON users.id=members.user_id
+               WHERE users.openid=? AND members.status='active'""",
+            (user["openid"],),
+        ).fetchall()
+    }
     items = []
-    hidden_items = []
     for context in contexts:
         item = context.as_dict(include_clans=False)
         visit = visits.get(context.alliance_id)
         item["is_default"] = bool(visit and visit["is_default"])
         item["is_hidden"] = bool(visit and visit["is_hidden"])
         item["hidden_at"] = visit["hidden_at"] if visit else None
-        item["last_visited_at"] = visit["last_visited_at"] if visit else None
-        if item["is_hidden"]:
-            item["is_default"] = False
-            hidden_items.append(item)
-        else:
-            items.append(item)
+        item["last_visited_at"] = (
+            visit["last_visited_at"] if visit else membership_times.get(context.alliance_id)
+        )
+        item["relationship"] = "member"
+        items.append(item)
+    items.sort(key=lambda item: item.get("last_visited_at") or "", reverse=True)
+
+    active_ids = {context.alliance_id for context in contexts}
+    browsed_items = []
+    for row in sorted(visit_rows, key=lambda item: item["last_visited_at"] or "", reverse=True):
+        alliance_id = int(row["alliance_id"])
+        if alliance_id in active_ids:
+            continue
+        context = resolve_alliance_public_context(db.conn, alliance_id, openid=user["openid"])
+        if context is None:
+            continue
+        item = context.as_dict(include_clans=False)
+        item.update({
+            "role": "visitor", "role_label": "浏览", "relationship": "visited",
+            "is_default": bool(row["is_default"]),
+            "last_visited_at": row["last_visited_at"],
+        })
+        browsed_items.append(item)
     return {
         "count": len(items),
         "alliances": items,
-        "hidden_count": len(hidden_items),
-        "hidden_alliances": hidden_items,
+        "browsed_count": len(browsed_items),
+        "browsed_alliances": browsed_items[:50],
+        "hidden_count": 0,
+        "hidden_alliances": [],
         "features": {
             "free_alliance": free_alliance_capability(db.conn, user["openid"]),
             "platform_admin": platform_admin_capability(db.conn, user["openid"]),
@@ -387,13 +460,17 @@ def refresh_free_subscription(
 @router.delete("/alliances/{alliance_id}")
 def delete_my_free_alliance(
     alliance_id: int,
+    confirmation_name: str = "",
     user: dict = Depends(require_user),
     db: Database = Depends(get_db),
 ):
     try:
-        archive_free_alliance(db.conn, user["openid"], alliance_id)
-    except FreeAllianceError as exc:
-        raise _free_error(exc) from exc
+        archive_alliance(
+            db.conn, user["openid"], alliance_id,
+            confirmation_name=confirmation_name,
+        )
+    except AllianceOperationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     # Reconciliation is local-only.  If it races with the scheduler, the next
     # minute's planner will converge to the same target set.
     try:
@@ -407,10 +484,9 @@ def delete_my_free_alliance(
 @router.get("/alliances/{alliance_id}")
 def alliance_detail(
     alliance_id: int,
-    user: dict = Depends(require_user),
+    context: AllianceContext = Depends(alliance_view_context),
     db: Database = Depends(get_db),
 ):
-    context = _context(user, alliance_id, db)
     member_count = db.conn.execute(
         """SELECT COUNT(*) FROM alliance_members
            WHERE alliance_id = ? AND status = 'active'""",
@@ -425,13 +501,27 @@ def visit_alliance(
     user: dict = Depends(require_user),
     db: Database = Depends(get_db),
 ):
-    """记录最近选择的联盟；访问记录不创建成员关系，也不授予权限。"""
-    context = _context(user, alliance_id, db)
+    """记录最近选择的联盟；已有访问历史即可切换，不创建成员关系。"""
+    context = resolve_alliance_context(db.conn, user["openid"], alliance_id)
+    selected_user_id = context.user_id if context is not None else None
+    if context is None:
+        row = db.conn.execute(
+            """SELECT users.id AS user_id FROM alliance_visits AS visits
+               JOIN wechat_users AS users ON users.id=visits.user_id
+               WHERE users.openid=? AND visits.alliance_id=?""",
+            (user["openid"], int(alliance_id)),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="联盟不存在或尚未打开过")
+        selected_user_id = int(row["user_id"])
+        context = resolve_alliance_public_context(db.conn, alliance_id, openid=user["openid"])
+        if context is None:
+            raise HTTPException(status_code=404, detail="联盟不存在或已停用")
     now = _utc_now()
     with db.conn:
         db.conn.execute(
             "UPDATE alliance_visits SET is_default = 0 WHERE user_id = ?",
-            (context.user_id,),
+            (selected_user_id,),
         )
         db.conn.execute(
             """INSERT INTO alliance_visits
@@ -443,9 +533,14 @@ def visit_alliance(
                    is_hidden = 0,
                    hidden_at = NULL,
                    last_visited_at = excluded.last_visited_at""",
-            (alliance_id, context.user_id, now, now),
+            (alliance_id, selected_user_id, now, now),
         )
-    return {**context.as_dict(include_clans=False), "is_default": True, "last_visited_at": now}
+    item = context.as_dict(include_clans=False)
+    if context.role == "visitor":
+        item.update({"role": "visitor", "role_label": "浏览", "relationship": "visited"})
+    else:
+        item["relationship"] = "member"
+    return {**item, "is_default": True, "last_visited_at": now}
 
 
 @router.patch("/me/alliances/{alliance_id}/visibility")
@@ -534,10 +629,9 @@ def set_alliance_visibility(
 @router.get("/alliances/{alliance_id}/clans")
 def alliance_clans(
     alliance_id: int,
-    user: dict = Depends(require_user),
+    context: AllianceContext = Depends(alliance_view_context),
     db: Database = Depends(get_db),
 ):
-    context = _context(user, alliance_id, db)
     clans = _alliance_clan_overviews(db, context)
     return {
         "alliance_id": alliance_id,
@@ -553,10 +647,9 @@ def alliance_clans(
 def alliance_clan_detail(
     alliance_id: int,
     clan_tag: str,
-    user: dict = Depends(require_user),
+    context: AllianceContext = Depends(alliance_view_context),
     db: Database = Depends(get_db),
 ):
-    context = _context(user, alliance_id, db)
     clan = _subscribed_clan(context, clan_tag)
     item = next(
         value for value in _alliance_clan_overviews(db, context)
@@ -580,11 +673,10 @@ def alliance_clan_detail(
 @router.get("/alliances/{alliance_id}/farm-config")
 def alliance_farm_config(
     alliance_id: int,
-    user: dict = Depends(require_user),
+    context: AllianceContext = Depends(alliance_view_context),
     db: Database = Depends(get_db),
 ):
     """返回当前联盟中标记为 ``farm`` 的部落及其本地互刷缓存。"""
-    context = _context(user, alliance_id, db)
     configured_clans = [
         {
             "tag": clan.clan_tag,
@@ -619,7 +711,7 @@ def alliance_members(
     search: str = "",
     sort_key: str = "town_hall_level",
     sort_order: str = "desc",
-    user: dict = Depends(require_user),
+    context: AllianceContext = Depends(alliance_view_context),
     db: Database = Depends(get_db),
 ):
     """返回联盟订阅部落中的游戏成员，按逐部落权限白名单输出字段。"""
@@ -631,7 +723,6 @@ def alliance_members(
         raise HTTPException(status_code=422, detail="不支持的成员排序字段")
     if sort_order not in {"asc", "desc"}:
         raise HTTPException(status_code=422, detail="sort_order 仅支持 asc/desc")
-    context = _context(user, alliance_id, db)
     requested_tags = [
         normalize_tag(value)
         for value in (clan_tags or clan_tag).split(",")
@@ -750,10 +841,9 @@ def alliance_members(
 @router.get("/alliances/{alliance_id}/wars/current")
 def alliance_current_wars(
     alliance_id: int,
-    user: dict = Depends(require_user),
+    context: AllianceContext = Depends(alliance_view_context),
     db: Database = Depends(get_db),
 ):
-    context = _context(user, alliance_id, db)
     cached = legacy_routes._cached_current_wars(db)
     items = []
     categories = []
@@ -791,10 +881,9 @@ def alliance_current_wars(
 def alliance_current_war_detail(
     alliance_id: int,
     clan_tag: str,
-    user: dict = Depends(require_user),
+    context: AllianceContext = Depends(alliance_view_context),
     db: Database = Depends(get_db),
 ):
-    context = _context(user, alliance_id, db)
     clan = _subscribed_clan(context, clan_tag)
     configured = {"tag": clan.clan_tag, "name": clan.clan_name, "category": clan.category}
     item = legacy_routes._cached_current_wars(db).get(clan.clan_tag)
@@ -822,11 +911,10 @@ def _configured_context_clans(context: AllianceContext) -> list[dict]:
 def alliance_war_history(
     alliance_id: int,
     clan_tag: Optional[str] = None,
-    user: dict = Depends(require_user),
+    context: AllianceContext = Depends(alliance_view_context),
     db: Database = Depends(get_db),
 ):
     """返回当前联盟订阅部落的已结束普通战档案，不触发外部同步。"""
-    context = _context(user, alliance_id, db)
     if clan_tag:
         _subscribed_clan(context, clan_tag)
     result = legacy_routes._war_history_for_clans(
@@ -841,11 +929,10 @@ def alliance_war_history_detail(
     alliance_id: int,
     clan_tag: str,
     war_key: str,
-    user: dict = Depends(require_user),
+    context: AllianceContext = Depends(alliance_view_context),
     db: Database = Depends(get_db),
 ):
     """返回当前联盟订阅部落的一场已结束普通战详情。"""
-    context = _context(user, alliance_id, db)
     clan = _subscribed_clan(context, clan_tag)
     configured = {
         "tag": clan.clan_tag,
@@ -864,11 +951,10 @@ def alliance_war_history_detail(
 def alliance_war_stats(
     alliance_id: int,
     clan_tag: Optional[str] = None,
-    user: dict = Depends(require_user),
+    context: AllianceContext = Depends(alliance_view_context),
     db: Database = Depends(get_db),
 ):
     """按当前联盟的战营标签返回普通战固定窗口统计。"""
-    context = _context(user, alliance_id, db)
     combat_clans = [clan for clan in context.clans if clan.category == "combat"]
     options = [
         {"clan_tag": clan.clan_tag, "clan_name": clan.clan_name}
@@ -905,11 +991,10 @@ def alliance_war_stats(
 def alliance_league_stats(
     alliance_id: int,
     period: Optional[str] = None,
-    user: dict = Depends(require_user),
+    context: AllianceContext = Depends(alliance_view_context),
     db: Database = Depends(get_db),
 ):
     """按联盟各月配置的实战队伍返回 CWL 滚动窗口统计。"""
-    context = _context(user, alliance_id, db)
     if context.role not in {"admin", "leader"} or not any(
         clan.management_allowed for clan in context.clans
     ):
@@ -1069,10 +1154,9 @@ def _alliance_cwl_available_periods(
 @router.get("/alliances/{alliance_id}/cwl/seasons")
 def alliance_cwl_seasons_list(
     alliance_id: int,
-    user: dict = Depends(require_user),
+    context: AllianceContext = Depends(alliance_view_context),
     db: Database = Depends(get_db),
 ):
-    context = _context(user, alliance_id, db)
     seasons = list_seasons(db.conn, context)
     db.conn.commit()
     return {"alliance_id": alliance_id, "count": len(seasons), "seasons": seasons}
@@ -1082,10 +1166,9 @@ def alliance_cwl_seasons_list(
 def alliance_cwl_season_detail(
     alliance_id: int,
     period: str,
-    user: dict = Depends(require_user),
+    context: AllianceContext = Depends(alliance_view_context),
     db: Database = Depends(get_db),
 ):
-    context = _context(user, alliance_id, db)
     try:
         season = season_payload(
             db.conn,
@@ -1238,10 +1321,9 @@ def alliance_cwl_season_confirm(
 def alliance_cwl_live(
     alliance_id: int,
     period: Optional[str] = None,
-    user: dict = Depends(require_user),
+    context: AllianceContext = Depends(alliance_view_context),
     db: Database = Depends(get_db),
 ):
-    context = _context(user, alliance_id, db)
     selected_period = period or legacy_routes._current_cwl_live_period()
     if not legacy_routes._valid_period(selected_period):
         raise HTTPException(status_code=400, detail="period 必须为 YYYY-MM")
@@ -1268,10 +1350,9 @@ def alliance_cwl_live_detail(
     period: Optional[str] = None,
     round: Optional[int] = None,
     view: Optional[str] = None,
-    user: dict = Depends(require_user),
+    context: AllianceContext = Depends(alliance_view_context),
     db: Database = Depends(get_db),
 ):
-    context = _context(user, alliance_id, db)
     selected_period = period or legacy_routes._current_cwl_live_period()
     normalized = normalize_tag(clan_tag)
     if not legacy_routes._valid_period(selected_period):

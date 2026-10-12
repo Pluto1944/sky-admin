@@ -6,10 +6,13 @@ from pydantic import BaseModel, Field
 
 from modules.alliance.operations import (
     AllianceOperationError,
+    add_alliance_member_by_openid,
     add_managed_clan,
     create_share_link,
+    delete_browsing_history,
     grant_alliance_plan,
     join_from_share,
+    list_join_requests,
     leave_alliance,
     list_managed_clans,
     list_alliance_members,
@@ -18,6 +21,7 @@ from modules.alliance.operations import (
     platform_admin_capability,
     platform_alliance_detail,
     platform_dashboard,
+    record_share_visit,
     remove_alliance_member,
     remove_managed_clan,
     reorder_managed_clans,
@@ -25,6 +29,8 @@ from modules.alliance.operations import (
     set_alliance_member_role,
     set_alliance_status,
     share_preview,
+    request_alliance_join,
+    review_join_request,
     update_platform_settings,
     update_managed_clan,
     verification_entry,
@@ -41,6 +47,7 @@ router = APIRouter(prefix="/api")
 
 class ShareCreateInput(BaseModel):
     expires_days: int = Field(default=30, ge=1, le=30)
+    share_type: str = "invite"
 
 
 class ShareTokenInput(BaseModel):
@@ -49,6 +56,15 @@ class ShareTokenInput(BaseModel):
 
 class MemberRoleInput(BaseModel):
     role: str
+
+
+class MemberCreateInput(BaseModel):
+    openid: str = Field(min_length=1, max_length=200)
+    role: str = "member"
+
+
+class JoinRequestReviewInput(BaseModel):
+    action: str
 
 
 class PlatformSettingsInput(BaseModel):
@@ -96,6 +112,19 @@ def preview_alliance_share(payload: ShareTokenInput, db: Database = Depends(get_
     """Public metadata only; resolving a token never creates membership or sync work."""
     try:
         return share_preview(db.conn, payload.token)
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.post("/alliance-shares/open")
+def open_alliance_share(
+    payload: ShareTokenInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    """已登录用户打开分享只记录浏览，不自动入盟。"""
+    try:
+        return record_share_visit(db.conn, user["openid"], payload.token)
     except AllianceOperationError as exc:
         raise _error(exc) from exc
 
@@ -230,7 +259,8 @@ def create_alliance_share(
 ):
     try:
         return create_share_link(
-            db.conn, user["openid"], alliance_id, expires_days=payload.expires_days,
+            db.conn, user["openid"], alliance_id,
+            share_type=payload.share_type, expires_days=payload.expires_days,
         )
     except AllianceOperationError as exc:
         raise _error(exc) from exc
@@ -258,6 +288,73 @@ def alliance_user_members(
 ):
     try:
         return list_alliance_members(db.conn, user["openid"], alliance_id)
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.post("/alliances/{alliance_id}/user-members", status_code=201)
+def create_alliance_user_member(
+    alliance_id: int,
+    payload: MemberCreateInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        return add_alliance_member_by_openid(
+            db.conn, user["openid"], alliance_id, payload.openid, payload.role,
+        )
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.post("/alliances/{alliance_id}/join-requests", status_code=201)
+def create_alliance_join_request(
+    alliance_id: int,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        return request_alliance_join(db.conn, user["openid"], alliance_id)
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.get("/alliances/{alliance_id}/join-requests")
+def alliance_join_requests(
+    alliance_id: int,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        return list_join_requests(db.conn, user["openid"], alliance_id)
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.patch("/alliances/{alliance_id}/join-requests/{request_id}")
+def update_alliance_join_request(
+    alliance_id: int,
+    request_id: int,
+    payload: JoinRequestReviewInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        return review_join_request(
+            db.conn, user["openid"], alliance_id, request_id, payload.action,
+        )
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.delete("/me/alliance-history/{alliance_id}")
+def delete_alliance_history(
+    alliance_id: int,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        return delete_browsing_history(db.conn, user["openid"], alliance_id)
     except AllianceOperationError as exc:
         raise _error(exc) from exc
 

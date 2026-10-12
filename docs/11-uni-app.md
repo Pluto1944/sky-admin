@@ -12,17 +12,17 @@
 - `manifest.json` 显式关闭 `uniStatistics`，避免在用户同意隐私政策前启动第三方统计采集。
 - 部落 Tab 内部为“概览 / 成员 / 战营 / 互刷”四个入口，默认显示全部自有部落概览卡片；概览卡片在四项数据下方显示部落战与都城状态。单部落详情也在同一 Tab 页内展示，因此始终保留原生底部 TabBar。成员表格只在首次点击“成员”后加载。
 - 战斗页固定提供“部落战”“联赛数据”“联赛点名”三个入口；无对应数据时展示空状态而不隐藏入口。联赛数据和单部落详情统一按当前联盟月度联赛队伍配置读取。
-- 全局联盟切换弹层顶部提供“创建联盟”，只在后端返回 `can_create=true` 时显示；其他用户不展示无效
-  入口。每个可见联盟可由当前用户从列表隐藏，隐藏不改变成员关系、角色或数据，并可从弹层底部的
-  “已隐藏联盟”恢复；为避免无联盟上下文，至少保留一个可见联盟。
+- 全局联盟切换弹层顶部固定提供“创建联盟”和“管理联盟列表”。未登录用户点击创建时先进入登录；
+  登录后仍由后端 `can_create` 控制是否可创建。联盟分为“我的联盟”和“浏览过的联盟”，各自按最近
+  访问时间排序，浏览历史最多 50 条。管理列表支持删除浏览历史、退出成员关系或由首领软删除联盟。
 - 管理页包含已有免费联盟的“我的部落”卡片，支持改名、选择实战/战营/互刷/偷矿标签、订阅、查看
   异步初始化状态、受限刷新战况和软删除；创建入口不再在管理页重复出现。
   页面每 5 秒轮询仍在执行/重试的三项初始化状态，完成或失败后停止；刷新按钮不会直接调用 COC。
 - 部落概览为空且当前用户具备管理权限时显示“添加第一个部落”；已有部落时在列表底部显示“管理
   部落”。两者进入统一的部落管理页，可添加部落、修改实战/战营/互刷/偷矿标签、上下调整顺序和
   软移除部落。普通成员不显示入口；免费套餐最多 1 个，付费套餐按后端配额，内部套餐保持只读。
-- M6～M9 新增“联盟管理”和平台管理员可见的“平台管理”子页：联盟页展示认证状态、保留的人工
-  认证按钮、邀请生成/撤销、成员角色/首领移交和有效付费部落增减；平台页管理人工认证、套餐、
+- M6～M9 新增管理员/首领可见的“管理联盟”和超级管理员可见的“超级管理”子页：联盟页展示认证状态、保留的人工
+  认证按钮、加入申请、邀请生成/撤销、OpenID 添加成员、成员角色/首领移交和有效付费部落增减；平台页管理人工认证、套餐、
   联盟状态、免费注册配额以及队列和审计摘要。后端已部署，生产编译已通过，但尚未随微信版本上传发布。
 - 联赛实时看板采用“参赛部落 → 单部落详情”的两层结构；详情内再切换战斗日和联赛总览，完整设计见 `docs/19-cwl-live-dashboard.md`。
 - 本文件下方明确标记为“旧架构”或“待开发功能”的章节仅保留作历史记录，不代表当前页面状态。
@@ -70,8 +70,9 @@ uni-app/
 │   │   ├── settings.vue       # 管理中心（账号、免费联盟内部灰度、其他管理）
 │   │   ├── cwl-settings.vue   # 当前联盟月度联赛队伍配置
 │   │   ├── alliance-management.vue # 认证状态、分享和联盟成员管理
+│   │   ├── alliance-list-management.vue # 我的联盟、浏览历史、退出与删除
 │   │   ├── clan-management.vue # 当前联盟部落增删、标签与顺序管理
-│   │   └── platform-management.vue # 平台人工认证、套餐、配额和审计
+│   │   └── platform-management.vue # 超级管理：人工认证、套餐、配额和审计
 │   ├── login/
 │   │   └── login.vue          # 微信登录页（已有，整合到管理流程）
 │   └── bind/
@@ -163,6 +164,7 @@ uni-app/
 | `pages/settings/settings` | 管理中心 | Tab 页 | ✅ 管理 | 自定义顶栏 |
 | `pages/settings/cwl-settings` | 当前联盟联赛设置 | 子页 | ❌ | 自定义顶栏 `< 返回` |
 | `pages/settings/alliance-management` | 当前联盟管理 | 子页 | ❌ | 自定义顶栏 `< 返回` |
+| `pages/settings/alliance-list-management` | 个人联盟列表管理 | 子页 | ❌ | 自定义顶栏 `< 返回` |
 | `pages/settings/platform-management` | 平台运营管理 | 子页 | ❌ | 自定义顶栏 `< 返回` |
 | `pages/war/detail` | 战绩详情 | 子页 | ❌ | 原生导航栏 `< 返回` |
 | `pages/war/current-detail` | 当前普通部落战详情 | 子页 | ❌ | 自定义顶栏 `< 返回` |
@@ -275,12 +277,9 @@ TabBar「管理」页
 复制上月、增删队伍、切换 `combat / shell`、调整顺序和确认。官方分组出现后页面只读，
 仅保留“纠正 Tag”入口；纠正必须同时填写新 Tag 和原因，后端记录操作人及前后值。
 
-“联盟管理”对所有当前联盟成员可进入：普通成员可以查看认证状态和生成本人可撤销的邀请；
-管理员/首领额外查看联盟用户并移除普通成员；只有首领可调整管理员或移交首领。普通成员和管理员
-可退出当前联盟，首领必须先移交。认证按钮只弹出人工认证说明，不调用自助验证码。部落增删、标签
-和顺序统一放在部落概览底部进入的“部落管理”页，避免空联盟创建后还要去设置页寻找入口。
+“管理联盟”只对当前联盟的管理员和首领显示，承载加入申请、加入邀请、联盟成员和认证状态。管理员可批准申请、生成邀请并移除普通成员；只有首领可设置或取消管理员、移交首领和删除联盟。普通成员在“管理联盟列表”中退出，不显示“管理联盟”入口。认证按钮暂时只弹出人工认证说明。部落增删、标签和顺序统一放在部落概览底部的“部落管理”页。
 
-“平台管理”只在后端返回平台管理员能力时显示，普通用户即使构造页面路径也会被平台 API 拒绝。
+“超级管理”只在后端返回超级管理能力时显示，普通用户即使构造页路径也会被平台 API 拒绝。入口统一使用“超级管理”文案。
 
 当前 uni-app/微信构建链会把页面 `<style scoped>` 编译为与 WXML 类名不匹配的属性选择器，导致
 管理页整体样式失效。因此该页面使用普通页面级 `<style>`；如果以后恢复 `scoped`，必须同时检查
@@ -507,18 +506,23 @@ TabBar「管理」页
 | `getMyAlliances()` | `GET /api/me/alliances` | ✅ |
 | `visitAlliance(id)` | `POST /api/me/alliances/{id}/visit` | ✅ |
 | `previewAllianceShare(token)` | `POST /api/alliance-shares/preview` | ❌ |
+| `openAllianceShare(token)` | `POST /api/alliance-shares/open` | ✅ |
 | `joinAllianceShare(token)` | `POST /api/alliance-shares/join` | ✅ |
+| `requestAllianceJoin(id)` | `POST /api/alliances/{id}/join-requests` | ✅ |
+| `getAllianceJoinRequests(id)` | `GET /api/alliances/{id}/join-requests` | ✅ 管理 |
 | `getAllianceVerification(id)` | `GET /api/alliances/{id}/verification` | ✅ |
 | `createAllianceShare(id)` | `POST /api/alliances/{id}/shares` | ✅ |
 | `getAllianceUserMembers(id)` | `GET /api/alliances/{id}/user-members` | ✅ 管理 |
-| `getPlatformAlliances()` | `GET /api/platform/alliances` | ✅ 平台管理 |
+| `addAllianceUserMember(id, openid, role)` | `POST /api/alliances/{id}/user-members` | ✅ 管理 |
+| `getPlatformAlliances()` | `GET /api/platform/alliances` | ✅ 超级管理 |
 | `bindAccount(name, tag)` | `POST /api/wechat/bind` | ✅ |
-| `getMembers()` | `GET /api/members` | ❌ |
-| `getClanOverview()` | `GET /api/clan/overview` | ❌ |
-| `getClanOverviewDetail(tag)` | `GET /api/clan/overview/{clan_tag}` | ❌ |
+| `getMembers()` | `GET /api/alliances/{id}/members` | 成员、浏览历史或分享令牌 |
+| `getClanOverview()` | `GET /api/alliances/{id}/clans` | 成员、浏览历史或分享令牌 |
+| `getClanOverviewDetail(tag)` | `GET /api/alliances/{id}/clans/{clan_tag}` | 成员、浏览历史或分享令牌 |
 
-登录且已经解析出当前 `alliance_id` 时，`getMembers`、部落概览/详情和当前战争自动改走
-`/api/alliances/{alliance_id}/...`。未登录仍保留苍穹公开旧接口，且不会自动触发微信登录。
+成员、部落概览/详情和当前战争始终使用 `/api/alliances/{alliance_id}/...`。未选择、未加入且没有
+通过有效分享打开任何联盟时，前端显示空状态，不再回退到苍穹公开旧接口。未登录分享访问通过
+`X-Alliance-Share` 请求头取得与普通成员相同的非管理字段，且不会自动触发微信登录。
 联赛数据、单队详情和战营联赛统计统一使用当前联盟范围接口，前端缓存必须按
 `alliance_id + period` 隔离。无月度配置显示“当前联盟本月暂无联赛队伍”，已配置但官方数据尚未可用时
 显示“本月已配置 N 支联赛队伍，等待官方联赛数据”。联赛点名仍仅对苍穹显示，非苍穹不挂载该组件。互刷页改走当前联盟范围接口，仅展示当前联盟中
@@ -533,12 +537,14 @@ TabBar「管理」页
 - 顶部安全区、微信胶囊左侧固定显示“联盟名称（角色）”按钮；下拉层在屏幕中央，点击遮罩关闭；
 - 本地持久化只保存最近选择的 `currentAllianceId`，角色、套餐和认证状态必须从
   `GET /api/me/alliances` 重新取得，不能把本地缓存当作权限依据；
-- 选择联盟后调用 `POST /api/me/alliances/{id}/visit`，再广播 `alliance-changed`；
+- 登录用户选择联盟后调用 `POST /api/me/alliances/{id}/visit`；未登录用户只可切换本机最近打开的
+  有效分享联盟。两种情况都广播 `alliance-changed`；
 - 部落概览、成员和详情缓存使用 `alliance_id` 作为键，战斗页切换时清空当前展示，并丢弃
   在旧联盟上下文中发出、切换后才返回的响应；
-- 普通页面分享继续携带 `alliance_id`；用户在联盟管理页显式生成邀请后，分享参数还携带短期
-  `share_token`。未登录打开时保存待处理令牌并显示公开预览，登录成功后调用加入接口；接收者固定
-  成为普通成员，分享者的管理员/首领权限不会写进链接；
+- 普通页面分享携带短期 `browse` 类型 `share_token`，打开后只记录浏览历史，不自动加入。用户在
+  “管理联盟”页可生成 `invite` 类型邀请；接收者登录并在确认弹窗中主动接受后固定成为普通成员，
+  分享者的管理员/首领权限不会写进链接。未登录打开任意分享时先显示普通数据，申请或接受邀请时
+  才要求登录；
 - Token 过期或退出登录时同步清理当前联盟 ID。冷启动和重新登录会重新校验联盟列表。
 
 ### 使用示例

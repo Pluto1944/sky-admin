@@ -2,7 +2,7 @@
   <view class="top-bar">
     <view class="top-safe-area" :style="{ height: topPadding + 'px' }">
       <view class="alliance-switch" :style="allianceButtonStyle" @tap="openAlliancePicker">
-        <text class="alliance-switch-name">{{ currentAlliance ? currentAlliance.name : '苍穹联盟' }}</text>
+        <text class="alliance-switch-name">{{ currentAlliance ? currentAlliance.name : '选择联盟' }}</text>
         <text v-if="currentAlliance" class="alliance-switch-role">{{ allianceRoleLabel(currentAlliance) }}</text>
         <text class="alliance-switch-arrow">⌄</text>
       </view>
@@ -32,7 +32,7 @@
           <text class="alliance-picker-title">切换联盟</text>
           <text class="alliance-picker-close" @tap="closeAlliancePicker">关闭</text>
         </view>
-        <view v-if="canCreateAlliance" class="alliance-create-entry" @tap="toggleCreateForm">
+        <view class="alliance-create-entry" :class="{ disabled: isLoggedIn && !canCreateAlliance }" @tap="toggleCreateForm">
           <text class="alliance-create-icon">＋</text>
           <text class="alliance-create-label">创建联盟</text>
         </view>
@@ -49,9 +49,14 @@
             <button class="alliance-create-submit" :loading="createBusy" :disabled="createBusy" @tap="submitCreateAlliance">创建</button>
           </view>
         </view>
+        <view v-if="isLoggedIn" class="alliance-manage-entry" @tap="openAllianceListManagement">
+          <text class="alliance-create-icon">⚙</text>
+          <text class="alliance-create-label">管理联盟列表</text>
+        </view>
         <scroll-view scroll-y class="alliance-picker-list" :style="allianceListStyle">
           <view v-if="allianceLoading" class="alliance-picker-state">正在加载...</view>
-          <view v-else-if="!alliances.length" class="alliance-picker-state">暂无可访问联盟</view>
+          <view v-else-if="!alliances.length && !browsedAlliances.length" class="alliance-picker-state">暂无可访问联盟</view>
+          <view v-if="alliances.length" class="alliance-group-title">我的联盟</view>
           <view
             v-for="item in alliances"
             :key="item.id"
@@ -65,23 +70,24 @@
             </view>
             <view class="alliance-picker-actions">
               <text v-if="currentAlliance && Number(currentAlliance.id) === Number(item.id)" class="alliance-picker-check">✓</text>
-              <text v-if="alliances.length > 1" class="alliance-picker-more" @tap.stop="openAllianceActions(item)">···</text>
             </view>
           </view>
-          <view v-if="hiddenAlliances.length" class="alliance-hidden-toggle" @tap="hiddenExpanded = !hiddenExpanded">
-            <text>已隐藏联盟 {{ hiddenAlliances.length }} 个</text>
-            <text>{{ hiddenExpanded ? '收起⌃' : '展开⌄' }}</text>
-          </view>
+          <view v-if="browsedAlliances.length" class="alliance-group-title">浏览过的联盟</view>
           <view
-            v-for="item in (hiddenExpanded ? hiddenAlliances : [])"
+            v-for="item in browsedAlliances"
             :key="item.id"
-            class="alliance-picker-item alliance-picker-item-hidden"
+            class="alliance-picker-item"
+            :class="{ active: currentAlliance && Number(currentAlliance.id) === Number(item.id) }"
+            @tap="chooseAlliance(item)"
           >
             <view class="alliance-picker-main">
               <text class="alliance-picker-name">{{ item.name }}</text>
-              <text class="alliance-picker-role">{{ allianceRoleLabel(item) }}</text>
+              <text class="alliance-picker-role">浏览</text>
             </view>
-            <text class="alliance-restore" @tap.stop="restoreAlliance(item)">恢复显示</text>
+            <view class="alliance-picker-actions">
+              <text v-if="currentAlliance && Number(currentAlliance.id) === Number(item.id)" class="alliance-picker-check">✓</text>
+              <text v-if="isLoggedIn" class="alliance-apply" @tap.stop="applyToAlliance(item)">申请加入</text>
+            </view>
           </view>
         </scroll-view>
       </view>
@@ -94,9 +100,11 @@ import {
   ALLIANCE_CHANGED_EVENT,
   getCurrentAlliance,
   loadAllianceContext,
-  selectAlliance
+  ensureBrowseShareToken,
+  selectAlliance,
+  selectLocalAlliance
 } from '@/utils/alliance.js'
-import { createFreeAlliance, setAllianceVisibility } from '@/utils/api.js'
+import { createFreeAlliance, requestAllianceJoin } from '@/utils/api.js'
 
 export default {
   name: 'TopBar',
@@ -111,6 +119,7 @@ export default {
       topPadding: 0,
       allianceButtonStyle: {},
       alliances: [],
+      browsedAlliances: [],
       hiddenAlliances: [],
       allianceFeatures: {},
       currentAlliance: getCurrentAlliance(),
@@ -125,13 +134,13 @@ export default {
   },
   computed: {
     allianceListStyle() {
-      const hiddenRows = this.hiddenAlliances.length
-        ? 1 + (this.hiddenExpanded ? this.hiddenAlliances.length : 0)
-        : 0
-      const rows = this.allianceLoading ? 1 : Math.max(this.alliances.length + hiddenRows, 1)
+      const groupRows = (this.alliances.length ? 1 : 0) + (this.browsedAlliances.length ? 1 : 0)
+      const rows = this.allianceLoading ? 1 : Math.max(this.alliances.length + this.browsedAlliances.length + groupRows, 1)
       return { height: `${Math.min(rows * 104, 624)}rpx` }
     },
+    isLoggedIn() { return Boolean(uni.getStorageSync('token')) },
     canCreateAlliance() {
+      if (!this.isLoggedIn) return true
       const feature = this.allianceFeatures.free_alliance || {}
       return Boolean(feature.can_create)
     }
@@ -166,16 +175,20 @@ export default {
       return role
     },
     async refreshAlliances() {
-      if (!uni.getStorageSync('token')) return
       this.allianceLoading = true
       try {
         const result = await loadAllianceContext()
         this.alliances = result.alliances
+        this.browsedAlliances = result.browsedAlliances || []
         this.hiddenAlliances = result.hiddenAlliances || []
         this.allianceFeatures = result.features || {}
         this.currentAlliance = result.current
+        if (this.currentAlliance && this.currentAlliance.role !== 'visitor' && this.isLoggedIn) {
+          ensureBrowseShareToken(this.currentAlliance.id).catch(() => {})
+        }
       } catch (e) {
         this.alliances = []
+        this.browsedAlliances = []
         this.hiddenAlliances = []
         this.allianceFeatures = {}
       } finally {
@@ -183,10 +196,6 @@ export default {
       }
     },
     openAlliancePicker() {
-      if (!uni.getStorageSync('token')) {
-        uni.showToast({ title: '登录后可切换联盟', icon: 'none' })
-        return
-      }
       this.alliancePickerVisible = true
       this.refreshAlliances()
     },
@@ -195,7 +204,21 @@ export default {
       this.createFormVisible = false
     },
     toggleCreateForm() {
-      if (!this.canCreateAlliance || this.createBusy) return
+      if (this.createBusy) return
+      if (!this.isLoggedIn) {
+        this.closeAlliancePicker()
+        uni.showToast({ title: '登录后可以创建联盟', icon: 'none' })
+        setTimeout(() => uni.switchTab({ url: '/pages/settings/settings' }), 500)
+        return
+      }
+      if (!this.canCreateAlliance) {
+        const feature = this.allianceFeatures.free_alliance || {}
+        const message = feature.existing_alliance_id
+          ? '每个用户只能创建一个联盟'
+          : '当前暂未开放创建联盟'
+        uni.showToast({ title: message, icon: 'none' })
+        return
+      }
       this.createFormVisible = !this.createFormVisible
       if (this.createFormVisible && !this.createAllianceName.trim()) {
         this.createAllianceName = '我的部落'
@@ -224,43 +247,20 @@ export default {
         this.createBusy = false
       }
     },
-    openAllianceActions(item) {
-      if (!item || this.allianceLoading) return
-      uni.showActionSheet({
-        itemList: ['从列表隐藏'],
-        success: result => {
-          if (result.tapIndex === 0) this.hideAlliance(item)
-        }
-      })
+    openAllianceListManagement() {
+      this.closeAlliancePicker()
+      uni.navigateTo({ url: '/pages/settings/alliance-list-management' })
     },
-    async hideAlliance(item) {
-      if (!item || this.allianceLoading) return
-      this.allianceLoading = true
-      try {
-        await setAllianceVisibility(item.id, true)
-        const loaded = await loadAllianceContext(null, true)
-        this.alliances = loaded.alliances
-        this.hiddenAlliances = loaded.hiddenAlliances || []
-        this.allianceFeatures = loaded.features || {}
-        this.currentAlliance = loaded.current
-        uni.showToast({ title: '已从列表隐藏', icon: 'none' })
-      } catch (e) {
-        uni.showToast({ title: e.message || '隐藏失败', icon: 'none' })
-      } finally {
-        this.allianceLoading = false
+    async applyToAlliance(item) {
+      if (!this.isLoggedIn) {
+        uni.showToast({ title: '请先登录', icon: 'none' })
+        return
       }
-    },
-    async restoreAlliance(item) {
-      if (!item || this.allianceLoading) return
-      this.allianceLoading = true
       try {
-        await setAllianceVisibility(item.id, false)
-        await this.refreshAlliances()
-        uni.showToast({ title: '已恢复显示', icon: 'success' })
+        await requestAllianceJoin(item.id)
+        uni.showToast({ title: '申请已提交', icon: 'success' })
       } catch (e) {
-        uni.showToast({ title: e.message || '恢复失败', icon: 'none' })
-      } finally {
-        this.allianceLoading = false
+        uni.showToast({ title: e.message || '申请失败', icon: 'none' })
       }
     },
     async chooseAlliance(item) {
@@ -271,7 +271,12 @@ export default {
       }
       this.allianceLoading = true
       try {
-        this.currentAlliance = await selectAlliance(item.id)
+        this.currentAlliance = this.isLoggedIn
+          ? await selectAlliance(item.id)
+          : selectLocalAlliance(item)
+        if (this.currentAlliance.role !== 'visitor' && this.isLoggedIn) {
+          ensureBrowseShareToken(this.currentAlliance.id).catch(() => {})
+        }
         this.closeAlliancePicker()
       } catch (e) {
         uni.showToast({ title: e.message || '切换失败', icon: 'none' })
@@ -426,8 +431,12 @@ export default {
 .alliance-picker-state { padding: 48rpx 28rpx; color: #747d94; font-size: 25rpx; text-align: center; }
 .alliance-create-entry { display: flex; align-items: center; min-height: 92rpx; padding: 0 28rpx; border-bottom: 1rpx solid #34345a; background: rgba(74, 144, 217, .08); color: #5fa8ff; }
 .alliance-create-entry:active { background: rgba(74, 144, 217, .16); }
+.alliance-create-entry.disabled { color: #626d82; background: rgba(255, 255, 255, .02); }
 .alliance-create-icon { margin-right: 12rpx; font-size: 34rpx; font-weight: 400; }
 .alliance-create-label { font-size: 27rpx; font-weight: 600; }
+.alliance-manage-entry { display: flex; align-items: center; min-height: 82rpx; padding: 0 28rpx; border-bottom: 1rpx solid #34345a; color: #9aa6bb; }
+.alliance-manage-entry:active { background: rgba(255, 255, 255, .04); }
+.alliance-group-title { padding: 18rpx 28rpx 10rpx; color: #68738b; font-size: 21rpx; background: #151529; }
 .alliance-create-form { padding: 22rpx 28rpx; border-bottom: 1rpx solid #34345a; background: #17172d; }
 .alliance-create-input { height: 72rpx; padding: 0 20rpx; border: 1rpx solid #353555; border-radius: 12rpx; color: #eef0f6; font-size: 26rpx; background: #111125; }
 .alliance-create-actions { display: flex; justify-content: flex-end; margin-top: 18rpx; }
@@ -445,6 +454,7 @@ export default {
 .alliance-picker-item.active .alliance-picker-role, .alliance-picker-check { color: #5fa8ff; }
 .alliance-picker-check { margin-right: 18rpx; font-size: 30rpx; }
 .alliance-picker-more { min-width: 52rpx; padding: 16rpx 0; color: #7e879d; font-size: 27rpx; text-align: right; }
+.alliance-apply { min-width: 112rpx; padding: 16rpx 0 16rpx 16rpx; color: #5fa8ff; font-size: 22rpx; text-align: right; }
 .alliance-hidden-toggle { display: flex; align-items: center; justify-content: space-between; min-height: 88rpx; padding: 0 28rpx; border-top: 1rpx solid #34345a; color: #7b849a; font-size: 23rpx; }
 .alliance-picker-item-hidden { background: rgba(255, 255, 255, .018); }
 .alliance-picker-item-hidden .alliance-picker-name { color: #9aa1b2; }
