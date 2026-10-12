@@ -43,6 +43,13 @@
       }
     },
     {
+      "path": "pages/settings/clan-management",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "部落管理"
+      }
+    },
+    {
       "path": "pages/settings/platform-management",
       "style": {
         "navigationStyle": "custom",

@@ -42,20 +42,6 @@
           </view>
 
           <view class="free-alliance-card">
-            <template v-if="!freeAlliance">
-              <text class="free-card-title">创建免费单部落联盟</text>
-              <text class="free-card-desc">默认名称为“我的部落”，订阅 1 个部落并使用低频同步。</text>
-              <input
-                v-model="freeAllianceName"
-                class="free-input"
-                maxlength="30"
-                placeholder="联盟名称（可稍后修改）"
-                placeholder-style="color:#59637a"
-              />
-              <button class="free-primary-btn" :loading="freeBusy" :disabled="freeBusy" @tap="createMyFreeAlliance">创建我的部落</button>
-            </template>
-
-            <template v-else>
               <view class="free-card-head">
                 <view>
                   <text class="free-card-title">{{ freeAlliance.name }}</text>
@@ -112,7 +98,6 @@
               </view>
 
               <button class="free-danger-btn" :disabled="freeBusy" @tap="confirmArchiveFreeAlliance">停用并删除联盟</button>
-            </template>
           </view>
         </template>
 
@@ -280,7 +265,6 @@ import TopBar from '@/components/TopBar.vue'
 import {
   archiveFreeAlliance,
   bindAccount,
-  createFreeAlliance,
   getFreeAllianceSubscription,
   getMyInfo,
   getServerInfo,
@@ -336,8 +320,7 @@ export default {
       return feature.public_open ? '免费版' : '内部测试'
     },
     showFreeAllianceSection() {
-      const feature = this.allianceFeatures.free_alliance || {}
-      return Boolean(this.freeAlliance || feature.allowed)
+      return Boolean(this.freeAlliance)
     },
     displayName() {
       if (this.userInfo && this.userInfo.nickname) {
@@ -501,21 +484,6 @@ export default {
         this.scheduleFreeStatusPoll()
       } catch (err) {
         this.freeSubscription = null
-      }
-    },
-
-    async createMyFreeAlliance() {
-      if (this.freeBusy) return
-      this.freeBusy = true
-      try {
-        const created = await createFreeAlliance(this.freeAllianceName.trim() || undefined)
-        await loadAllianceContext(created.id, true)
-        await this.refreshFreeAlliancePanel()
-        uni.showToast({ title: '创建成功', icon: 'success' })
-      } catch (err) {
-        uni.showModal({ title: '创建失败', content: err.message || '请稍后重试', showCancel: false })
-      } finally {
-        this.freeBusy = false
       }
     },
 

@@ -92,6 +92,10 @@ class FreeRefreshInput(BaseModel):
     resource_types: list[str] = Field(default_factory=lambda: ["current_war"])
 
 
+class AllianceVisibilityInput(BaseModel):
+    hidden: bool
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -218,7 +222,8 @@ def my_alliances(user: dict = Depends(require_user), db: Database = Depends(get_
     ensure_sky_admin_membership(db.conn, user["openid"])
     contexts = list_alliance_contexts(db.conn, user["openid"])
     visit_rows = db.conn.execute(
-        """SELECT visits.alliance_id, visits.is_default, visits.last_visited_at
+        """SELECT visits.alliance_id, visits.is_default, visits.is_hidden,
+                  visits.hidden_at, visits.last_visited_at
            FROM alliance_visits AS visits
            JOIN wechat_users AS users ON users.id = visits.user_id
            WHERE users.openid = ?""",
@@ -226,15 +231,24 @@ def my_alliances(user: dict = Depends(require_user), db: Database = Depends(get_
     ).fetchall()
     visits = {int(row["alliance_id"]): row for row in visit_rows}
     items = []
+    hidden_items = []
     for context in contexts:
         item = context.as_dict(include_clans=False)
         visit = visits.get(context.alliance_id)
         item["is_default"] = bool(visit and visit["is_default"])
+        item["is_hidden"] = bool(visit and visit["is_hidden"])
+        item["hidden_at"] = visit["hidden_at"] if visit else None
         item["last_visited_at"] = visit["last_visited_at"] if visit else None
-        items.append(item)
+        if item["is_hidden"]:
+            item["is_default"] = False
+            hidden_items.append(item)
+        else:
+            items.append(item)
     return {
         "count": len(items),
         "alliances": items,
+        "hidden_count": len(hidden_items),
+        "hidden_alliances": hidden_items,
         "features": {
             "free_alliance": free_alliance_capability(db.conn, user["openid"]),
             "platform_admin": platform_admin_capability(db.conn, user["openid"]),
@@ -421,14 +435,100 @@ def visit_alliance(
         )
         db.conn.execute(
             """INSERT INTO alliance_visits
-               (alliance_id, user_id, is_default, first_visited_at, last_visited_at)
-               VALUES (?, ?, 1, ?, ?)
+               (alliance_id, user_id, is_default, is_hidden, hidden_at,
+                first_visited_at, last_visited_at)
+               VALUES (?, ?, 1, 0, NULL, ?, ?)
                ON CONFLICT(alliance_id, user_id) DO UPDATE SET
                    is_default = 1,
+                   is_hidden = 0,
+                   hidden_at = NULL,
                    last_visited_at = excluded.last_visited_at""",
             (alliance_id, context.user_id, now, now),
         )
     return {**context.as_dict(include_clans=False), "is_default": True, "last_visited_at": now}
+
+
+@router.patch("/me/alliances/{alliance_id}/visibility")
+def set_alliance_visibility(
+    alliance_id: int,
+    payload: AllianceVisibilityInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    """隐藏或恢复当前用户切换列表中的联盟，不改变成员关系和权限。"""
+    context = _context(user, alliance_id, db)
+    now = _utc_now()
+    next_context = None
+    with db.conn:
+        if payload.hidden:
+            visible_rows = db.conn.execute(
+                """SELECT members.alliance_id
+                   FROM alliance_members AS members
+                   JOIN alliances ON alliances.id=members.alliance_id
+                                     AND alliances.status='active'
+                   LEFT JOIN alliance_visits AS visits
+                     ON visits.alliance_id=members.alliance_id
+                    AND visits.user_id=members.user_id
+                   WHERE members.user_id=? AND members.status='active'
+                     AND COALESCE(visits.is_hidden, 0)=0
+                     AND members.alliance_id!=?
+                   ORDER BY COALESCE(visits.is_default, 0) DESC,
+                            visits.last_visited_at DESC, members.alliance_id""",
+                (context.user_id, alliance_id),
+            ).fetchall()
+            if not visible_rows:
+                raise HTTPException(status_code=409, detail="至少保留一个可见联盟")
+            current_visit = db.conn.execute(
+                """SELECT is_default FROM alliance_visits
+                   WHERE alliance_id=? AND user_id=?""",
+                (alliance_id, context.user_id),
+            ).fetchone()
+            was_default = bool(current_visit and current_visit["is_default"])
+            db.conn.execute(
+                """INSERT INTO alliance_visits
+                   (alliance_id, user_id, is_default, is_hidden, hidden_at,
+                    first_visited_at, last_visited_at)
+                   VALUES (?, ?, 0, 1, ?, ?, ?)
+                   ON CONFLICT(alliance_id, user_id) DO UPDATE SET
+                       is_default=0, is_hidden=1, hidden_at=excluded.hidden_at""",
+                (alliance_id, context.user_id, now, now, now),
+            )
+            if was_default:
+                next_alliance_id = int(visible_rows[0]["alliance_id"])
+                db.conn.execute(
+                    "UPDATE alliance_visits SET is_default=0 WHERE user_id=?",
+                    (context.user_id,),
+                )
+                db.conn.execute(
+                    """INSERT INTO alliance_visits
+                       (alliance_id, user_id, is_default, is_hidden, hidden_at,
+                        first_visited_at, last_visited_at)
+                       VALUES (?, ?, 1, 0, NULL, ?, ?)
+                       ON CONFLICT(alliance_id, user_id) DO UPDATE SET
+                           is_default=1, is_hidden=0, hidden_at=NULL,
+                           last_visited_at=excluded.last_visited_at""",
+                    (next_alliance_id, context.user_id, now, now),
+                )
+                next_context = resolve_alliance_context(
+                    db.conn, user["openid"], next_alliance_id,
+                )
+        else:
+            db.conn.execute(
+                """INSERT INTO alliance_visits
+                   (alliance_id, user_id, is_default, is_hidden, hidden_at,
+                    first_visited_at, last_visited_at)
+                   VALUES (?, ?, 0, 0, NULL, ?, ?)
+                   ON CONFLICT(alliance_id, user_id) DO UPDATE SET
+                       is_hidden=0, hidden_at=NULL""",
+                (alliance_id, context.user_id, now, now),
+            )
+    return {
+        "alliance_id": alliance_id,
+        "hidden": bool(payload.hidden),
+        "next_alliance": (
+            next_context.as_dict(include_clans=False) if next_context else None
+        ),
+    }
 
 
 @router.get("/alliances/{alliance_id}/clans")

@@ -230,6 +230,63 @@ def test_visit_switches_default_only_for_active_membership(db):
     assert exc.value.status_code == 404
 
 
+def test_hide_and_restore_alliance_only_changes_user_visibility(db):
+    apply_sky_migration(db.conn, CLANS, now=NOW)
+    user_id = _user(db, "visibility-user")
+    sky_id = _sky_id(db)
+    ensure_sky_admin_membership(db.conn, "visibility-user", now=NOW)
+    paid_id = _paid_alliance(db)
+    _membership(db, paid_id, user_id, "admin")
+    db.conn.commit()
+    alliance_routes.visit_alliance(
+        paid_id, user={"openid": "visibility-user"}, db=db,
+    )
+
+    hidden = alliance_routes.set_alliance_visibility(
+        paid_id,
+        alliance_routes.AllianceVisibilityInput(hidden=True),
+        user={"openid": "visibility-user"}, db=db,
+    )
+    listing = alliance_routes.my_alliances(
+        user={"openid": "visibility-user"}, db=db,
+    )
+    assert hidden["hidden"] is True
+    assert hidden["next_alliance"]["id"] == sky_id
+    assert [item["id"] for item in listing["alliances"]] == [sky_id]
+    assert [item["id"] for item in listing["hidden_alliances"]] == [paid_id]
+    membership = db.conn.execute(
+        "SELECT role, status FROM alliance_members WHERE alliance_id=? AND user_id=?",
+        (paid_id, user_id),
+    ).fetchone()
+    assert tuple(membership) == ("admin", "active")
+
+    alliance_routes.set_alliance_visibility(
+        paid_id,
+        alliance_routes.AllianceVisibilityInput(hidden=False),
+        user={"openid": "visibility-user"}, db=db,
+    )
+    restored = alliance_routes.my_alliances(
+        user={"openid": "visibility-user"}, db=db,
+    )
+    assert {item["id"] for item in restored["alliances"]} == {sky_id, paid_id}
+    assert restored["hidden_alliances"] == []
+
+
+def test_cannot_hide_last_visible_alliance(db):
+    apply_sky_migration(db.conn, CLANS, now=NOW)
+    _user(db, "single-alliance-user")
+    ensure_sky_admin_membership(db.conn, "single-alliance-user", now=NOW)
+
+    with pytest.raises(HTTPException) as exc:
+        alliance_routes.set_alliance_visibility(
+            _sky_id(db),
+            alliance_routes.AllianceVisibilityInput(hidden=True),
+            user={"openid": "single-alliance-user"}, db=db,
+        )
+    assert exc.value.status_code == 409
+    assert exc.value.detail == "至少保留一个可见联盟"
+
+
 def test_members_endpoint_whitelists_management_fields_per_clan(db):
     apply_sky_migration(db.conn, CLANS, now=NOW)
     admin_id = _user(db, "admin")

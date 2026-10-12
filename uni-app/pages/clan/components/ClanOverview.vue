@@ -11,6 +11,12 @@
           <text>自有部落 · {{ clans.length }} 个</text>
           <text v-if="updatedAt">更新于 {{ formatTime(updatedAt) }}</text>
         </view>
+        <view v-if="!clans.length" class="clan-overview-empty">
+          <text class="clan-overview-empty-title">当前联盟还没有部落</text>
+          <text class="clan-overview-empty-tip">添加后会进入后台同步队列，首次数据可能需要等待。</text>
+          <button v-if="canManageClans" class="clan-overview-manage primary" @tap="openClanManagement">添加第一个部落</button>
+          <text v-else class="clan-overview-empty-tip">请联系联盟管理员添加部落</text>
+        </view>
         <view
           v-for="clan in clans"
           :key="clan.clan_tag"
@@ -49,6 +55,7 @@
             <text class="clan-overview-detail-hint">查看详情</text>
           </view>
         </view>
+        <button v-if="clans.length && canManageClans" class="clan-overview-manage" @tap="openClanManagement">管理部落</button>
         <view class="clan-overview-bottom"></view>
       </view>
     </scroll-view>
@@ -57,7 +64,7 @@
 
 <script>
 import { getClanOverview } from '@/utils/api.js'
-import { getCurrentAllianceId } from '@/utils/alliance.js'
+import { getCurrentAlliance, getCurrentAllianceId } from '@/utils/alliance.js'
 
 const overviewCache = Object.create(null)
 
@@ -76,7 +83,19 @@ export default {
       this.fetchData()
     }
   },
+  computed: {
+    canManageClans() {
+      const alliance = getCurrentAlliance()
+      if (!alliance || ['admin', 'leader'].indexOf(alliance.role) < 0) return false
+      const code = alliance.plan && alliance.plan.code
+      const state = alliance.plan && alliance.plan.status
+      return code === 'free' || (code === 'paid' && ['active', 'legacy'].indexOf(state) >= 0)
+    }
+  },
   methods: {
+    openClanManagement() {
+      uni.navigateTo({ url: '/pages/settings/clan-management' })
+    },
     applyResponse(res) {
       this.clans = res.clans || []
       this.updatedAt = res.updated_at || ''
@@ -152,6 +171,12 @@ export default {
 .clan-overview-error { color: #e06060; margin-bottom: 20rpx; }
 .clan-overview-retry { color: #5fa8ff; padding: 16rpx 28rpx; }
 .clan-overview-summary { display: flex; justify-content: space-between; margin: 0 4rpx 18rpx; color: #66708a; font-size: 22rpx; }
+.clan-overview-empty { min-height: 430rpx; padding: 70rpx 36rpx; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 1rpx solid #252542; border-radius: 16rpx; background: #18182d; text-align: center; }
+.clan-overview-empty-title { color: #d7dbe6; font-size: 29rpx; font-weight: 600; }
+.clan-overview-empty-tip { margin-top: 16rpx; color: #6f788e; font-size: 22rpx; line-height: 1.6; }
+.clan-overview-manage { margin: 8rpx 0 0; border: 1rpx solid #303958; border-radius: 12rpx; color: #79b4f2; background: #1b2338; font-size: 25rpx; line-height: 2.6; }
+.clan-overview-manage.primary { width: 360rpx; margin-top: 30rpx; color: #fff; border-color: #315f9a; background: #315f9a; }
+.clan-overview-manage::after { border: 0; }
 .clan-overview-card { margin-bottom: 22rpx; padding: 24rpx; box-sizing: border-box; background: #1a1a2e; border: 1rpx solid #2a2a4a; border-radius: 16rpx; }
 .clan-overview-card:active { background: #20203a; }
 .clan-overview-card-head { display: flex; align-items: center; justify-content: space-between; }

@@ -283,10 +283,35 @@ def rename_alliance(
     return {"alliance_id": int(alliance_id), "name": display_name}
 
 
+def _managed_clan_actor(
+    conn: sqlite3.Connection,
+    openid: str,
+    alliance_id: int,
+    *,
+    now: datetime | None = None,
+) -> sqlite3.Row:
+    actor = _member(conn, openid, alliance_id, roles={"admin", "leader"})
+    if actor["plan_code"] not in {"free", "paid"}:
+        raise AllianceOperationError("当前联盟的部落由系统配置，不能在小程序内修改", status_code=409)
+    if actor["plan_code"] == "paid":
+        latest_grant = conn.execute(
+            """SELECT status, expires_at FROM alliance_plan_grants
+               WHERE alliance_id=? ORDER BY id DESC LIMIT 1""",
+            (int(alliance_id),),
+        ).fetchone()
+        grant_expiry = _parse_time(latest_grant["expires_at"]) if latest_grant else None
+        if latest_grant is not None and (
+            latest_grant["status"] != "active"
+            or (grant_expiry is not None and grant_expiry <= _now(now))
+        ):
+            raise AllianceOperationError("付费权益已到期，请先续期", status_code=409)
+    return actor
+
+
 def list_managed_clans(conn: sqlite3.Connection, openid: str, alliance_id: int) -> dict:
     member = _member(conn, openid, alliance_id)
     plan = conn.execute(
-        """SELECT plans.max_clans FROM alliances
+        """SELECT alliances.plan_code, plans.max_clans FROM alliances
            JOIN alliance_plans AS plans ON plans.plan_code=alliances.plan_code
            WHERE alliances.id=?""",
         (int(alliance_id),),
@@ -298,9 +323,28 @@ def list_managed_clans(conn: sqlite3.Connection, openid: str, alliance_id: int) 
            ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END, sort_order, id""",
         (int(alliance_id),),
     ).fetchall()
+    active_count = sum(1 for row in rows if row["status"] == "active")
+    plan_allows_management = bool(plan and plan["plan_code"] in {"free", "paid"})
+    if plan and plan["plan_code"] == "paid":
+        latest_grant = conn.execute(
+            """SELECT status, expires_at FROM alliance_plan_grants
+               WHERE alliance_id=? ORDER BY id DESC LIMIT 1""",
+            (int(alliance_id),),
+        ).fetchone()
+        grant_expiry = _parse_time(latest_grant["expires_at"]) if latest_grant else None
+        if latest_grant is not None and (
+            latest_grant["status"] != "active"
+            or (grant_expiry is not None and grant_expiry <= _now())
+        ):
+            plan_allows_management = False
+    can_manage = member["role"] in {"admin", "leader"} and plan_allows_management
     return {
         "alliance_id": int(alliance_id), "actor_role": member["role"],
+        "plan_code": plan["plan_code"] if plan else member["plan_code"],
         "max_clans": int(plan["max_clans"]) if plan else 1,
+        "active_count": active_count,
+        "can_manage": bool(can_manage),
+        "can_add": bool(can_manage and active_count < (int(plan["max_clans"]) if plan else 1)),
         "clans": [dict(row) for row in rows],
     }
 
@@ -315,20 +359,7 @@ def add_managed_clan(
     clan_name: str = "",
     now: datetime | None = None,
 ) -> dict:
-    actor = _member(conn, openid, alliance_id, roles={"admin", "leader"})
-    if actor["plan_code"] != "paid":
-        raise AllianceOperationError("多部落管理仅适用于有效付费联盟", status_code=409)
-    latest_grant = conn.execute(
-        """SELECT status, expires_at FROM alliance_plan_grants
-           WHERE alliance_id=? ORDER BY id DESC LIMIT 1""",
-        (int(alliance_id),),
-    ).fetchone()
-    grant_expiry = _parse_time(latest_grant["expires_at"]) if latest_grant else None
-    if latest_grant is not None and (
-        latest_grant["status"] != "active"
-        or (grant_expiry is not None and grant_expiry <= _now(now))
-    ):
-        raise AllianceOperationError("付费权益已到期，请先续期", status_code=409)
+    actor = _managed_clan_actor(conn, openid, alliance_id, now=now)
     tag = _clan_tag(clan_tag)
     selected_category = str(category or "").strip()
     if selected_category not in _CATEGORIES:
@@ -360,15 +391,17 @@ def add_managed_clan(
                        VALUES (?, ?, ?, ?, ?, 'active', 'unverified', 'manual', ?, ?)""",
                     (int(alliance_id), tag, display_name, selected_category, order, timestamp, timestamp),
                 )
-                action = "paid_clan_added"
+                action = "managed_clan_added"
             else:
+                if existing["status"] == "active":
+                    raise AllianceOperationError("该部落已在当前联盟中", status_code=409)
                 conn.execute(
                     """UPDATE alliance_clans SET clan_name=?, category=?, status='active',
                               verification_status='unverified', verified_by_user_id=NULL,
                               verified_at=NULL, updated_at=? WHERE id=?""",
                     (display_name, selected_category, timestamp, existing["id"]),
                 )
-                action = "paid_clan_reactivated" if existing["status"] != "active" else "paid_clan_updated"
+                action = "managed_clan_reactivated"
             _alliance_audit(
                 conn, alliance_id=alliance_id, actor_user_id=int(actor["user_id"]),
                 action=action, entity_type="alliance_clan", entity_id=tag,
@@ -385,6 +418,80 @@ def add_managed_clan(
     }
 
 
+def update_managed_clan(
+    conn: sqlite3.Connection,
+    openid: str,
+    alliance_id: int,
+    clan_tag: str,
+    *,
+    category: str,
+    now: datetime | None = None,
+) -> dict:
+    actor = _managed_clan_actor(conn, openid, alliance_id, now=now)
+    tag = _clan_tag(clan_tag)
+    selected_category = str(category or "").strip()
+    if selected_category not in _CATEGORIES:
+        raise AllianceOperationError("部落标签仅支持实战、战营、互刷或偷矿", status_code=422)
+    row = conn.execute(
+        """SELECT id, clan_name, category, verification_status FROM alliance_clans
+           WHERE alliance_id=? AND clan_tag=? AND status='active'""",
+        (int(alliance_id), tag),
+    ).fetchone()
+    if row is None:
+        raise AllianceOperationError("部落不在当前有效订阅中", status_code=404)
+    timestamp = _iso(now)
+    with conn:
+        conn.execute(
+            "UPDATE alliance_clans SET category=?, updated_at=? WHERE id=?",
+            (selected_category, timestamp, row["id"]),
+        )
+        _alliance_audit(
+            conn, alliance_id=alliance_id, actor_user_id=int(actor["user_id"]),
+            action="managed_clan_category_updated", entity_type="alliance_clan", entity_id=tag,
+            details={"before": row["category"], "after": selected_category}, timestamp=timestamp,
+        )
+    return {
+        "clan_tag": tag, "clan_name": row["clan_name"], "category": selected_category,
+        "verification_status": row["verification_status"], "status": "active",
+    }
+
+
+def reorder_managed_clans(
+    conn: sqlite3.Connection,
+    openid: str,
+    alliance_id: int,
+    clan_tags: list[str],
+    *,
+    now: datetime | None = None,
+) -> dict:
+    actor = _managed_clan_actor(conn, openid, alliance_id, now=now)
+    tags = [_clan_tag(tag) for tag in clan_tags]
+    if len(tags) != len(set(tags)):
+        raise AllianceOperationError("部落顺序中存在重复标签", status_code=422)
+    rows = conn.execute(
+        """SELECT clan_tag FROM alliance_clans
+           WHERE alliance_id=? AND status='active' ORDER BY sort_order, id""",
+        (int(alliance_id),),
+    ).fetchall()
+    current_tags = [row["clan_tag"] for row in rows]
+    if len(tags) != len(current_tags) or set(tags) != set(current_tags):
+        raise AllianceOperationError("部落顺序必须包含当前全部有效部落", status_code=422)
+    timestamp = _iso(now)
+    with conn:
+        for order, tag in enumerate(tags):
+            conn.execute(
+                """UPDATE alliance_clans SET sort_order=?, updated_at=?
+                   WHERE alliance_id=? AND clan_tag=? AND status='active'""",
+                (order, timestamp, int(alliance_id), tag),
+            )
+        _alliance_audit(
+            conn, alliance_id=alliance_id, actor_user_id=int(actor["user_id"]),
+            action="managed_clans_reordered", entity_type="alliance_clan_order",
+            details={"before": current_tags, "after": tags}, timestamp=timestamp,
+        )
+    return {"clan_tags": tags}
+
+
 def remove_managed_clan(
     conn: sqlite3.Connection,
     openid: str,
@@ -393,9 +500,7 @@ def remove_managed_clan(
     *,
     now: datetime | None = None,
 ) -> dict:
-    actor = _member(conn, openid, alliance_id, roles={"admin", "leader"})
-    if actor["plan_code"] != "paid":
-        raise AllianceOperationError("多部落管理仅适用于付费联盟", status_code=409)
+    actor = _managed_clan_actor(conn, openid, alliance_id, now=now)
     tag = _clan_tag(clan_tag)
     row = conn.execute(
         """SELECT id, status, verification_status FROM alliance_clans
@@ -413,7 +518,7 @@ def remove_managed_clan(
         )
         _alliance_audit(
             conn, alliance_id=alliance_id, actor_user_id=int(actor["user_id"]),
-            action="paid_clan_removed", entity_type="alliance_clan", entity_id=tag,
+            action="managed_clan_removed", entity_type="alliance_clan", entity_id=tag,
             details={"verification_before": row["verification_status"]}, timestamp=timestamp,
         )
     return {"clan_tag": tag, "status": "removed"}
@@ -626,10 +731,12 @@ def join_from_share(
         conn.execute("UPDATE alliance_visits SET is_default=0 WHERE user_id=?", (user["id"],))
         conn.execute(
             """INSERT INTO alliance_visits
-               (alliance_id, user_id, is_default, first_visited_at, last_visited_at)
-               VALUES (?, ?, 1, ?, ?)
+               (alliance_id, user_id, is_default, is_hidden, hidden_at,
+                first_visited_at, last_visited_at)
+               VALUES (?, ?, 1, 0, NULL, ?, ?)
                ON CONFLICT(alliance_id, user_id) DO UPDATE SET
-                   is_default=1, last_visited_at=excluded.last_visited_at""",
+                   is_default=1, is_hidden=0, hidden_at=NULL,
+                   last_visited_at=excluded.last_visited_at""",
             (alliance_id, user["id"], timestamp, timestamp),
         )
         _alliance_audit(

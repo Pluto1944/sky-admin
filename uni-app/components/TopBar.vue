@@ -32,6 +32,23 @@
           <text class="alliance-picker-title">切换联盟</text>
           <text class="alliance-picker-close" @tap="closeAlliancePicker">关闭</text>
         </view>
+        <view v-if="canCreateAlliance" class="alliance-create-entry" @tap="toggleCreateForm">
+          <text class="alliance-create-icon">＋</text>
+          <text class="alliance-create-label">创建联盟</text>
+        </view>
+        <view v-if="createFormVisible" class="alliance-create-form">
+          <input
+            v-model="createAllianceName"
+            class="alliance-create-input"
+            maxlength="30"
+            placeholder="联盟名称"
+            placeholder-style="color:#59637a"
+          />
+          <view class="alliance-create-actions">
+            <button class="alliance-create-cancel" :disabled="createBusy" @tap="cancelCreate">取消</button>
+            <button class="alliance-create-submit" :loading="createBusy" :disabled="createBusy" @tap="submitCreateAlliance">创建</button>
+          </view>
+        </view>
         <scroll-view scroll-y class="alliance-picker-list" :style="allianceListStyle">
           <view v-if="allianceLoading" class="alliance-picker-state">正在加载...</view>
           <view v-else-if="!alliances.length" class="alliance-picker-state">暂无可访问联盟</view>
@@ -46,7 +63,25 @@
               <text class="alliance-picker-name">{{ item.name }}</text>
               <text class="alliance-picker-role">{{ allianceRoleLabel(item) }}</text>
             </view>
-            <text v-if="currentAlliance && Number(currentAlliance.id) === Number(item.id)" class="alliance-picker-check">✓</text>
+            <view class="alliance-picker-actions">
+              <text v-if="currentAlliance && Number(currentAlliance.id) === Number(item.id)" class="alliance-picker-check">✓</text>
+              <text v-if="alliances.length > 1" class="alliance-picker-more" @tap.stop="openAllianceActions(item)">···</text>
+            </view>
+          </view>
+          <view v-if="hiddenAlliances.length" class="alliance-hidden-toggle" @tap="hiddenExpanded = !hiddenExpanded">
+            <text>已隐藏联盟 {{ hiddenAlliances.length }} 个</text>
+            <text>{{ hiddenExpanded ? '收起⌃' : '展开⌄' }}</text>
+          </view>
+          <view
+            v-for="item in (hiddenExpanded ? hiddenAlliances : [])"
+            :key="item.id"
+            class="alliance-picker-item alliance-picker-item-hidden"
+          >
+            <view class="alliance-picker-main">
+              <text class="alliance-picker-name">{{ item.name }}</text>
+              <text class="alliance-picker-role">{{ allianceRoleLabel(item) }}</text>
+            </view>
+            <text class="alliance-restore" @tap.stop="restoreAlliance(item)">恢复显示</text>
           </view>
         </scroll-view>
       </view>
@@ -61,6 +96,7 @@ import {
   loadAllianceContext,
   selectAlliance
 } from '@/utils/alliance.js'
+import { createFreeAlliance, setAllianceVisibility } from '@/utils/api.js'
 
 export default {
   name: 'TopBar',
@@ -75,16 +111,29 @@ export default {
       topPadding: 0,
       allianceButtonStyle: {},
       alliances: [],
+      hiddenAlliances: [],
+      allianceFeatures: {},
       currentAlliance: getCurrentAlliance(),
       alliancePickerVisible: false,
       allianceLoading: false,
+      hiddenExpanded: false,
+      createFormVisible: false,
+      createAllianceName: '我的部落',
+      createBusy: false,
       allianceChangeHandler: null
     }
   },
   computed: {
     allianceListStyle() {
-      const rows = this.allianceLoading ? 1 : Math.max(this.alliances.length, 1)
+      const hiddenRows = this.hiddenAlliances.length
+        ? 1 + (this.hiddenExpanded ? this.hiddenAlliances.length : 0)
+        : 0
+      const rows = this.allianceLoading ? 1 : Math.max(this.alliances.length + hiddenRows, 1)
       return { height: `${Math.min(rows * 104, 624)}rpx` }
+    },
+    canCreateAlliance() {
+      const feature = this.allianceFeatures.free_alliance || {}
+      return Boolean(feature.can_create)
     }
   },
   created() {
@@ -122,9 +171,13 @@ export default {
       try {
         const result = await loadAllianceContext()
         this.alliances = result.alliances
+        this.hiddenAlliances = result.hiddenAlliances || []
+        this.allianceFeatures = result.features || {}
         this.currentAlliance = result.current
       } catch (e) {
         this.alliances = []
+        this.hiddenAlliances = []
+        this.allianceFeatures = {}
       } finally {
         this.allianceLoading = false
       }
@@ -137,7 +190,79 @@ export default {
       this.alliancePickerVisible = true
       this.refreshAlliances()
     },
-    closeAlliancePicker() { this.alliancePickerVisible = false },
+    closeAlliancePicker() {
+      this.alliancePickerVisible = false
+      this.createFormVisible = false
+    },
+    toggleCreateForm() {
+      if (!this.canCreateAlliance || this.createBusy) return
+      this.createFormVisible = !this.createFormVisible
+      if (this.createFormVisible && !this.createAllianceName.trim()) {
+        this.createAllianceName = '我的部落'
+      }
+    },
+    cancelCreate() {
+      if (this.createBusy) return
+      this.createFormVisible = false
+    },
+    async submitCreateAlliance() {
+      const name = this.createAllianceName.trim()
+      if (!name || this.createBusy) {
+        if (!name) uni.showToast({ title: '请输入联盟名称', icon: 'none' })
+        return
+      }
+      this.createBusy = true
+      try {
+        const created = await createFreeAlliance(name)
+        this.currentAlliance = await selectAlliance(created.id)
+        await this.refreshAlliances()
+        this.createFormVisible = false
+        uni.showToast({ title: '创建成功', icon: 'success' })
+      } catch (e) {
+        uni.showModal({ title: '创建失败', content: e.message || '请稍后重试', showCancel: false })
+      } finally {
+        this.createBusy = false
+      }
+    },
+    openAllianceActions(item) {
+      if (!item || this.allianceLoading) return
+      uni.showActionSheet({
+        itemList: ['从列表隐藏'],
+        success: result => {
+          if (result.tapIndex === 0) this.hideAlliance(item)
+        }
+      })
+    },
+    async hideAlliance(item) {
+      if (!item || this.allianceLoading) return
+      this.allianceLoading = true
+      try {
+        await setAllianceVisibility(item.id, true)
+        const loaded = await loadAllianceContext(null, true)
+        this.alliances = loaded.alliances
+        this.hiddenAlliances = loaded.hiddenAlliances || []
+        this.allianceFeatures = loaded.features || {}
+        this.currentAlliance = loaded.current
+        uni.showToast({ title: '已从列表隐藏', icon: 'none' })
+      } catch (e) {
+        uni.showToast({ title: e.message || '隐藏失败', icon: 'none' })
+      } finally {
+        this.allianceLoading = false
+      }
+    },
+    async restoreAlliance(item) {
+      if (!item || this.allianceLoading) return
+      this.allianceLoading = true
+      try {
+        await setAllianceVisibility(item.id, false)
+        await this.refreshAlliances()
+        uni.showToast({ title: '已恢复显示', icon: 'success' })
+      } catch (e) {
+        uni.showToast({ title: e.message || '恢复失败', icon: 'none' })
+      } finally {
+        this.allianceLoading = false
+      }
+    },
     async chooseAlliance(item) {
       if (this.allianceLoading) return
       if (!item || (this.currentAlliance && Number(item.id) === Number(this.currentAlliance.id))) {
@@ -299,12 +424,29 @@ export default {
 .alliance-picker-title { color: #f0f1f6; font-size: 30rpx; font-weight: 600; }
 .alliance-picker-close { padding: 18rpx 0 18rpx 24rpx; color: #5fa8ff; font-size: 24rpx; }
 .alliance-picker-state { padding: 48rpx 28rpx; color: #747d94; font-size: 25rpx; text-align: center; }
+.alliance-create-entry { display: flex; align-items: center; min-height: 92rpx; padding: 0 28rpx; border-bottom: 1rpx solid #34345a; background: rgba(74, 144, 217, .08); color: #5fa8ff; }
+.alliance-create-entry:active { background: rgba(74, 144, 217, .16); }
+.alliance-create-icon { margin-right: 12rpx; font-size: 34rpx; font-weight: 400; }
+.alliance-create-label { font-size: 27rpx; font-weight: 600; }
+.alliance-create-form { padding: 22rpx 28rpx; border-bottom: 1rpx solid #34345a; background: #17172d; }
+.alliance-create-input { height: 72rpx; padding: 0 20rpx; border: 1rpx solid #353555; border-radius: 12rpx; color: #eef0f6; font-size: 26rpx; background: #111125; }
+.alliance-create-actions { display: flex; justify-content: flex-end; margin-top: 18rpx; }
+.alliance-create-cancel, .alliance-create-submit { width: 144rpx; height: 64rpx; margin: 0 0 0 16rpx; padding: 0; border: 0; border-radius: 10rpx; font-size: 24rpx; line-height: 64rpx; }
+.alliance-create-cancel { color: #8992a8; background: #24243f; }
+.alliance-create-submit { color: #eef5ff; background: #356da8; }
+.alliance-create-cancel::after, .alliance-create-submit::after { border: 0; }
 .alliance-picker-item { display: flex; align-items: center; justify-content: space-between; min-height: 104rpx; padding: 0 28rpx; border-bottom: 1rpx solid #282846; }
 .alliance-picker-item:last-child { border-bottom: 0; }
 .alliance-picker-item.active { background: rgba(74, 144, 217, .12); }
 .alliance-picker-main { min-width: 0; display: flex; flex-direction: column; }
 .alliance-picker-name { overflow: hidden; color: #d7dae4; font-size: 28rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .alliance-picker-role { margin-top: 8rpx; color: #727b92; font-size: 21rpx; }
+.alliance-picker-actions { display: flex; flex-shrink: 0; align-items: center; margin-left: 18rpx; }
 .alliance-picker-item.active .alliance-picker-role, .alliance-picker-check { color: #5fa8ff; }
-.alliance-picker-check { flex-shrink: 0; margin-left: 20rpx; font-size: 30rpx; }
+.alliance-picker-check { margin-right: 18rpx; font-size: 30rpx; }
+.alliance-picker-more { min-width: 52rpx; padding: 16rpx 0; color: #7e879d; font-size: 27rpx; text-align: right; }
+.alliance-hidden-toggle { display: flex; align-items: center; justify-content: space-between; min-height: 88rpx; padding: 0 28rpx; border-top: 1rpx solid #34345a; color: #7b849a; font-size: 23rpx; }
+.alliance-picker-item-hidden { background: rgba(255, 255, 255, .018); }
+.alliance-picker-item-hidden .alliance-picker-name { color: #9aa1b2; }
+.alliance-restore { flex-shrink: 0; margin-left: 20rpx; padding: 18rpx 0 18rpx 20rpx; color: #5fa8ff; font-size: 23rpx; }
 </style>

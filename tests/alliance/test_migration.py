@@ -48,6 +48,10 @@ def test_alliance_core_tables_are_created(db):
         assert db.conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)
         ).fetchone()
+    visit_columns = {
+        row[1] for row in db.conn.execute("PRAGMA table_info(alliance_visits)")
+    }
+    assert {"is_hidden", "hidden_at"} <= visit_columns
 
 
 def test_manifest_only_contains_enabled_clans_in_config_order():

@@ -452,6 +452,7 @@ POST /api/alliances/{alliance_id}/cwl/seasons/{period}/confirm
 GET /api/alliances/{alliance_id}/cwl/live
 GET /api/alliances/{alliance_id}/cwl/live/{clan_tag}
 POST /api/me/alliances
+PATCH /api/me/alliances/{alliance_id}/visibility
 PATCH /api/alliances/{alliance_id}
 GET /api/alliances/{alliance_id}/subscription
 PUT /api/alliances/{alliance_id}/subscription
@@ -459,18 +460,21 @@ POST /api/alliances/{alliance_id}/subscription/refresh
 DELETE /api/alliances/{alliance_id}
 ```
 
-`GET /api/me/alliances` 只列出有效成员关系；单纯存在 `alliance_visits` 不授予访问权。
+`GET /api/me/alliances` 只列出有效成员关系；单纯存在 `alliance_visits` 不授予访问权。响应把当前用户
+可见项放在 `alliances`，个人隐藏项放在 `hidden_alliances`。隐藏仅是当前用户的列表偏好，不改变
+成员关系、角色和数据权限；至少保留一个可见联盟。`PATCH .../visibility` 使用 `{ "hidden": true/false }`
+隐藏或恢复，重新通过有效分享进入隐藏联盟时会自动恢复显示。
 `POST /api/me/alliances/{alliance_id}/visit` 仅将已有有效成员关系对应的联盟记为最近访问和
-默认联盟，不会创建成员关系或提升角色。每个用户最多只有一个默认联盟。
+默认联盟，并自动恢复该联盟显示；不会创建成员关系或提升角色。每个用户最多只有一个默认联盟。
 修改 URL 中的 `alliance_id` 或 `clan_tag` 不能越过当前用户的有效联盟和订阅部落范围，
 无权访问统一返回 `404`，避免枚举其他联盟。
 
 免费联盟写接口首先受 `ALLIANCE_FREE_ENABLED=true`（兼容旧名 `M5_FREE_ALLIANCE_ENABLED`）
 环境总开关控制。内部测试账号可由 `M5_FREE_ALLIANCE_OPENIDS` 允许；外部用户还必须满足平台后台
 `free_registration_enabled=true` 且未达到总配额。创建者是联盟
-首领，但新订阅部落固定为 `unverified`，因此业务数据权限仍封顶为成员。免费联盟最多一个部落，
-首版只允许修改同一部落的 `normal / combat / farm / flat` 标签，不允许在原联盟中自由替换 Tag。
-删除为可审计软删除，不清理公共缓存或历史。
+首领，但新订阅部落固定为 `unverified`，因此业务数据权限仍封顶为成员。免费联盟最多一个有效部落；
+管理员或首领可修改 `normal / combat / farm / flat` 标签，也可先软移除再添加另一个 Tag。
+移除会撤销当前联盟的部落认证关系，但不清理共享公共缓存或历史。
 
 订阅接口在关系提交后只向 M4 队列提交部落资料、成员列表和当前战争初始化任务；已有新鲜公共缓存
 直接复用。刷新接口默认只提交 `current_war`，返回 `202`、任务/缓存状态和共享冷却结果，不在 HTTP
@@ -528,6 +532,8 @@ POST   /api/alliance-shares/join
 GET    /api/alliances/{alliance_id}/verification
 GET    /api/alliances/{alliance_id}/managed-clans
 POST   /api/alliances/{alliance_id}/managed-clans
+PUT    /api/alliances/{alliance_id}/managed-clans/order
+PATCH  /api/alliances/{alliance_id}/managed-clans/{clan_tag}
 DELETE /api/alliances/{alliance_id}/managed-clans/{clan_tag}
 GET    /api/alliances/{alliance_id}/shares
 POST   /api/alliances/{alliance_id}/shares
@@ -556,8 +562,10 @@ PUT /api/platform/alliances/{alliance_id}/status
 任何平台权限都不会替代联盟成员关系和逐部落业务权限。
 
 联盟成员列表仅 `admin / leader` 可读且不返回 OpenID。首领可以调整管理员或移交首领；管理员只能
-移除普通成员。普通成员和管理员可主动退出；首领必须先移交。付费联盟只有有效权益下的管理员/首领可添加最多 10 个部落，新增部落默认未认证并
-通过 M4 队列初始化。平台套餐接口是人工运营入口，不是在线支付接口。
+移除普通成员。普通成员和管理员可主动退出；首领必须先移交。免费或有效付费联盟的管理员/首领
+可通过统一接口新增、软移除、修改业务标签和调整顺序；免费套餐最多 1 个有效部落，付费套餐当前
+最多 10 个。新增或重新启用的部落默认未认证并通过 M4 队列初始化。`internal` 套餐由系统配置，
+不允许在小程序中修改，防止误改苍穹存量配置。平台套餐接口是人工运营入口，不是在线支付接口。
 
 ### 6. 绑定游戏账号
 

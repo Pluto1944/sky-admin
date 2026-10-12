@@ -324,6 +324,8 @@ CREATE TABLE IF NOT EXISTS alliance_visits (
     alliance_id      INTEGER NOT NULL,
     user_id          INTEGER NOT NULL,
     is_default       INTEGER NOT NULL DEFAULT 0 CHECK(is_default IN (0, 1)),
+    is_hidden        INTEGER NOT NULL DEFAULT 0 CHECK(is_hidden IN (0, 1)),
+    hidden_at        TEXT,
     first_visited_at TEXT NOT NULL,
     last_visited_at  TEXT NOT NULL,
     PRIMARY KEY(alliance_id, user_id),
@@ -1441,6 +1443,19 @@ class Database:
                 "ALTER TABLE sync_targets ADD COLUMN planning_mode TEXT "
                 "NOT NULL DEFAULT 'shadow' CHECK(planning_mode IN ('shadow', 'live'))"
             )
+
+        # 联盟切换列表的用户级显示偏好。隐藏不改变成员关系和权限，
+        # 因而放在访问偏好表，而不是 alliance_members.status。
+        visit_cols = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(alliance_visits)")
+        }
+        if visit_cols and "is_hidden" not in visit_cols:
+            self.conn.execute(
+                "ALTER TABLE alliance_visits ADD COLUMN is_hidden INTEGER "
+                "NOT NULL DEFAULT 0 CHECK(is_hidden IN (0, 1))"
+            )
+        if visit_cols and "hidden_at" not in visit_cols:
+            self.conn.execute("ALTER TABLE alliance_visits ADD COLUMN hidden_at TEXT")
 
         # M3.1：为既有套餐补齐 CWL 权益。只合并缺失键，保留运营期间可能增加的
         # 其他 entitlement，不用一次 schema 初始化覆盖整份 JSON。

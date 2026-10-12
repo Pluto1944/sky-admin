@@ -39,16 +39,17 @@ export function clearAllianceContext() {
 export async function loadAllianceContext(preferredId, emitChange = false) {
   if (!tokenExists()) {
     clearAllianceContext()
-    return { alliances: [], current: null }
+    return { alliances: [], hiddenAlliances: [], current: null, features: {} }
   }
   const response = await getMyAlliances()
   const alliances = response.alliances || []
+  const hiddenAlliances = response.hidden_alliances || []
   const requestedId = Number(preferredId || getCurrentAllianceId())
   const current = alliances.find(item => Number(item.id) === requestedId) ||
     alliances.find(item => item.is_default) || alliances[0] || null
   if (current) rememberAlliance(current, emitChange)
   else clearAllianceContext()
-  return { alliances, current, features: response.features || {} }
+  return { alliances, hiddenAlliances, current, features: response.features || {} }
 }
 
 export async function selectAlliance(allianceId) {

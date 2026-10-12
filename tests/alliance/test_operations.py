@@ -15,6 +15,7 @@ from modules.alliance.operations import (
     grant_alliance_plan,
     join_from_share,
     leave_alliance,
+    list_managed_clans,
     list_alliance_members,
     list_share_links,
     manual_set_clan_verification,
@@ -22,11 +23,13 @@ from modules.alliance.operations import (
     platform_dashboard,
     reconcile_expired_plan_grants,
     remove_managed_clan,
+    reorder_managed_clans,
     remove_alliance_member,
     set_alliance_member_role,
     set_alliance_status,
     share_preview,
     update_platform_settings,
+    update_managed_clan,
 )
 from modules.sync_queue.planner import SyncPlanner
 
@@ -106,6 +109,12 @@ def test_share_join_is_member_only_idempotent_and_blocked_users_stay_blocked(ops
     assert share_preview(db.conn, shared["token"], now=NOW)["name"] == "share-a"
 
     first = join_from_share(db.conn, "member", shared["token"], now=NOW)
+    db.conn.execute(
+        """UPDATE alliance_visits SET is_default=0, is_hidden=1, hidden_at=?
+           WHERE alliance_id=? AND user_id=?""",
+        (NOW_TEXT, alliance_id, ids["member"]),
+    )
+    db.conn.commit()
     second = join_from_share(db.conn, "member", shared["token"], now=NOW)
     assert first == {"alliance_id": alliance_id, "joined": True, "role": "member"}
     assert second["joined"] is False
@@ -118,6 +127,11 @@ def test_share_join_is_member_only_idempotent_and_blocked_users_stay_blocked(ops
         (alliance_id, ids["member"]),
     ).fetchone()
     assert tuple(row) == ("member", "active")
+    assert db.conn.execute(
+        """SELECT is_hidden FROM alliance_visits
+           WHERE alliance_id=? AND user_id=?""",
+        (alliance_id, ids["member"]),
+    ).fetchone()[0] == 0
 
     db.conn.execute(
         """INSERT INTO alliance_members
@@ -296,6 +310,81 @@ def test_paid_manager_can_add_and_remove_clans_without_deleting_public_cache(ops
     assert db.conn.execute(
         "SELECT COUNT(*) FROM current_war_cache WHERE clan_tag='#2QQ'"
     ).fetchone()[0] == 1
+
+
+def test_free_manager_can_manage_one_clan_and_replace_removed_subscription(ops):
+    db, ids = ops
+    alliance_id = _alliance(db, ids["owner"], "free-manage")
+
+    listed = list_managed_clans(db.conn, "owner", alliance_id)
+    assert listed["can_manage"] is True
+    assert listed["can_add"] is True
+    assert listed["max_clans"] == 1
+
+    added = add_managed_clan(
+        db.conn, "owner", alliance_id, clan_tag="#2QQ", category="combat", now=NOW,
+    )
+    assert added["category"] == "combat"
+    with pytest.raises(AllianceOperationError, match="数量上限"):
+        add_managed_clan(
+            db.conn, "owner", alliance_id, clan_tag="#9PY", category="farm", now=NOW,
+        )
+
+    manual_set_clan_verification(
+        db.conn, "operator", alliance_id, "#2QQ", "verified", now=NOW,
+    )
+    updated = update_managed_clan(
+        db.conn, "owner", alliance_id, "#2QQ", category="normal", now=NOW,
+    )
+    assert updated["category"] == "normal"
+    assert updated["verification_status"] == "verified"
+
+    remove_managed_clan(db.conn, "owner", alliance_id, "#2QQ", now=NOW)
+    replacement = add_managed_clan(
+        db.conn, "owner", alliance_id, clan_tag="#9PY", category="farm", now=NOW,
+    )
+    assert replacement["clan_tag"] == "#9PY"
+
+
+def test_paid_manager_can_reorder_active_clans(ops):
+    db, ids = ops
+    alliance_id = _alliance(db, ids["owner"], "paid-order", plan="paid")
+    grant_alliance_plan(
+        db.conn, "operator", alliance_id, plan_code="paid",
+        expires_at=(NOW + timedelta(days=365)).isoformat(), now=NOW,
+    )
+    add_managed_clan(db.conn, "owner", alliance_id, clan_tag="#2QQ", category="combat", now=NOW)
+    add_managed_clan(db.conn, "owner", alliance_id, clan_tag="#9PY", category="farm", now=NOW)
+
+    result = reorder_managed_clans(
+        db.conn, "owner", alliance_id, ["#9PY", "#2QQ"], now=NOW,
+    )
+    assert result == {"clan_tags": ["#9PY", "#2QQ"]}
+    assert [row["clan_tag"] for row in db.conn.execute(
+        """SELECT clan_tag FROM alliance_clans
+           WHERE alliance_id=? AND status='active' ORDER BY sort_order, id""",
+        (alliance_id,),
+    ).fetchall()] == ["#9PY", "#2QQ"]
+    with pytest.raises(AllianceOperationError, match="全部有效部落"):
+        reorder_managed_clans(db.conn, "owner", alliance_id, ["#2QQ"], now=NOW)
+
+
+def test_internal_or_member_cannot_manage_alliance_clans(ops):
+    db, ids = ops
+    internal_id = _alliance(db, ids["owner"], "internal-manage", plan="internal")
+    with pytest.raises(AllianceOperationError, match="系统配置"):
+        add_managed_clan(
+            db.conn, "owner", internal_id, clan_tag="#2QQ", category="combat", now=NOW,
+        )
+
+    free_id = _alliance(db, ids["other-owner"], "member-manage")
+    shared = create_share_link(db.conn, "other-owner", free_id, now=NOW)
+    join_from_share(db.conn, "member", shared["token"], now=NOW)
+    assert list_managed_clans(db.conn, "member", free_id)["can_manage"] is False
+    with pytest.raises(AllianceOperationError, match="角色没有此操作权限"):
+        add_managed_clan(
+            db.conn, "member", free_id, clan_tag="#2QQ", category="combat", now=NOW,
+        )
 
 
 def test_platform_dashboard_requires_operator_and_exposes_no_openid(ops):

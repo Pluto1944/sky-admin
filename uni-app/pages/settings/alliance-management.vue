@@ -31,28 +31,6 @@
           <text class="tip">认证按钮暂时保留，当前由后台人工处理，不会自动读取或修改部落介绍。</text>
         </view>
 
-        <template v-if="isPaidManager">
-          <view class="section-title">订阅部落</view>
-          <view class="card">
-            <view v-for="clan in managedClans" :key="clan.id" class="clan-row">
-              <view class="grow">
-                <text class="name">{{ clan.clan_name || clan.clan_tag }}</text>
-                <text class="sub">{{ clan.clan_tag }} · {{ categoryLabel(clan.category) }} · {{ statusLabel(clan.status) }}</text>
-              </view>
-              <text v-if="clan.status !== 'active'" class="restore" @tap="reactivatePaidClan(clan)">恢复</text>
-              <text v-if="clan.status === 'active'" class="remove" @tap="confirmRemoveClan(clan)">移除</text>
-            </view>
-            <view class="paid-add-form">
-              <input v-model="newClanTag" class="input" maxlength="15" placeholder="部落标签，例如 #2QQ" placeholder-style="color:#59637a" />
-              <picker :range="categories" range-key="label" :value="categoryIndex" @change="categoryIndex = Number($event.detail.value) || 0">
-                <view class="picker">业务标签：{{ categories[categoryIndex].label }}⌄</view>
-              </picker>
-              <button class="primary-btn" :disabled="!newClanTag.trim()" @tap="addPaidClan">添加部落</button>
-              <text class="tip">最多 {{ managedMaxClans }} 个；新部落默认未认证并通过后台队列初始化。</text>
-            </view>
-          </view>
-        </template>
-
         <view class="section-title">分享加入</view>
         <view class="card">
           <text class="body">生成联盟邀请后，其他用户登录打开分享将以普通成员身份加入，不会继承分享人的管理权限。</text>
@@ -116,15 +94,12 @@
 <script>
 import TopBar from '@/components/TopBar.vue'
 import {
-  addAllianceManagedClan,
   createAllianceShare,
   getAllianceShares,
-  getAllianceManagedClans,
   getAllianceUserMembers,
   getAllianceVerification,
   leaveAlliance,
   removeAllianceUser,
-  removeAllianceManagedClan,
   renameFreeAlliance,
   revokeAllianceShare,
   updateAllianceUserRole
@@ -144,16 +119,6 @@ export default {
       shareToken: '',
       shareExpiresAt: '',
       shareBusy: false,
-      managedClans: [],
-      managedMaxClans: 1,
-      newClanTag: '',
-      categories: [
-        { key: 'normal', label: '实战' },
-        { key: 'combat', label: '战营' },
-        { key: 'farm', label: '互刷' },
-        { key: 'flat', label: '偷矿' }
-      ],
-      categoryIndex: 0,
       roleOptions: [
         { key: 'member', label: '成员' },
         { key: 'admin', label: '管理' },
@@ -164,10 +129,6 @@ export default {
   computed: {
     canManageMembers() {
       return this.alliance && ['admin', 'leader'].indexOf(this.alliance.role) >= 0
-    },
-    isPaidManager() {
-      if (!this.canManageMembers || !this.alliance || !this.alliance.plan || this.alliance.plan.code !== 'paid') return false
-      return ['active', 'legacy'].indexOf(this.alliance.plan.status) >= 0
     }
   },
   async onLoad() { await this.loadData() },
@@ -192,14 +153,11 @@ export default {
         const results = await Promise.all([
           getAllianceVerification(this.alliance.id),
           getAllianceShares(this.alliance.id),
-          this.canManageMembers ? getAllianceUserMembers(this.alliance.id) : Promise.resolve({ members: [] }),
-          this.isPaidManager ? getAllianceManagedClans(this.alliance.id) : Promise.resolve({ clans: [], max_clans: 1 })
+          this.canManageMembers ? getAllianceUserMembers(this.alliance.id) : Promise.resolve({ members: [] })
         ])
         this.verification = results[0]
         this.shareLinks = results[1].links || []
         this.members = results[2].members || []
-        this.managedClans = results[3].clans || []
-        this.managedMaxClans = results[3].max_clans || 1
       } catch (err) {
         uni.showToast({ title: err.message || '加载失败', icon: 'none' })
       } finally {
@@ -323,58 +281,11 @@ export default {
         }
       })
     },
-    async addPaidClan() {
-      if (!this.alliance || !this.newClanTag.trim()) return
-      try {
-        await addAllianceManagedClan(this.alliance.id, {
-          clan_tag: this.newClanTag.trim(),
-          category: this.categories[this.categoryIndex].key
-        })
-        this.newClanTag = ''
-        await loadAllianceContext(this.alliance.id, true)
-        await this.loadData()
-        uni.showToast({ title: '部落已添加', icon: 'success' })
-      } catch (err) {
-        uni.showModal({ title: '添加失败', content: err.message || '请稍后重试', showCancel: false })
-      }
-    },
-    async reactivatePaidClan(clan) {
-      try {
-        await addAllianceManagedClan(this.alliance.id, {
-          clan_tag: clan.clan_tag,
-          clan_name: clan.clan_name || '',
-          category: clan.category
-        })
-        await loadAllianceContext(this.alliance.id, true)
-        await this.loadData()
-        uni.showToast({ title: '部落已恢复', icon: 'success' })
-      } catch (err) {
-        uni.showModal({ title: '恢复失败', content: err.message || '请检查套餐配额', showCancel: false })
-      }
-    },
-    confirmRemoveClan(clan) {
-      uni.showModal({
-        title: '移除订阅部落',
-        content: `确认移除${clan.clan_name || clan.clan_tag}？公共历史不会删除。`,
-        confirmColor: '#d56b72',
-        success: async res => {
-          if (!res.confirm) return
-          try {
-            await removeAllianceManagedClan(this.alliance.id, clan.clan_tag)
-            await loadAllianceContext(this.alliance.id, true)
-            await this.loadData()
-          } catch (err) {
-            uni.showToast({ title: err.message || '移除失败', icon: 'none' })
-          }
-        }
-      })
-    },
     roleIndex(value) { const index = this.roleOptions.findIndex(item => item.key === value); return index < 0 ? 0 : index },
     roleLabel(value) { return ({ leader: '首领', admin: '管理', member: '成员' }[value] || value) },
     statusLabel(value) { return ({ active: '有效', removed: '已移除', blocked: '已封禁', left: '已离开', invited: '待加入' }[value] || value) },
     verificationLabel(value) { return ({ verified: '已认证', disputed: '存在争议', revoked: '已撤销', unverified: '未认证' }[value] || value) },
     shareStatusLabel(value) { return ({ active: '有效', revoked: '已撤销', expired: '已过期' }[value] || value) },
-    categoryLabel(value) { return ({ normal: '实战', combat: '战营', farm: '互刷', flat: '偷矿' }[value] || value) },
     planStateLabel(value) { return ({ active: '有效', legacy: '兼容权益', expired: '已到期', revoked: '已撤销' }[value] || value || '有效') },
     shortDate(value) { return value ? String(value).replace('T', ' ').slice(0, 16) : '' }
   }

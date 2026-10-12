@@ -20,11 +20,13 @@ from modules.alliance.operations import (
     platform_dashboard,
     remove_alliance_member,
     remove_managed_clan,
+    reorder_managed_clans,
     revoke_share_link,
     set_alliance_member_role,
     set_alliance_status,
     share_preview,
     update_platform_settings,
+    update_managed_clan,
     verification_entry,
 )
 from modules.alliance.free_alliance import enqueue_initialization, reconcile_sync_targets
@@ -75,6 +77,14 @@ class ManagedClanInput(BaseModel):
     clan_tag: str
     category: str
     clan_name: str = Field(default="", max_length=40)
+
+
+class ManagedClanUpdateInput(BaseModel):
+    category: str
+
+
+class ManagedClanOrderInput(BaseModel):
+    clan_tags: list[str]
 
 
 def _error(exc: AllianceOperationError) -> HTTPException:
@@ -146,6 +156,40 @@ def create_alliance_managed_clan(
             actor_user_id=int(actor["id"]),
         )
         return {"clan": clan, "initialization": initialization}
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.put("/alliances/{alliance_id}/managed-clans/order")
+def reorder_alliance_managed_clans(
+    alliance_id: int,
+    payload: ManagedClanOrderInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        return reorder_managed_clans(
+            db.conn, user["openid"], alliance_id, payload.clan_tags,
+        )
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.patch("/alliances/{alliance_id}/managed-clans/{clan_tag}")
+def update_alliance_managed_clan(
+    alliance_id: int,
+    clan_tag: str,
+    payload: ManagedClanUpdateInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        clan = update_managed_clan(
+            db.conn, user["openid"], alliance_id, clan_tag,
+            category=payload.category,
+        )
+        reconcile_sync_targets(db.conn)
+        return clan
     except AllianceOperationError as exc:
         raise _error(exc) from exc
 

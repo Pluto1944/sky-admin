@@ -258,6 +258,16 @@ export function visitAlliance(allianceId) {
   return request(`/api/me/alliances/${encodeURIComponent(allianceId)}/visit`, 'POST', {}, true)
 }
 
+/** 仅调整当前用户切换列表的显示偏好，不改变联盟成员关系。 */
+export function setAllianceVisibility(allianceId, hidden) {
+  return request(
+    `/api/me/alliances/${encodeURIComponent(allianceId)}/visibility`,
+    'PATCH',
+    { hidden: Boolean(hidden) },
+    true
+  )
+}
+
 /** M5 内部灰度：创建当前用户的免费单部落联盟。 */
 export function createFreeAlliance(name) {
   return request('/api/me/alliances', 'POST', { name: name || undefined }, true)
@@ -298,6 +308,14 @@ export function getAllianceManagedClans(allianceId) {
 
 export function addAllianceManagedClan(allianceId, payload) {
   return request(`/api/alliances/${encodeURIComponent(allianceId)}/managed-clans`, 'POST', payload, true)
+}
+
+export function updateAllianceManagedClan(allianceId, clanTag, payload) {
+  return request(`/api/alliances/${encodeURIComponent(allianceId)}/managed-clans/${encodeURIComponent(clanTag)}`, 'PATCH', payload, true)
+}
+
+export function reorderAllianceManagedClans(allianceId, clanTags) {
+  return request(`/api/alliances/${encodeURIComponent(allianceId)}/managed-clans/order`, 'PUT', { clan_tags: clanTags }, true)
 }
 
 export function removeAllianceManagedClan(allianceId, clanTag) {
