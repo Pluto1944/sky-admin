@@ -401,7 +401,15 @@ export default {
 .primary-btn::after, .secondary-btn::after, .search-btn::after, .mini-btn::after { border: 0; }
 .queue-row { justify-content: space-between; min-height: 54rpx; color: #9099ac; font-size: 22rpx; }
 .search-row { margin-bottom: 18rpx; }.search-input { flex: 1; padding: 18rpx; border: 1rpx solid #292945; border-radius: 10rpx; color: #fff; background: #18182d; }.search-btn { width: 120rpx; margin-left: 12rpx; color: #7eb8f6; background: #202b42; line-height: 2.45; }
-.standalone-input { margin-top: 16rpx; box-sizing: border-box; background: #111126; }
+.standalone-input {
+  height: 72rpx;
+  padding: 0 18rpx;
+  margin-top: 16rpx;
+  box-sizing: border-box;
+  font-size: 24rpx;
+  line-height: 72rpx;
+  background: #111126;
+}
 .alliance-card:active { background: #202038; }.status { color: #8d96a8; font-size: 21rpx; }.status-active { color: #54b9a6; }.status-suspended { color: #d29a5f; }.status-archived { color: #737b8e; }
 .clan-row { min-height: 100rpx; border-bottom: 1rpx solid #25253e; }.clan-row:last-child { border-bottom: 0; }
 .platform-order { width: 48rpx; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; }.order-btn { color: #6da9e8; font-size: 25rpx; line-height: 1.45; }.order-btn.disabled { color: #3d4558; }

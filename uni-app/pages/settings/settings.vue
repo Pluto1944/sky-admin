@@ -73,7 +73,7 @@
             <view v-if="canManageAlliance" class="menu-item" @tap="openCwlSettings">
               <view class="menu-icon menu-icon-league">赛</view>
               <view class="menu-copy">
-                <text class="menu-text">联赛设置</text>
+                <text class="menu-text">管理联赛部落</text>
                 <text class="menu-desc">配置本月和下月的联赛队伍</text>
               </view>
               <text class="menu-arrow">›</text>

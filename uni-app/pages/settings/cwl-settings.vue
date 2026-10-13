@@ -294,7 +294,7 @@ export default {
 }
 </script>
 
-<style scoped>
+<style>
 .page-container { min-height: 100vh; background: #0f0f23; color: #e7e9f2; }
 .content-scroll { height: calc(100vh - 150rpx); padding: 20rpx 24rpx; box-sizing: border-box; }
 .period-card, .status-card, .toolbar-card, .form-card, .team-card, .empty-card { background: #19192f; border: 1rpx solid #2e3054; border-radius: 16rpx; margin-bottom: 18rpx; }
