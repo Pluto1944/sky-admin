@@ -2,8 +2,8 @@
   "name": "苍穹联赛助手",
   "appid": "wx6a46dda85a013a34",
   "description": "COC 苍穹联赛管理小程序",
-  "versionName": "1.5.0",
-  "versionCode": "10500",
+  "versionName": "1.6.0",
+  "versionCode": "10600",
   "transformPx": false,
   "uniStatistics": {
     "enable": false
