@@ -432,6 +432,7 @@ CREATE TABLE IF NOT EXISTS alliance_cwl_teams (
     clan_tag           TEXT NOT NULL,
     clan_name_snapshot TEXT,
     team_alias         TEXT,
+    manager_names      TEXT,
     category           TEXT NOT NULL CHECK(category IN ('combat', 'shell')),
     sort_order         INTEGER NOT NULL DEFAULT 0 CHECK(sort_order >= 0),
     source             TEXT NOT NULL DEFAULT 'manual'
@@ -1577,6 +1578,12 @@ class Database:
 
         # M3.1：为既有套餐补齐 CWL 权益。只合并缺失键，保留运营期间可能增加的
         # 其他 entitlement，不用一次 schema 初始化覆盖整份 JSON。
+        cwl_team_cols = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(alliance_cwl_teams)")
+        }
+        if cwl_team_cols and "manager_names" not in cwl_team_cols:
+            self.conn.execute("ALTER TABLE alliance_cwl_teams ADD COLUMN manager_names TEXT")
+
         cwl_entitlements = {
             "free": {"max_cwl_teams": 1, "cwl_data": True, "cwl_registration": False},
             "paid": {"max_cwl_teams": 20, "cwl_data": True, "cwl_registration": False},

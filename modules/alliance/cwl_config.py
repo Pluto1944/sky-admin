@@ -118,6 +118,11 @@ def _refresh_status(conn: sqlite3.Connection, season_id: int) -> str:
         target = "complete"
     else:
         target = "frozen"
+    # 官方分组一旦被发现，配置不得因为纠正 Tag 后的新缓存尚未到达而退回可自由编辑状态。
+    if status == "complete":
+        target = "complete"
+    elif status == "frozen" and target == "active":
+        target = "frozen"
     if target != status:
         conn.execute(
             "UPDATE alliance_cwl_seasons SET status = ?, updated_at = ? WHERE id = ?",
@@ -143,7 +148,7 @@ def _teams(conn: sqlite3.Connection, season_id: int) -> list[dict]:
         dict(row)
         for row in conn.execute(
             """SELECT id, team_index, clan_tag, clan_name_snapshot, team_alias,
-                      category, sort_order, source, created_at, updated_at
+                      manager_names, category, sort_order, source, created_at, updated_at
                FROM alliance_cwl_teams
                WHERE season_id = ?
                ORDER BY sort_order, team_index, id""",
@@ -260,6 +265,7 @@ def add_team(
     clan_name: str | None,
     team_alias: str | None,
     category: str,
+    manager_names: str | None = None,
 ) -> dict:
     season = _editable_season(conn, context, period)
     normalized = normalize_tag(clan_tag)
@@ -283,11 +289,12 @@ def add_team(
             cursor = conn.execute(
                 """INSERT INTO alliance_cwl_teams
                    (season_id, team_index, clan_tag, clan_name_snapshot, team_alias,
-                    category, sort_order, source, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, 'manual', ?, ?)""",
+                    manager_names, category, sort_order, source, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'manual', ?, ?)""",
                 (
                     season["id"], next_index, normalized, clan_name or normalized,
-                    team_alias or clan_name or normalized, category, next_index, now, now,
+                    team_alias or clan_name or normalized, (manager_names or "").strip() or None,
+                    category, next_index, now, now,
                 ),
             )
             conn.execute(
@@ -315,6 +322,7 @@ def update_team(
     team_alias: str | None,
     category: str,
     sort_order: int,
+    manager_names: str | None = None,
 ) -> dict:
     season = _editable_season(conn, context, period)
     normalized = normalize_tag(clan_tag)
@@ -329,16 +337,22 @@ def update_team(
         "SELECT * FROM alliance_cwl_teams WHERE id=? AND season_id=?",
         (team_id, season["id"]),
     ).fetchone()
+    selected_managers = (
+        before["manager_names"]
+        if manager_names is None and before is not None
+        else (manager_names or "").strip() or None
+    )
     try:
         with conn:
             cursor = conn.execute(
                 """UPDATE alliance_cwl_teams
                    SET clan_tag = ?, clan_name_snapshot = ?, team_alias = ?,
-                       category = ?, sort_order = ?, updated_at = ?
+                       manager_names = ?, category = ?, sort_order = ?, updated_at = ?
                    WHERE id = ? AND season_id = ?""",
                 (
                     normalized, clan_name or normalized, team_alias or clan_name or normalized,
-                    category, sort_order, now, team_id, season["id"],
+                    selected_managers, category, sort_order, now,
+                    team_id, season["id"],
                 ),
             )
             if cursor.rowcount != 1:
@@ -355,6 +369,7 @@ def update_team(
                     "after": {
                         "clan_tag": normalized, "clan_name": clan_name or normalized,
                         "team_alias": team_alias or clan_name or normalized,
+                        "manager_names": selected_managers,
                         "category": category, "sort_order": sort_order,
                     },
                 }, now,
@@ -415,12 +430,12 @@ def copy_previous(
             conn.execute(
                 """INSERT INTO alliance_cwl_teams
                    (season_id, team_index, clan_tag, clan_name_snapshot, team_alias,
-                    category, sort_order, source, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, 'copied', ?, ?)""",
+                    manager_names, category, sort_order, source, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'copied', ?, ?)""",
                 (
                     target["id"], row["team_index"], row["clan_tag"],
-                    row["clan_name_snapshot"], row["team_alias"], row["category"],
-                    row["sort_order"], now, now,
+                    row["clan_name_snapshot"], row["team_alias"], row["manager_names"],
+                    row["category"], row["sort_order"], now, now,
                 ),
             )
         _audit(
@@ -470,12 +485,35 @@ def correct_frozen_tag(
     clan_tag: str,
     reason: str,
 ) -> dict:
+    """兼容旧客户端的冻结月份 Tag 纠正入口。"""
+    return amend_frozen_team(
+        conn,
+        context,
+        period,
+        team_id,
+        clan_tag=clan_tag,
+        reason=reason,
+    )
+
+
+def amend_frozen_team(
+    conn: sqlite3.Connection,
+    context: AllianceContext,
+    period: str,
+    team_id: int,
+    *,
+    clan_tag: str,
+    clan_name: str | None = None,
+    team_alias: str | None = None,
+    category: str | None = None,
+    manager_names: str | None = None,
+    reason: str = "管理页面编辑",
+) -> dict:
+    """审计化编辑已经冻结或结束的月度联赛队伍配置。"""
     require_manager(context)
     season = _season_row(conn, context.alliance_id, validate_period(period))
     if season is None or _refresh_status(conn, int(season["id"])) not in {"frozen", "complete"}:
-        raise CwlConfigError("仅冻结后的月份使用纠正 Tag 操作")
-    if not reason.strip():
-        raise CwlConfigError("纠正 Tag 必须填写原因")
+        raise CwlConfigError("仅冻结或结束的月份使用留痕编辑")
     row = conn.execute(
         "SELECT * FROM alliance_cwl_teams WHERE id = ? AND season_id = ?",
         (team_id, season["id"]),
@@ -485,29 +523,59 @@ def correct_frozen_tag(
     normalized = normalize_tag(clan_tag)
     if not normalized:
         raise CwlConfigError("请输入有效的部落标签")
-    old_tag = row["clan_tag"]
+    selected_category = category or row["category"]
+    if selected_category not in VALID_CATEGORIES:
+        raise CwlConfigError("category 仅支持 combat/shell")
+    selected_name = (
+        row["clan_name_snapshot"]
+        if clan_name is None
+        else clan_name.strip() or normalized
+    )
+    selected_alias = (
+        row["team_alias"]
+        if team_alias is None
+        else team_alias.strip() or selected_name or normalized
+    )
+    selected_managers = (
+        row["manager_names"]
+        if manager_names is None
+        else manager_names.strip() or None
+    )
     now = utc_now()
     try:
         with conn:
             conn.execute(
-                "UPDATE alliance_cwl_teams SET clan_tag = ?, source = 'corrected', updated_at = ? WHERE id = ?",
-                (normalized, now, team_id),
-            )
-            conn.execute(
-                """INSERT INTO alliance_audit_events
-                   (alliance_id, actor_user_id, action, entity_type, entity_id, details_json, created_at)
-                   VALUES (?, ?, 'correct_cwl_team_tag', 'alliance_cwl_team', ?, ?, ?)""",
+                """UPDATE alliance_cwl_teams
+                   SET clan_tag = ?, clan_name_snapshot = ?, team_alias = ?,
+                       manager_names = ?, category = ?, source = 'corrected', updated_at = ?
+                   WHERE id = ?""",
                 (
-                    context.alliance_id, context.user_id, str(team_id),
-                    json.dumps(
-                        {"period": period, "old_tag": old_tag, "new_tag": normalized, "reason": reason.strip()},
-                        ensure_ascii=False,
-                    ),
-                    now,
+                    normalized, selected_name, selected_alias, selected_managers,
+                    selected_category, now, team_id,
                 ),
             )
+            _audit(
+                conn,
+                context,
+                "amend_frozen_cwl_team",
+                "alliance_cwl_team",
+                team_id,
+                {
+                    "period": period,
+                    "before": dict(row),
+                    "after": {
+                        "clan_tag": normalized,
+                        "clan_name": selected_name,
+                        "team_alias": selected_alias,
+                        "manager_names": selected_managers,
+                        "category": selected_category,
+                    },
+                    "reason": reason.strip() or "管理页面编辑",
+                },
+                now,
+            )
     except sqlite3.IntegrityError as exc:
-        raise CwlConfigError("纠正后的部落已在本月配置中") from exc
+        raise CwlConfigError("修改后的部落已在本月配置中") from exc
     return dict(conn.execute("SELECT * FROM alliance_cwl_teams WHERE id = ?", (team_id,)).fetchone())
 
 

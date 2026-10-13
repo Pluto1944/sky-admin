@@ -1049,6 +1049,8 @@ def _build_cwl_live_detail(
                 "defense": {"round_count": 0, "rows": []},
             }
 
+    result.setdefault("team", {})["leader_name"] = team.get("leader_name") or ""
+    result["team"]["manager_names"] = team.get("manager_names") or ""
     result["available_teams"] = [
         {
             "team_index": item.get("team_index"),

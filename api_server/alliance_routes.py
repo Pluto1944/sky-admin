@@ -22,6 +22,7 @@ from modules.alliance.access import (
 from modules.alliance.cwl_config import (
     CwlConfigError,
     add_team,
+    amend_frozen_team,
     confirm_season,
     copy_previous,
     correct_frozen_tag,
@@ -69,6 +70,7 @@ class CwlTeamInput(BaseModel):
     clan_tag: str
     clan_name: str | None = None
     team_alias: str | None = None
+    manager_names: str | None = None
     category: str = "shell"
     sort_order: int = 0
 
@@ -76,6 +78,15 @@ class CwlTeamInput(BaseModel):
 class CwlTagCorrectionInput(BaseModel):
     clan_tag: str
     reason: str
+
+
+class CwlFrozenTeamAmendInput(BaseModel):
+    clan_tag: str
+    clan_name: str | None = None
+    team_alias: str | None = None
+    manager_names: str | None = None
+    category: str | None = None
+    reason: str = "管理页面编辑"
 
 
 class FreeAllianceCreateInput(BaseModel):
@@ -1110,6 +1121,7 @@ def _configured_cwl_teams(
     season = season_payload(db.conn, context, period, include_draft=False)
     if season is None or season["status"] == "draft":
         return season, []
+    season = _decorate_cwl_season_teams(db, season)
     legacy_by_tag = {
         normalize_tag(item.get("clan_tag")): item
         for item in legacy_routes._cwl_live_teams(db, period)
@@ -1127,10 +1139,56 @@ def _configured_cwl_teams(
             "category": item["category"],
             "member_count": legacy.get("member_count", 0),
             "league_level": legacy.get("league_level"),
-            "leader_name": legacy.get("leader_name", ""),
-            "manager_names": legacy.get("manager_names", ""),
+            "leader_name": item.get("leader_name") or legacy.get("leader_name", ""),
+            "manager_names": item.get("manager_names") or legacy.get("manager_names", ""),
         })
     return season, teams
+
+
+def _decorate_cwl_season_teams(db: Database, season: dict) -> dict:
+    """补齐配置页需要的 COC 首领与月度联赛管理展示字段。"""
+    teams = season.get("teams") or []
+    if not teams:
+        return season
+    tags = [normalize_tag(item.get("clan_tag")) for item in teams]
+    tags = [tag for tag in tags if tag]
+    legacy_by_tag = {
+        normalize_tag(item.get("clan_tag")): item
+        for item in legacy_routes._cwl_live_teams(db, season["period"])
+        if normalize_tag(item.get("clan_tag"))
+    }
+    leaders: dict[str, str] = {}
+    if tags:
+        placeholders = ",".join("?" for _ in tags)
+        for row in db.conn.execute(
+            f"""SELECT clan_tag, account_name FROM accounts
+                WHERE membership_status='member' AND clan_role='leader'
+                  AND clan_tag IN ({placeholders})""",
+            tags,
+        ).fetchall():
+            tag = normalize_tag(row["clan_tag"])
+            if tag and row["account_name"]:
+                leaders[tag] = str(row["account_name"]).strip()
+        for row in db.conn.execute(
+            f"SELECT clan_tag, data_json FROM clan_profile_cache WHERE clan_tag IN ({placeholders})",
+            tags,
+        ).fetchall():
+            tag = normalize_tag(row["clan_tag"])
+            if not tag or leaders.get(tag):
+                continue
+            members = _safe_raw(row["data_json"]).get("memberList") or []
+            leader = next(
+                (str(item.get("name") or "").strip() for item in members if item.get("role") == "leader"),
+                "",
+            )
+            if leader:
+                leaders[tag] = leader
+    for item in teams:
+        tag = normalize_tag(item.get("clan_tag"))
+        legacy = legacy_by_tag.get(tag, {})
+        item["leader_name"] = leaders.get(tag) or legacy.get("leader_name") or ""
+        item["manager_names"] = item.get("manager_names") or legacy.get("manager_names") or ""
+    return season
 
 
 def _alliance_cwl_available_periods(
@@ -1157,7 +1215,7 @@ def alliance_cwl_seasons_list(
     context: AllianceContext = Depends(alliance_view_context),
     db: Database = Depends(get_db),
 ):
-    seasons = list_seasons(db.conn, context)
+    seasons = [_decorate_cwl_season_teams(db, item) for item in list_seasons(db.conn, context)]
     db.conn.commit()
     return {"alliance_id": alliance_id, "count": len(seasons), "seasons": seasons}
 
@@ -1180,6 +1238,7 @@ def alliance_cwl_season_detail(
         raise _cwl_config_error(exc) from exc
     if season is None:
         raise HTTPException(status_code=404, detail="联赛月份配置不存在")
+    season = _decorate_cwl_season_teams(db, season)
     db.conn.commit()
     return {"alliance_id": alliance_id, **season}
 
@@ -1193,7 +1252,8 @@ def alliance_cwl_season_create(
 ):
     context = _context(user, alliance_id, db)
     try:
-        return {"alliance_id": alliance_id, **create_season(db.conn, context, period)}
+        season = _decorate_cwl_season_teams(db, create_season(db.conn, context, period))
+        return {"alliance_id": alliance_id, **season}
     except CwlConfigError as exc:
         raise _cwl_config_error(exc) from exc
 
@@ -1207,7 +1267,8 @@ def alliance_cwl_season_copy_previous(
 ):
     context = _context(user, alliance_id, db)
     try:
-        return {"alliance_id": alliance_id, **copy_previous(db.conn, context, period)}
+        season = _decorate_cwl_season_teams(db, copy_previous(db.conn, context, period))
+        return {"alliance_id": alliance_id, **season}
     except CwlConfigError as exc:
         raise _cwl_config_error(exc) from exc
 
@@ -1230,6 +1291,7 @@ def alliance_cwl_team_add(
             clan_name=payload.clan_name,
             team_alias=payload.team_alias,
             category=payload.category,
+            manager_names=payload.manager_names,
         )
         return {"alliance_id": alliance_id, "period": period, "team": team}
     except CwlConfigError as exc:
@@ -1257,6 +1319,7 @@ def alliance_cwl_team_update(
             team_alias=payload.team_alias,
             category=payload.category,
             sort_order=payload.sort_order,
+            manager_names=payload.manager_names,
         )
         return {"alliance_id": alliance_id, "period": period, "team": team}
     except CwlConfigError as exc:
@@ -1303,6 +1366,34 @@ def alliance_cwl_team_correct_tag(
         raise _cwl_config_error(exc) from exc
 
 
+@router.put("/alliances/{alliance_id}/cwl/seasons/{period}/teams/{team_id}/amend")
+def alliance_cwl_team_amend(
+    alliance_id: int,
+    period: str,
+    team_id: int,
+    payload: CwlFrozenTeamAmendInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    context = _context(user, alliance_id, db)
+    try:
+        team = amend_frozen_team(
+            db.conn,
+            context,
+            period,
+            team_id,
+            clan_tag=payload.clan_tag,
+            clan_name=payload.clan_name,
+            team_alias=payload.team_alias,
+            manager_names=payload.manager_names,
+            category=payload.category,
+            reason=payload.reason,
+        )
+        return {"alliance_id": alliance_id, "period": period, "team": team}
+    except CwlConfigError as exc:
+        raise _cwl_config_error(exc) from exc
+
+
 @router.post("/alliances/{alliance_id}/cwl/seasons/{period}/confirm")
 def alliance_cwl_season_confirm(
     alliance_id: int,
@@ -1312,7 +1403,8 @@ def alliance_cwl_season_confirm(
 ):
     context = _context(user, alliance_id, db)
     try:
-        return {"alliance_id": alliance_id, **confirm_season(db.conn, context, period)}
+        season = _decorate_cwl_season_teams(db, confirm_season(db.conn, context, period))
+        return {"alliance_id": alliance_id, **season}
     except CwlConfigError as exc:
         raise _cwl_config_error(exc) from exc
 

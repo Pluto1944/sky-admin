@@ -274,9 +274,8 @@ export default {
                   uni.showToast({ title: `已加入${joined.alliance.name}`, icon: 'success' })
                 }
               })
-              .catch((err) => {
-                uni.showToast({ title: err.message || '加入联盟失败', icon: 'none' })
-              })
+              // 这里是登录态恢复，不是用户主动打开分享；失效链接已在工具层清理，无需反复提示。
+              .catch(() => {})
               .finally(() => this.refreshAllianceContext())
           })
           .catch(() => {

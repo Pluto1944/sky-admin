@@ -539,7 +539,35 @@ export default {
 .openid { display: block; max-width: 390rpx; margin-top: 5rpx; overflow: hidden; color: #667087; font-size: 18rpx; text-overflow: ellipsis; white-space: nowrap; }
 .platform-order { width: 48rpx; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; }.order-btn { color: #6da9e8; font-size: 25rpx; line-height: 1.45; }.order-btn.disabled { color: #3d4558; }
 .category { margin-left: 8rpx; padding: 8rpx 10rpx; border-radius: 8rpx; color: #78afe8; background: #202940; font-size: 20rpx; }.edit-name { margin-left: 10rpx; color: #7f9fca; font-size: 20rpx; }.remove { margin-left: 12rpx; color: #b8757d; font-size: 20rpx; }
-.platform-add { padding-top: 20rpx; }.platform-picker { margin-top: 12rpx; padding: 16rpx; border: 1rpx solid #30304d; border-radius: 9rpx; color: #a4adbf; background: #111126; font-size: 22rpx; }
+.platform-add { padding-top: 24rpx; }
+.platform-add .search-input {
+  height: 88rpx;
+  padding: 0 22rpx;
+  box-sizing: border-box;
+  font-size: 25rpx;
+  line-height: 88rpx;
+  background: #111126;
+}
+.platform-add picker { display: block; }
+.platform-picker {
+  height: 88rpx;
+  margin-top: 16rpx;
+  padding: 0 22rpx;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  border: 1rpx solid #30304d;
+  border-radius: 10rpx;
+  color: #a4adbf;
+  background: #111126;
+  font-size: 25rpx;
+}
+.platform-add .primary-btn {
+  height: 88rpx;
+  margin-top: 16rpx;
+  font-size: 25rpx;
+  line-height: 88rpx;
+}
 .mini-btn { margin: 0 0 0 8rpx; padding: 5rpx 12rpx; color: #7eb8f6; background: #202b42; line-height: 2; }.mini-btn.warn { color: #d4a665; }.mini-btn.danger { color: #c9797f; }
 .action-card { margin-top: 16rpx; }.danger-text { color: #c9797f; }
 .delete-btn { margin-top: 16rpx; border: 1rpx solid rgba(201, 121, 127, .45); border-radius: 9rpx; color: #d98c91; background: rgba(120, 45, 54, .18); font-size: 23rpx; line-height: 2.4; }

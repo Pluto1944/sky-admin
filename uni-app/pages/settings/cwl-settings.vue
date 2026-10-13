@@ -69,6 +69,7 @@
                 <view class="team-main">
                   <text class="team-name">{{ team.team_alias || team.clan_name_snapshot || team.clan_tag }}</text>
                   <text class="team-meta">{{ team.clan_tag }}<text v-if="team.clan_name_snapshot && team.clan_name_snapshot !== team.team_alias"> · {{ team.clan_name_snapshot }}</text></text>
+                  <text class="team-staff">首领：{{ team.leader_name || '-' }} · 管理：{{ team.manager_names || '-' }}</text>
                 </view>
                 <text class="category" :class="'category-' + team.category">{{ team.category === 'combat' ? '实战队' : '壳子队' }}</text>
                 <text v-if="canManage && canEdit" class="edit" @tap="startEdit(team)">编辑</text>
@@ -77,13 +78,14 @@
                   v-else-if="canManage && (status === 'frozen' || status === 'complete')"
                   class="edit"
                   @tap="startCorrection(team)"
-                >纠正Tag</text>
+                >编辑</text>
               </view>
 
               <view v-if="editingTeamId === team.id" class="edit-form">
                 <input v-model="editForm.clan_tag" class="input" placeholder="部落标签，例如 #2QQ" maxlength="15" />
                 <input v-model="editForm.clan_name" class="input" placeholder="部落名称（可选）" maxlength="30" />
                 <input v-model="editForm.team_alias" class="input" placeholder="队伍别名（可选）" maxlength="30" />
+                <input v-model="editForm.manager_names" class="input" placeholder="联赛管理（可选，多人用顿号分隔）" maxlength="80" />
                 <picker :range="categoryOptions" range-key="label" :value="editCategoryIndex" @change="changeEditCategory">
                   <view class="picker">队伍类别：{{ categoryOptions[editCategoryIndex].label }}⌄</view>
                 </picker>
@@ -94,11 +96,16 @@
               </view>
 
               <view v-if="correctingTeamId === team.id" class="edit-form">
-                <input v-model="correction.clan_tag" class="input" placeholder="纠正后的部落标签" maxlength="15" />
-                <input v-model="correction.reason" class="input" placeholder="纠正原因（必填）" maxlength="80" />
+                <input v-model="correction.clan_tag" class="input" placeholder="部落标签，例如 #2QQ" maxlength="15" />
+                <input v-model="correction.clan_name" class="input" placeholder="部落名称（可选）" maxlength="30" />
+                <input v-model="correction.team_alias" class="input" placeholder="队伍别名（可选）" maxlength="30" />
+                <input v-model="correction.manager_names" class="input" placeholder="联赛管理（可选，多人用顿号分隔）" maxlength="80" />
+                <picker :range="categoryOptions" range-key="label" :value="correctionCategoryIndex" @change="changeCorrectionCategory">
+                  <view class="picker">队伍类别：{{ categoryOptions[correctionCategoryIndex].label }}⌄</view>
+                </picker>
                 <view class="form-actions">
                   <button class="secondary-btn" @tap="cancelCorrection">取消</button>
-                  <button class="primary-btn" :loading="busy" @tap="submitCorrection(team)">提交纠正</button>
+                  <button class="primary-btn" :loading="busy" @tap="submitCorrection(team)">保存修改</button>
                 </view>
               </view>
             </view>
@@ -115,6 +122,7 @@
                 <input v-model="form.clan_tag" class="input" placeholder="部落标签，例如 #2QQ" maxlength="15" />
                 <input v-model="form.clan_name" class="input" placeholder="部落名称（可选）" maxlength="30" />
                 <input v-model="form.team_alias" class="input" placeholder="队伍别名（可选）" maxlength="30" />
+                <input v-model="form.manager_names" class="input" placeholder="联赛管理（可选，多人用顿号分隔）" maxlength="80" />
                 <picker :range="categoryOptions" range-key="label" :value="categoryIndex" @change="changeCategory">
                   <view class="picker">队伍类别：{{ categoryOptions[categoryIndex].label }}⌄</view>
                 </picker>
@@ -147,7 +155,7 @@ import {
   addAllianceCwlTeam,
   updateAllianceCwlTeam,
   deleteAllianceCwlTeam,
-  correctAllianceCwlTeamTag,
+  amendAllianceCwlTeam,
   confirmAllianceCwlSeason
 } from '@/utils/api.js'
 import { getCurrentAlliance, loadAllianceContext } from '@/utils/alliance.js'
@@ -180,12 +188,13 @@ export default {
       season: null,
       loading: true,
       busy: false,
-      form: { clan_tag: '', clan_name: '', team_alias: '', category: 'combat' },
+      form: { clan_tag: '', clan_name: '', team_alias: '', manager_names: '', category: 'combat' },
       editingTeamId: null,
       editCategoryIndex: 0,
-      editForm: { clan_tag: '', clan_name: '', team_alias: '', category: 'combat' },
+      editForm: { clan_tag: '', clan_name: '', team_alias: '', manager_names: '', category: 'combat' },
       correctingTeamId: null,
-      correction: { clan_tag: '', reason: '' }
+      correctionCategoryIndex: 0,
+      correction: { clan_tag: '', clan_name: '', team_alias: '', manager_names: '', category: 'combat' }
     }
   },
   computed: {
@@ -269,7 +278,7 @@ export default {
       try {
         await this.ensureSeason()
         await addAllianceCwlTeam(this.period, this.form)
-        this.form = { clan_tag: '', clan_name: '', team_alias: '', category: 'combat' }
+        this.form = { clan_tag: '', clan_name: '', team_alias: '', manager_names: '', category: 'combat' }
         this.categoryIndex = 0
         await this.loadSeason()
       } catch (e) { uni.showToast({ title: e.message || '添加失败', icon: 'none' }) }
@@ -280,6 +289,7 @@ export default {
         clan_tag: team.clan_tag,
         clan_name: team.clan_name_snapshot,
         team_alias: team.team_alias,
+        manager_names: team.manager_names,
         category: team.category,
         sort_order: team.sort_order
       }, overrides || {})
@@ -293,13 +303,14 @@ export default {
         clan_tag: team.clan_tag || '',
         clan_name: team.clan_name_snapshot || '',
         team_alias: team.team_alias || '',
+        manager_names: team.manager_names || '',
         category: team.category || 'combat'
       }
     },
     cancelEdit() {
       this.editingTeamId = null
       this.editCategoryIndex = 0
-      this.editForm = { clan_tag: '', clan_name: '', team_alias: '', category: 'combat' }
+      this.editForm = { clan_tag: '', clan_name: '', team_alias: '', manager_names: '', category: 'combat' }
     },
     changeEditCategory(event) {
       this.editCategoryIndex = Number(event.detail.value) || 0
@@ -316,6 +327,7 @@ export default {
           clan_tag: this.editForm.clan_tag.trim(),
           clan_name: this.editForm.clan_name.trim(),
           team_alias: this.editForm.team_alias.trim(),
+          manager_names: this.editForm.manager_names.trim(),
           category: this.editForm.category
         })
         this.cancelEdit()
@@ -355,24 +367,43 @@ export default {
     startCorrection(team) {
       this.cancelEdit()
       this.correctingTeamId = team.id
-      this.correction = { clan_tag: team.clan_tag, reason: '' }
+      this.correctionCategoryIndex = Math.max(0, this.categoryOptions.findIndex(item => item.key === team.category))
+      this.correction = {
+        clan_tag: team.clan_tag || '',
+        clan_name: team.clan_name_snapshot || '',
+        team_alias: team.team_alias || '',
+        manager_names: team.manager_names || '',
+        category: team.category || 'combat'
+      }
     },
     cancelCorrection() {
       this.correctingTeamId = null
-      this.correction = { clan_tag: '', reason: '' }
+      this.correctionCategoryIndex = 0
+      this.correction = { clan_tag: '', clan_name: '', team_alias: '', manager_names: '', category: 'combat' }
+    },
+    changeCorrectionCategory(event) {
+      this.correctionCategoryIndex = Number(event.detail.value) || 0
+      this.correction.category = this.categoryOptions[this.correctionCategoryIndex].key
     },
     async submitCorrection(team) {
-      if (!this.correction.clan_tag.trim() || !this.correction.reason.trim()) {
-        uni.showToast({ title: '请填写新Tag和纠正原因', icon: 'none' })
+      if (!this.correction.clan_tag.trim()) {
+        uni.showToast({ title: '请输入部落标签', icon: 'none' })
         return
       }
       this.busy = true
       try {
-        await correctAllianceCwlTeamTag(this.period, team.id, this.correction)
+        await amendAllianceCwlTeam(this.period, team.id, {
+          clan_tag: this.correction.clan_tag.trim(),
+          clan_name: this.correction.clan_name.trim(),
+          team_alias: this.correction.team_alias.trim(),
+          manager_names: this.correction.manager_names.trim(),
+          category: this.correction.category,
+          reason: '联赛设置页面编辑'
+        })
         this.cancelCorrection()
         await this.loadSeason()
-        uni.showToast({ title: '已纠正并留痕', icon: 'success' })
-      } catch (e) { uni.showToast({ title: e.message || '纠正失败', icon: 'none' }) }
+        uni.showToast({ title: '队伍已更新', icon: 'success' })
+      } catch (e) { uni.showToast({ title: e.message || '保存失败', icon: 'none' }) }
       finally { this.busy = false }
     },
     roleLabel(value) { return ({ leader: '首领', admin: '管理', member: '成员' }[value] || value) },
@@ -409,11 +440,24 @@ export default {
 .status-card { margin-top: 18rpx; padding: 18rpx 24rpx; }.status-row { display: flex; justify-content: space-between; padding: 8rpx 0; }.status-label, .status-tip { color: #8d95aa; }.status-value { font-weight: 600; }.status-active { color: #4aa3ff; }.status-frozen { color: #cba45e; }.status-complete { color: #8d95aa; }.status-tip { display: block; border-top: 1rpx solid #292b49; margin-top: 12rpx; padding-top: 16rpx; font-size: 22rpx; }
 .next-season-btn { width: 100%; margin: 18rpx 0 0; border: 0; border-radius: 10rpx; color: #fff; background: #315f9a; font-size: 24rpx; line-height: 2.45; }.next-season-btn::after { border: 0; }
 .toolbar-card { margin-top: 18rpx; padding: 18rpx; display: flex; align-items: center; }.toolbar-card .secondary-btn { width: 180rpx; flex-shrink: 0; }.toolbar-tip { margin-left: 18rpx; color: #69738a; font-size: 20rpx; line-height: 1.5; }
-.team-list { overflow: hidden; }.team-item { border-bottom: 1rpx solid #25253e; }.team-item:last-child { border-bottom: 0; }.team-row { min-height: 112rpx; padding: 14rpx 18rpx; box-sizing: border-box; display: flex; align-items: center; }
+.team-list { overflow: hidden; }.team-item { border-bottom: 1rpx solid #25253e; }.team-item:last-child { border-bottom: 0; }.team-row { min-height: 132rpx; padding: 14rpx 18rpx; box-sizing: border-box; display: flex; align-items: center; }
 .order-actions { width: 54rpx; min-height: 70rpx; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }.order-btn { color: #6da9e8; font-size: 27rpx; line-height: 1.45; }.order-btn.disabled { color: #3d4558; }
-.team-main { flex: 1; min-width: 0; }.team-name, .team-meta { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.team-name { color: #e7e9f0; font-size: 26rpx; font-weight: 600; }.team-meta { margin-top: 7rpx; color: #69738a; font-size: 20rpx; }
+.team-main { flex: 1; min-width: 0; }.team-name, .team-meta, .team-staff { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.team-name { color: #e7e9f0; font-size: 26rpx; font-weight: 600; }.team-meta { margin-top: 7rpx; color: #69738a; font-size: 20rpx; }.team-staff { margin-top: 7rpx; color: #7e8ba2; font-size: 19rpx; }
 .category { margin-left: 10rpx; padding: 8rpx 10rpx; border-radius: 8rpx; color: #78afe8; background: #202940; font-size: 20rpx; }.category-shell { color: #aa8dc2; background: #30283d; }.edit { margin-left: 14rpx; color: #6da9e8; font-size: 21rpx; }.remove { margin-left: 14rpx; color: #b8757d; font-size: 21rpx; }
-.edit-form { padding: 0 18rpx 22rpx 72rpx; }.input, .picker { padding: 18rpx; box-sizing: border-box; border: 1rpx solid #30304d; border-radius: 10rpx; color: #dce1ed; background: #111126; font-size: 24rpx; }.input + .input, .picker { margin-top: 14rpx; }.picker { color: #a4adbf; }
+.edit-form { padding: 4rpx 18rpx 24rpx 72rpx; }
+.input, .picker {
+  height: 84rpx;
+  padding: 0 18rpx;
+  box-sizing: border-box;
+  border: 1rpx solid #30304d;
+  border-radius: 10rpx;
+  color: #dce1ed;
+  background: #111126;
+  font-size: 24rpx;
+  line-height: 84rpx;
+}
+.input + .input, .picker { margin-top: 14rpx; }
+.picker { display: flex; align-items: center; color: #a4adbf; }
 .form-actions { margin-top: 16rpx; display: flex; gap: 14rpx; }.form-actions .primary-btn, .form-actions .secondary-btn { flex: 1; margin-top: 0; }
 .primary-btn, .secondary-btn, .confirm-btn { border: 0; border-radius: 10rpx; font-size: 24rpx; line-height: 2.45; }.primary-btn, .confirm-btn { color: #fff; background: #315f9a; }.secondary-btn { color: #91b9e2; background: #202b42; }.primary-btn::after, .secondary-btn::after, .confirm-btn::after { border: 0; }.primary-btn[disabled], .secondary-btn[disabled] { color: #6f7890; background: #222b40; }
 .empty-card { margin-top: 18rpx; padding: 70rpx 30rpx; text-align: center; }.empty-title, .empty-tip { display: block; }.empty-title { color: #ced3df; font-size: 27rpx; }.empty-tip { margin-top: 14rpx; color: #6c758a; font-size: 22rpx; line-height: 1.6; }.create-season-btn { margin-top: 24rpx; }

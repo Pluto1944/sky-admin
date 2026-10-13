@@ -31,6 +31,12 @@ function tokenExists() {
   return Boolean(uni.getStorageSync('token'))
 }
 
+function clearPendingAllianceShare(token) {
+  if (!token || uni.getStorageSync(PENDING_SHARE_KEY) === token) {
+    uni.removeStorageSync(PENDING_SHARE_KEY)
+  }
+}
+
 function rememberAlliance(alliance, emitChange) {
   if (!alliance || !alliance.id) return null
   const previousId = getCurrentAllianceId()
@@ -123,24 +129,29 @@ export async function activateSharedAlliance(options) {
   try { shareToken = decodeURIComponent((options && options.share_token) || '') } catch (e) { shareToken = (options && options.share_token) || '' }
   if (shareToken) {
     uni.setStorageSync(PENDING_SHARE_KEY, shareToken)
-    const preview = await previewAllianceShare(shareToken)
-    const publicAlliance = visitorAlliance(preview)
-    rememberAllianceShareToken(preview.alliance_id, shareToken, preview.expires_at, preview.share_type)
-    rememberLocalVisit(publicAlliance)
-    if (!tokenExists()) {
-      rememberAlliance(publicAlliance, true)
-      return { alliances: [], browsedAlliances: localHistory(), current: publicAlliance, features: {} }
+    try {
+      const preview = await previewAllianceShare(shareToken)
+      const publicAlliance = visitorAlliance(preview)
+      rememberAllianceShareToken(preview.alliance_id, shareToken, preview.expires_at, preview.share_type)
+      rememberLocalVisit(publicAlliance)
+      if (!tokenExists()) {
+        rememberAlliance(publicAlliance, true)
+        return { alliances: [], browsedAlliances: localHistory(), current: publicAlliance, features: {} }
+      }
+      const opened = await openAllianceShare(shareToken)
+      if (preview.can_join && await confirmInvitation(preview.name)) {
+        await joinAllianceShare(shareToken)
+      }
+      clearPendingAllianceShare(shareToken)
+      const loaded = await loadAllianceContext(opened.alliance_id, true)
+      if (loaded.current && Number(loaded.current.id) === Number(opened.alliance_id)) {
+        loaded.current = await selectAlliance(opened.alliance_id)
+      }
+      return loaded
+    } catch (error) {
+      clearPendingAllianceShare(shareToken)
+      throw error
     }
-    const opened = await openAllianceShare(shareToken)
-    if (preview.can_join && await confirmInvitation(preview.name)) {
-      await joinAllianceShare(shareToken)
-    }
-    uni.removeStorageSync(PENDING_SHARE_KEY)
-    const loaded = await loadAllianceContext(opened.alliance_id, true)
-    if (loaded.current && Number(loaded.current.id) === Number(opened.alliance_id)) {
-      loaded.current = await selectAlliance(opened.alliance_id)
-    }
-    return loaded
   }
   const value = options && Number(options.alliance_id)
   if (!value || !tokenExists()) return loadAllianceContext(null, true)
@@ -158,6 +169,8 @@ export async function activateSharedAlliance(options) {
 export async function acceptPendingAllianceShare() {
   const token = uni.getStorageSync(PENDING_SHARE_KEY)
   if (!token || !tokenExists()) return null
+  // 待处理分享只消费一次，避免失效链接在每次进入管理页时重复请求和提示。
+  clearPendingAllianceShare(token)
   const preview = await previewAllianceShare(token)
   const opened = await openAllianceShare(token)
   let joined = false
@@ -165,7 +178,6 @@ export async function acceptPendingAllianceShare() {
     await joinAllianceShare(token)
     joined = true
   }
-  uni.removeStorageSync(PENDING_SHARE_KEY)
   const loaded = await loadAllianceContext(opened.alliance_id, true)
   if (loaded.current) loaded.current = await selectAlliance(opened.alliance_id)
   return { ...opened, joined, alliance: loaded.current }

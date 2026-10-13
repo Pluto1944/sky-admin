@@ -9,6 +9,7 @@ from modules.alliance.access import resolve_alliance_context
 from modules.alliance.cwl_config import (
     CwlConfigError,
     add_team,
+    amend_frozen_team,
     confirm_season,
     correct_frozen_tag,
     create_season,
@@ -59,6 +60,10 @@ def test_schema_and_plan_entitlements_are_ready(db):
         ).fetchall()
     }
     assert {"alliance_cwl_seasons", "alliance_cwl_teams"} <= tables
+    team_columns = {
+        row[1] for row in db.conn.execute("PRAGMA table_info(alliance_cwl_teams)").fetchall()
+    }
+    assert "manager_names" in team_columns
     entitlements = {
         row["plan_code"]: json.loads(row["entitlements_json"])
         for row in db.conn.execute(
@@ -148,9 +153,23 @@ def test_group_detection_freezes_and_correction_is_audited(db, monkeypatch):
     )
     assert corrected["clan_tag"] == "#CCC"
     audit = db.conn.execute(
-        "SELECT details_json FROM alliance_audit_events WHERE action='correct_cwl_team_tag'"
+        "SELECT details_json FROM alliance_audit_events WHERE action='amend_frozen_cwl_team'"
     ).fetchone()
-    assert json.loads(audit[0])["old_tag"] == "#AAA"
+    assert json.loads(audit[0])["before"]["clan_tag"] == "#AAA"
+
+    amended = amend_frozen_team(
+        db.conn,
+        context,
+        "2026-10",
+        team["id"],
+        clan_tag="#CCC",
+        team_alias="一队新别名",
+        manager_names="管理甲、管理乙",
+        category="shell",
+    )
+    assert amended["team_alias"] == "一队新别名"
+    assert amended["manager_names"] == "管理甲、管理乙"
+    assert amended["category"] == "shell"
 
 
 def test_sky_legacy_snapshot_migrates_idempotently_and_keeps_shells(db):

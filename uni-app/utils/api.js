@@ -679,6 +679,13 @@ export function correctAllianceCwlTeamTag(period, teamId, payload) {
   return request(scoped, 'POST', payload, true)
 }
 
+/** 已冻结或结束月份的联赛队伍留痕编辑。 */
+export function amendAllianceCwlTeam(period, teamId, payload) {
+  const scoped = scopedPath(`/cwl/seasons/${encodeURIComponent(period)}/teams/${teamId}/amend`)
+  if (!scoped) return Promise.reject(new Error('请先选择联盟'))
+  return request(scoped, 'PUT', payload, true)
+}
+
 export function confirmAllianceCwlSeason(period) {
   const scoped = scopedPath(`/cwl/seasons/${encodeURIComponent(period)}/confirm`)
   if (!scoped) return Promise.reject(new Error('请先选择联盟'))
@@ -715,5 +722,6 @@ export default {
   updateAllianceCwlTeam,
   deleteAllianceCwlTeam,
   correctAllianceCwlTeamTag,
+  amendAllianceCwlTeam,
   confirmAllianceCwlSeason
 }
