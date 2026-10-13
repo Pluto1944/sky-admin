@@ -18,6 +18,7 @@
           :focus="nicknameFocused"
           placeholder="点击选择微信昵称或输入新昵称"
           placeholder-style="color:#59637a"
+          @focus="handleNicknameFocus"
           @input="handleNicknameInput"
           @blur="handleNicknameBlur"
           @nicknamereview="handleNicknameReview"
@@ -28,7 +29,11 @@
         </text>
       </view>
 
+      <view v-if="autoSaving" class="save-status">
+        <text>正在自动保存…</text>
+      </view>
       <button
+        v-else
         class="primary"
         :loading="saving"
         :disabled="saving || !nickname.trim()"
@@ -56,7 +61,24 @@ export default {
       nicknameFocused: false,
       nicknameDirty: false,
       nicknameReviewSupported: false,
+      pendingNickname: '',
+      nicknameReviewPassed: false,
+      nicknameInputStartedEmpty: true,
+      nicknameInputEvents: 0,
+      autoSaving: false,
+      autoBlurTimer: null,
       autoSaveTimer: null
+    }
+  },
+  watch: {
+    nickname(value, previousValue) {
+      const nickname = typeof value === 'string' ? value.trim() : ''
+      const previousNickname = typeof previousValue === 'string' ? previousValue.trim() : ''
+      if (this.editing || this.saving || previousNickname || nickname.length <= 1) return
+
+      this.pendingNickname = nickname
+      this.nicknameDirty = true
+      this.queueAutoSave(250)
     }
   },
   onLoad(options) {
@@ -84,44 +106,115 @@ export default {
     }
   },
   onUnload() {
+    if (this.autoBlurTimer) {
+      clearTimeout(this.autoBlurTimer)
+    }
     if (this.autoSaveTimer) {
       clearTimeout(this.autoSaveTimer)
     }
   },
   methods: {
-    handleNicknameInput(event) {
-      this.nickname = event && event.detail ? event.detail.value : this.nickname
-      this.nicknameDirty = true
+    handleNicknameFocus() {
+      if (this.editing) return
+      this.pendingNickname = ''
+      this.nicknameReviewPassed = false
+      this.nicknameInputStartedEmpty = !this.nickname.trim()
+      this.nicknameInputEvents = 0
     },
-    handleNicknameBlur() {
-      if (!this.editing && !this.nicknameReviewSupported) {
+    handleNicknameInput(event) {
+      const rawNickname = event && event.detail ? event.detail.value : this.nickname
+      this.nicknameInputEvents += 1
+      const isFirstInputFromEmpty = this.nicknameInputStartedEmpty && this.nicknameInputEvents === 1
+      this.nickname = rawNickname
+      this.nicknameDirty = true
+
+      // 微信推荐昵称会从空值一次性填入完整昵称，但仍保持输入框焦点。
+      // 主动收起键盘以触发 blur，后续由 nicknamereview 审核通过后保存。
+      if (
+        !this.editing &&
+        isFirstInputFromEmpty &&
+        rawNickname.trim().length > 1
+      ) {
+        this.nicknameInputStartedEmpty = false
+        this.pendingNickname = rawNickname.trim()
+        // 开发者工具的昵称建议不会稳定触发 blur / nicknamereview。
+        // 保留微信审核事件为主路径，同时为一次性填入的完整昵称提供自动保存兜底。
+        this.queueAutoSave(450)
+        if (this.autoBlurTimer) {
+          clearTimeout(this.autoBlurTimer)
+        }
+        this.autoBlurTimer = setTimeout(() => {
+          this.autoBlurTimer = null
+          this.nicknameFocused = false
+          if (uni.hideKeyboard) {
+            uni.hideKeyboard()
+          }
+        }, 80)
+      }
+    },
+    handleNicknameBlur(event) {
+      if (this.editing) return
+
+      if (this.autoBlurTimer) {
+        clearTimeout(this.autoBlurTimer)
+        this.autoBlurTimer = null
+      }
+
+      const detail = event && event.detail ? event.detail : {}
+      const rawNickname = typeof detail.value === 'string' ? detail.value : this.nickname
+      const nickname = rawNickname.trim()
+      this.nickname = rawNickname
+      this.pendingNickname = nickname
+      this.nicknameDirty = Boolean(nickname)
+
+      if (nickname && (!this.nicknameReviewSupported || this.nicknameReviewPassed)) {
         this.queueAutoSave()
       }
     },
     handleNicknameReview(event) {
-      if (this.editing || !this.nicknameDirty) return
+      if (this.editing) return
       const detail = event && event.detail ? event.detail : {}
       if (detail.pass) {
-        this.queueAutoSave()
+        this.nicknameReviewPassed = true
+        const nickname = (this.pendingNickname || this.nickname).trim()
+        if (nickname) {
+          this.nickname = nickname
+          this.nicknameDirty = true
+          this.queueAutoSave()
+        }
       } else if (!detail.timeout) {
+        if (this.autoSaveTimer) {
+          clearTimeout(this.autoSaveTimer)
+          this.autoSaveTimer = null
+        }
+        this.autoSaving = false
         this.nickname = ''
+        this.pendingNickname = ''
         this.nicknameDirty = false
+        this.nicknameReviewPassed = false
         uni.showToast({ title: '该昵称未通过微信校验', icon: 'none' })
       }
     },
-    queueAutoSave() {
+    queueAutoSave(delay = 120) {
       if (this.saving || !this.nicknameDirty || !this.nickname.trim()) return
+      this.autoSaving = true
       if (this.autoSaveTimer) {
         clearTimeout(this.autoSaveTimer)
       }
       this.autoSaveTimer = setTimeout(() => {
         this.autoSaveTimer = null
         this.save()
-      }, 120)
+      }, delay)
     },
     save() {
+      if (this.saving) return
+      if (this.autoSaveTimer) {
+        clearTimeout(this.autoSaveTimer)
+        this.autoSaveTimer = null
+      }
       const nickname = this.nickname.trim()
       if (!nickname) {
+        this.autoSaving = false
         uni.showToast({ title: '请输入昵称', icon: 'none' })
         return
       }
@@ -134,6 +227,7 @@ export default {
         })
         .catch((err) => {
           this.saving = false
+          this.autoSaving = false
           uni.showModal({
             title: '保存失败',
             content: err.message || '请稍后重试',
@@ -248,6 +342,18 @@ export default {
   border-radius: 14rpx;
   font-size: 27rpx;
   line-height: 84rpx;
+}
+
+.save-status {
+  height: 84rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #77baff;
+  background: #182947;
+  border: 1rpx solid #315887;
+  border-radius: 14rpx;
+  font-size: 26rpx;
 }
 
 .primary {
