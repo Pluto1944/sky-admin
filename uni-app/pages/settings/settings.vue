@@ -70,15 +70,6 @@
               <text class="menu-arrow">›</text>
             </view>
             <view v-if="isPlatformAdmin" class="menu-divider"></view>
-            <view v-if="canManageAlliance" class="menu-item" @tap="openCwlSettings">
-              <view class="menu-icon menu-icon-league">赛</view>
-              <view class="menu-copy">
-                <text class="menu-text">管理联赛部落</text>
-                <text class="menu-desc">配置本月和下月的联赛队伍</text>
-              </view>
-              <text class="menu-arrow">›</text>
-            </view>
-            <view v-if="canManageAlliance" class="menu-divider"></view>
             <view class="menu-item" @tap="pageState = 'bind'">
               <view class="menu-icon menu-icon-account">号</view>
               <view class="menu-copy">
@@ -262,9 +253,6 @@ export default {
     },
     openPlatformManagement() {
       uni.navigateTo({ url: '/pages/settings/platform-management' })
-    },
-    openCwlSettings() {
-      uni.navigateTo({ url: '/pages/settings/cwl-settings' })
     },
     refreshLoginState() {
       const token = uni.getStorageSync('token')

@@ -17,6 +17,26 @@
           </view>
         </view>
 
+        <view class="section-title">业务管理</view>
+        <view class="card management-card">
+          <view class="management-row" @tap="openClanManagement">
+            <view class="management-icon management-icon-clan">部</view>
+            <view class="grow">
+              <text class="name">管理部落</text>
+              <text class="sub">添加、移除、排序、标签与认证</text>
+            </view>
+            <text class="management-arrow">›</text>
+          </view>
+          <view class="management-row" @tap="openCwlSettings">
+            <view class="management-icon management-icon-league">赛</view>
+            <view class="grow">
+              <text class="name">管理联赛部落</text>
+              <text class="sub">配置本月和下月的联赛队伍</text>
+            </view>
+            <text class="management-arrow">›</text>
+          </view>
+        </view>
+
         <view class="section-title">加入申请</view>
         <view class="card">
           <view v-for="request in joinRequests" :key="request.id" class="request-row">
@@ -167,6 +187,12 @@ export default {
     }
   },
   methods: {
+    openClanManagement() {
+      uni.navigateTo({ url: '/pages/settings/clan-management' })
+    },
+    openCwlSettings() {
+      uni.navigateTo({ url: '/pages/settings/cwl-settings' })
+    },
     async loadData() {
       this.loading = true
       try {
@@ -371,6 +397,12 @@ export default {
 .section-title { margin: 30rpx 8rpx 14rpx; color: #7f8aa2; font-size: 23rpx; }
 .card { padding: 24rpx; border: 1rpx solid #292945; border-radius: 14rpx; background: #18182d; }
 .summary-card { margin-top: 4rpx; }
+.management-card { padding-top: 0; padding-bottom: 0; }
+.management-row { min-height: 112rpx; display: flex; align-items: center; border-bottom: 1rpx solid #25253e; }
+.management-row:last-child { border-bottom: 0; }
+.management-icon { width: 54rpx; height: 54rpx; margin-right: 18rpx; display: flex; align-items: center; justify-content: center; flex-shrink: 0; border-radius: 12rpx; color: #71aff1; background: #202b42; font-size: 23rpx; font-weight: 700; }
+.management-icon-league { color: #c9a766; background: #302c35; }
+.management-arrow { margin-left: 16rpx; color: #657087; font-size: 34rpx; }
 .title-row, .clan-row, .member-row, .request-row { display: flex; align-items: center; }
 .title { color: #fff; font-size: 32rpx; font-weight: 700; }
 .role { margin-left: 12rpx; color: #5fa8ff; font-size: 22rpx; }

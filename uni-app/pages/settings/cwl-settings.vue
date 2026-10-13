@@ -1,21 +1,32 @@
 <template>
-  <view class="page-container">
+  <view class="page">
     <TopBar title="联赛设置" :showBack="true" backFallback="/pages/settings/settings" />
 
-    <scroll-view scroll-y class="content-scroll">
-      <view class="period-card">
+    <scroll-view scroll-y class="content">
+      <view class="summary">
         <view>
-          <text class="card-title">月度联赛队伍</text>
-          <text class="card-desc">联赛队伍按月配置，不要求加入日常部落列表或完成认证</text>
+          <text class="summary-title">{{ alliance ? alliance.name : '月度联赛队伍' }}</text>
+          <text class="summary-sub">{{ periodLabel }} · 已配置 {{ teams.length }}/{{ maxTeams }} 支队伍</text>
         </view>
-        <picker :range="periodOptions" range-key="label" :value="periodIndex" @change="changePeriod">
-          <text class="period-picker">{{ periodOptions[periodIndex].label }}⌄</text>
-        </picker>
+        <text class="summary-role">{{ alliance ? (alliance.role_label || roleLabel(alliance.role)) : '' }}</text>
       </view>
 
-      <view v-if="loading" class="state-card">加载联赛配置...</view>
+      <view class="period-tabs">
+        <view
+          v-for="option in periodOptions"
+          :key="option.period"
+          class="period-tab"
+          :class="{ active: period === option.period }"
+          @tap="selectPeriod(option.period)"
+        >
+          <text class="period-tab-main">{{ option.shortLabel }}</text>
+          <text class="period-tab-sub">{{ option.label }}</text>
+        </view>
+      </view>
+
+      <view v-if="loading" class="state">加载联赛配置...</view>
       <template v-else>
-        <view class="status-card">
+        <view v-if="season" class="status-card">
           <view class="status-row">
             <text class="status-label">配置状态</text>
             <text class="status-value" :class="'status-' + status">{{ statusLabel }}</text>
@@ -24,68 +35,103 @@
             <text class="status-label">队伍数量</text>
             <text class="status-value">{{ teams.length }}/{{ maxTeams }}</text>
           </view>
-          <text v-if="!season" class="status-tip">当前联盟本月暂无联赛队伍</text>
-          <text v-else-if="!canEdit" class="status-tip">官方联赛组已发现或月份已结束，配置只读</text>
+          <text v-if="!canEdit" class="status-tip">官方联赛组已发现或月份已结束，当前配置只读</text>
+          <button
+            v-if="canManage && !canEdit && period === currentPeriodValue"
+            class="next-season-btn"
+            :loading="busy"
+            @tap="openNextSeason"
+          >创建或管理{{ nextPeriodLabel }}联赛</button>
         </view>
 
-        <view v-if="canManage && canEdit" class="toolbar-card">
+        <view v-if="!season" class="empty-card season-empty">
+          <text class="empty-title">{{ periodLabel }}联赛尚未创建</text>
+          <text class="empty-tip">联赛部落按月独立配置，不要求加入日常部落列表或完成认证。</text>
+          <button v-if="canManage" class="primary-btn create-season-btn" :loading="busy" @tap="createSelectedSeason">创建{{ periodLabel }}联赛</button>
+        </view>
+
+        <view v-if="season && canManage && canEdit" class="toolbar-card">
           <button class="secondary-btn" @tap="copyPrevious" :disabled="busy || teams.length > 0">复制上月</button>
-          <button class="primary-btn" @tap="showAddForm = !showAddForm" :disabled="busy || teams.length >= maxTeams">添加队伍</button>
+          <text class="toolbar-tip">复制后仍可调整顺序、Tag、别名和队伍类别</text>
         </view>
 
-        <view v-if="showAddForm && canEdit" class="form-card">
-          <text class="section-title">添加联赛队伍</text>
-          <input v-model="form.clan_tag" class="input" placeholder="部落标签，例如 #2QQ" maxlength="15" />
-          <input v-model="form.clan_name" class="input" placeholder="部落名称（可选）" maxlength="30" />
-          <input v-model="form.team_alias" class="input" placeholder="队伍别名（可选）" maxlength="30" />
-          <picker :range="categoryOptions" range-key="label" :value="categoryIndex" @change="changeCategory">
-            <view class="picker-input">队伍类别：{{ categoryOptions[categoryIndex].label }}⌄</view>
-          </picker>
-          <view class="form-actions">
-            <button class="secondary-btn" @tap="showAddForm = false">取消</button>
-            <button class="primary-btn" :loading="busy" @tap="addTeam">保存</button>
-          </view>
-        </view>
-
-        <view class="team-list">
-          <view v-for="(team, index) in teams" :key="team.id" class="team-card">
-            <view class="team-main">
-              <view class="team-title-row">
-                <text class="team-name">{{ team.clan_name_snapshot || team.team_alias || team.clan_tag }}</text>
-                <text class="category-badge" :class="'category-' + team.category">{{ team.category === 'combat' ? '实战队' : '壳子队' }}</text>
+        <template v-if="season">
+          <view class="section-title">联赛队伍（{{ teams.length }}）</view>
+          <view v-if="teams.length" class="card team-list">
+            <view v-for="(team, index) in teams" :key="team.id" class="team-item">
+              <view class="team-row">
+                <view class="order-actions">
+                  <template v-if="canManage && canEdit">
+                    <text class="order-btn" :class="{ disabled: index === 0 }" @tap="moveTeam(index, -1)">↑</text>
+                    <text class="order-btn" :class="{ disabled: index === teams.length - 1 }" @tap="moveTeam(index, 1)">↓</text>
+                  </template>
+                </view>
+                <view class="team-main">
+                  <text class="team-name">{{ team.team_alias || team.clan_name_snapshot || team.clan_tag }}</text>
+                  <text class="team-meta">{{ team.clan_tag }}<text v-if="team.clan_name_snapshot && team.clan_name_snapshot !== team.team_alias"> · {{ team.clan_name_snapshot }}</text></text>
+                </view>
+                <text class="category" :class="'category-' + team.category">{{ team.category === 'combat' ? '实战队' : '壳子队' }}</text>
+                <text v-if="canManage && canEdit" class="edit" @tap="startEdit(team)">编辑</text>
+                <text v-if="canManage && canEdit" class="remove" @tap="removeTeam(team)">删除</text>
+                <text
+                  v-else-if="canManage && (status === 'frozen' || status === 'complete')"
+                  class="edit"
+                  @tap="startCorrection(team)"
+                >纠正Tag</text>
               </view>
-              <text class="team-tag">{{ team.clan_tag }}</text>
-              <text v-if="team.team_alias && team.team_alias !== team.clan_name_snapshot" class="team-alias">别名：{{ team.team_alias }}</text>
-            </view>
-            <view v-if="canManage && canEdit" class="team-actions">
-              <text class="sort-btn" :class="{ disabled: index === 0 }" @tap="moveTeam(index, -1)">↑</text>
-              <text class="sort-btn" :class="{ disabled: index === teams.length - 1 }" @tap="moveTeam(index, 1)">↓</text>
-              <text class="category-toggle" @tap="toggleCategory(team)">切换类别</text>
-              <text class="delete-btn" @tap="removeTeam(team)">删除</text>
-            </view>
-            <text
-              v-else-if="canManage && (status === 'frozen' || status === 'complete')"
-              class="correct-btn"
-              @tap="startCorrection(team)"
-            >纠正Tag</text>
-            <view v-if="correctingTeamId === team.id" class="correction-form">
-              <input v-model="correction.clan_tag" class="input" placeholder="纠正后的部落标签" maxlength="15" />
-              <input v-model="correction.reason" class="input" placeholder="纠正原因（必填）" maxlength="80" />
-              <view class="form-actions correction-actions">
-                <button class="secondary-btn" @tap="cancelCorrection">取消</button>
-                <button class="primary-btn" :loading="busy" @tap="submitCorrection(team)">提交纠正</button>
+
+              <view v-if="editingTeamId === team.id" class="edit-form">
+                <input v-model="editForm.clan_tag" class="input" placeholder="部落标签，例如 #2QQ" maxlength="15" />
+                <input v-model="editForm.clan_name" class="input" placeholder="部落名称（可选）" maxlength="30" />
+                <input v-model="editForm.team_alias" class="input" placeholder="队伍别名（可选）" maxlength="30" />
+                <picker :range="categoryOptions" range-key="label" :value="editCategoryIndex" @change="changeEditCategory">
+                  <view class="picker">队伍类别：{{ categoryOptions[editCategoryIndex].label }}⌄</view>
+                </picker>
+                <view class="form-actions">
+                  <button class="secondary-btn" @tap="cancelEdit">取消</button>
+                  <button class="primary-btn" :loading="busy" @tap="submitEdit(team)">保存修改</button>
+                </view>
+              </view>
+
+              <view v-if="correctingTeamId === team.id" class="edit-form">
+                <input v-model="correction.clan_tag" class="input" placeholder="纠正后的部落标签" maxlength="15" />
+                <input v-model="correction.reason" class="input" placeholder="纠正原因（必填）" maxlength="80" />
+                <view class="form-actions">
+                  <button class="secondary-btn" @tap="cancelCorrection">取消</button>
+                  <button class="primary-btn" :loading="busy" @tap="submitCorrection(team)">提交纠正</button>
+                </view>
               </view>
             </view>
           </view>
-          <view v-if="!teams.length" class="empty-card">当前联盟本月暂无联赛队伍</view>
-        </view>
+          <view v-else class="empty-card">
+            <text class="empty-title">{{ periodLabel }}暂无联赛队伍</text>
+            <text class="empty-tip">可以复制上月配置，也可以在下方逐个添加。</text>
+          </view>
 
-        <button
-          v-if="canManage && canEdit && teams.length"
-          class="confirm-btn"
-          :loading="busy"
-          @tap="confirmSeason"
-        >确认本月联赛队伍</button>
+          <template v-if="canManage && canEdit">
+            <view class="section-title">添加新联赛队伍</view>
+            <view class="card add-card">
+              <template v-if="teams.length < maxTeams">
+                <input v-model="form.clan_tag" class="input" placeholder="部落标签，例如 #2QQ" maxlength="15" />
+                <input v-model="form.clan_name" class="input" placeholder="部落名称（可选）" maxlength="30" />
+                <input v-model="form.team_alias" class="input" placeholder="队伍别名（可选）" maxlength="30" />
+                <picker :range="categoryOptions" range-key="label" :value="categoryIndex" @change="changeCategory">
+                  <view class="picker">队伍类别：{{ categoryOptions[categoryIndex].label }}⌄</view>
+                </picker>
+                <button class="primary-btn add-btn" :loading="busy" :disabled="busy || !form.clan_tag.trim()" @tap="addTeam">添加联赛队伍</button>
+              </template>
+              <text v-else class="limit-tip">已达到当前套餐上限（{{ maxTeams }} 支）。删除现有队伍后可再添加。</text>
+              <text class="notice">联赛部落按月配置，不要求加入日常部落列表或完成认证。</text>
+            </view>
+          </template>
+
+          <button
+            v-if="canManage && canEdit && teams.length"
+            class="confirm-btn"
+            :loading="busy"
+            @tap="confirmSeason"
+          >确认{{ periodLabel }}联赛队伍</button>
+        </template>
         <view class="bottom-space"></view>
       </template>
     </scroll-view>
@@ -125,8 +171,8 @@ export default {
     return {
       period: current,
       periodOptions: [
-        { period: current, label: `${current.slice(0, 4)}年${Number(current.slice(5))}月` },
-        { period: nextPeriod(current), label: `${nextPeriod(current).slice(0, 4)}年${Number(nextPeriod(current).slice(5))}月` }
+        { period: current, shortLabel: '本月', label: `${current.slice(0, 4)}年${Number(current.slice(5))}月` },
+        { period: nextPeriod(current), shortLabel: '下月', label: `${nextPeriod(current).slice(0, 4)}年${Number(nextPeriod(current).slice(5))}月` }
       ],
       categoryOptions: [{ key: 'combat', label: '实战队' }, { key: 'shell', label: '壳子队' }],
       categoryIndex: 0,
@@ -134,14 +180,19 @@ export default {
       season: null,
       loading: true,
       busy: false,
-      showAddForm: false,
       form: { clan_tag: '', clan_name: '', team_alias: '', category: 'combat' },
+      editingTeamId: null,
+      editCategoryIndex: 0,
+      editForm: { clan_tag: '', clan_name: '', team_alias: '', category: 'combat' },
       correctingTeamId: null,
       correction: { clan_tag: '', reason: '' }
     }
   },
   computed: {
     periodIndex() { const index = this.periodOptions.findIndex(item => item.period === this.period); return index < 0 ? 0 : index },
+    periodLabel() { return this.periodOptions[this.periodIndex].label },
+    currentPeriodValue() { return this.periodOptions[0].period },
+    nextPeriodLabel() { return this.periodOptions[1].label },
     canManage() { return this.alliance && ['admin', 'leader'].indexOf(this.alliance.role) >= 0 },
     teams() { return this.season && this.season.teams ? this.season.teams.slice().sort((a, b) => a.sort_order - b.sort_order || a.team_index - b.team_index) : [] },
     maxTeams() { return (this.season && this.season.max_teams) || Number(this.alliance && this.alliance.plan && this.alliance.plan.entitlements && this.alliance.plan.entitlements.max_cwl_teams) || 1 },
@@ -176,11 +227,29 @@ export default {
       if (!this.season) this.season = await createAllianceCwlSeason(this.period)
       return this.season
     },
-    async changePeriod(event) {
-      this.period = this.periodOptions[Number(event.detail.value)].period
-      this.showAddForm = false
+    async selectPeriod(period) {
+      if (period === this.period || this.loading) return
+      this.period = period
+      this.cancelEdit()
       this.cancelCorrection()
       await this.loadSeason()
+    },
+    async createSelectedSeason() {
+      if (!this.canManage || this.busy) return
+      this.busy = true
+      try {
+        this.season = await createAllianceCwlSeason(this.period)
+        uni.showToast({ title: `${this.periodLabel}联赛已创建`, icon: 'success' })
+      } catch (e) { uni.showToast({ title: e.message || '创建失败', icon: 'none' }) }
+      finally { this.busy = false }
+    },
+    async openNextSeason() {
+      if (this.busy) return
+      this.period = this.periodOptions[1].period
+      this.cancelEdit()
+      this.cancelCorrection()
+      await this.loadSeason()
+      if (!this.season) await this.createSelectedSeason()
     },
     changeCategory(event) {
       this.categoryIndex = Number(event.detail.value)
@@ -202,7 +271,6 @@ export default {
         await addAllianceCwlTeam(this.period, this.form)
         this.form = { clan_tag: '', clan_name: '', team_alias: '', category: 'combat' }
         this.categoryIndex = 0
-        this.showAddForm = false
         await this.loadSeason()
       } catch (e) { uni.showToast({ title: e.message || '添加失败', icon: 'none' }) }
       finally { this.busy = false }
@@ -217,12 +285,43 @@ export default {
       }, overrides || {})
       await updateAllianceCwlTeam(this.period, team.id, payload)
     },
-    async toggleCategory(team) {
+    startEdit(team) {
+      this.cancelCorrection()
+      this.editingTeamId = team.id
+      this.editCategoryIndex = Math.max(0, this.categoryOptions.findIndex(item => item.key === team.category))
+      this.editForm = {
+        clan_tag: team.clan_tag || '',
+        clan_name: team.clan_name_snapshot || '',
+        team_alias: team.team_alias || '',
+        category: team.category || 'combat'
+      }
+    },
+    cancelEdit() {
+      this.editingTeamId = null
+      this.editCategoryIndex = 0
+      this.editForm = { clan_tag: '', clan_name: '', team_alias: '', category: 'combat' }
+    },
+    changeEditCategory(event) {
+      this.editCategoryIndex = Number(event.detail.value) || 0
+      this.editForm.category = this.categoryOptions[this.editCategoryIndex].key
+    },
+    async submitEdit(team) {
+      if (!this.editForm.clan_tag.trim()) {
+        uni.showToast({ title: '请输入部落标签', icon: 'none' })
+        return
+      }
       this.busy = true
       try {
-        await this.saveTeam(team, { category: team.category === 'combat' ? 'shell' : 'combat' })
+        await this.saveTeam(team, {
+          clan_tag: this.editForm.clan_tag.trim(),
+          clan_name: this.editForm.clan_name.trim(),
+          team_alias: this.editForm.team_alias.trim(),
+          category: this.editForm.category
+        })
+        this.cancelEdit()
         await this.loadSeason()
-      } catch (e) { uni.showToast({ title: e.message || '修改失败', icon: 'none' }) }
+        uni.showToast({ title: '队伍已更新', icon: 'success' })
+      } catch (e) { uni.showToast({ title: e.message || '保存失败', icon: 'none' }) }
       finally { this.busy = false }
     },
     async moveTeam(index, direction) {
@@ -254,6 +353,7 @@ export default {
       })
     },
     startCorrection(team) {
+      this.cancelEdit()
       this.correctingTeamId = team.id
       this.correction = { clan_tag: team.clan_tag, reason: '' }
     },
@@ -275,10 +375,11 @@ export default {
       } catch (e) { uni.showToast({ title: e.message || '纠正失败', icon: 'none' }) }
       finally { this.busy = false }
     },
+    roleLabel(value) { return ({ leader: '首领', admin: '管理', member: '成员' }[value] || value) },
     confirmSeason() {
       uni.showModal({
         title: '确认联赛队伍',
-        content: '确认后系统开始读取本月官方联赛数据；发现官方分组后配置将冻结。',
+        content: `确认后系统开始读取${this.periodLabel}官方联赛数据；发现官方分组后配置将冻结。`,
         success: async (res) => {
           if (!res.confirm) return
           this.busy = true
@@ -295,30 +396,27 @@ export default {
 </script>
 
 <style>
-.page-container { min-height: 100vh; background: #0f0f23; color: #e7e9f2; }
-.content-scroll { height: calc(100vh - 150rpx); padding: 20rpx 24rpx; box-sizing: border-box; }
-.period-card, .status-card, .toolbar-card, .form-card, .team-card, .empty-card { background: #19192f; border: 1rpx solid #2e3054; border-radius: 16rpx; margin-bottom: 18rpx; }
-.period-card { padding: 24rpx; display: flex; justify-content: space-between; align-items: center; }
-.card-title, .section-title { display: block; font-size: 32rpx; font-weight: 700; }
-.card-desc { display: block; color: #7f879e; font-size: 23rpx; margin-top: 8rpx; max-width: 430rpx; }
-.period-picker { color: #58a6ff; font-size: 27rpx; }
-.state-card { color: #8d95aa; text-align: center; padding: 120rpx 0; }
-.status-card { padding: 18rpx 24rpx; }
-.status-row { display: flex; justify-content: space-between; padding: 8rpx 0; }
-.status-label, .status-tip { color: #8d95aa; }
-.status-value { font-weight: 600; }
-.status-active { color: #4aa3ff; }.status-frozen { color: #fdcb6e; }.status-complete { color: #8d95aa; }
-.status-tip { display: block; border-top: 1rpx solid #292b49; margin-top: 12rpx; padding-top: 16rpx; font-size: 24rpx; }
-.toolbar-card, .form-actions { display: flex; gap: 16rpx; padding: 18rpx; }
-.primary-btn, .secondary-btn, .confirm-btn { border-radius: 12rpx; font-size: 26rpx; line-height: 72rpx; }
-.primary-btn, .confirm-btn { background: #274878; color: #68b2ff; }.secondary-btn { background: #23243f; color: #a6adc4; }
-.form-card { padding: 24rpx; }
-.input, .picker-input { background: #121226; border: 1rpx solid #303254; border-radius: 10rpx; padding: 18rpx; margin-top: 16rpx; font-size: 26rpx; color: #e7e9f2; }
-.team-card { padding: 22rpx; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; }
-.team-main { min-width: 0; flex: 1; }.team-title-row { display: flex; align-items: center; gap: 12rpx; }.team-name { font-size: 29rpx; font-weight: 650; max-width: 340rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.category-badge { font-size: 21rpx; padding: 4rpx 9rpx; border-radius: 6rpx; background: #1d3150; color: #67aef5; }.category-shell { background: #342744; color: #bb8bd8; }
-.team-tag, .team-alias { display: block; color: #747d96; font-size: 23rpx; margin-top: 8rpx; }
-.team-actions { display: flex; align-items: center; gap: 14rpx; margin-left: 12rpx; }.sort-btn, .category-toggle, .delete-btn { color: #6aaeff; font-size: 23rpx; }.delete-btn { color: #d77b7b; }.disabled { color: #3c405c; }
-.correct-btn { color: #6aaeff; font-size: 23rpx; margin-left: 12rpx; }.correction-form { width: 100%; border-top: 1rpx solid #292b49; margin-top: 18rpx; padding-top: 4rpx; }.correction-actions { padding: 16rpx 0 0; }
-.empty-card { color: #70788f; padding: 70rpx 20rpx; text-align: center; }.confirm-btn { margin: 24rpx 0; width: 100%; }.bottom-space { height: 80rpx; }
+.page { height: 100vh; display: flex; flex-direction: column; color: #dce1ed; background: #0f0f23; }
+.content { flex: 1; min-height: 0; padding: 24rpx; box-sizing: border-box; }
+.state { padding: 180rpx 24rpx; color: #717b91; font-size: 26rpx; text-align: center; }
+.summary { display: flex; align-items: center; justify-content: space-between; padding: 24rpx; border: 1rpx solid #292945; border-radius: 14rpx; background: #18182d; }
+.summary-title, .summary-sub { display: block; }.summary-title { color: #f2f3f8; font-size: 31rpx; font-weight: 700; }.summary-sub { margin-top: 8rpx; color: #737d92; font-size: 22rpx; }.summary-role { color: #68a8e9; font-size: 22rpx; }
+.period-tabs { margin-top: 18rpx; padding: 6rpx; display: flex; border: 1rpx solid #292945; border-radius: 13rpx; background: #18182d; }
+.period-tab { width: 50%; padding: 14rpx 8rpx; box-sizing: border-box; border-radius: 9rpx; color: #778197; text-align: center; }
+.period-tab.active { color: #dce8f7; background: #263654; }.period-tab-main, .period-tab-sub { display: block; }.period-tab-main { font-size: 25rpx; font-weight: 600; }.period-tab-sub { margin-top: 4rpx; font-size: 19rpx; }
+.section-title { margin: 30rpx 8rpx 14rpx; color: #7f8aa2; font-size: 23rpx; }
+.card, .status-card, .toolbar-card, .empty-card { border: 1rpx solid #292945; border-radius: 14rpx; background: #18182d; }
+.status-card { margin-top: 18rpx; padding: 18rpx 24rpx; }.status-row { display: flex; justify-content: space-between; padding: 8rpx 0; }.status-label, .status-tip { color: #8d95aa; }.status-value { font-weight: 600; }.status-active { color: #4aa3ff; }.status-frozen { color: #cba45e; }.status-complete { color: #8d95aa; }.status-tip { display: block; border-top: 1rpx solid #292b49; margin-top: 12rpx; padding-top: 16rpx; font-size: 22rpx; }
+.next-season-btn { width: 100%; margin: 18rpx 0 0; border: 0; border-radius: 10rpx; color: #fff; background: #315f9a; font-size: 24rpx; line-height: 2.45; }.next-season-btn::after { border: 0; }
+.toolbar-card { margin-top: 18rpx; padding: 18rpx; display: flex; align-items: center; }.toolbar-card .secondary-btn { width: 180rpx; flex-shrink: 0; }.toolbar-tip { margin-left: 18rpx; color: #69738a; font-size: 20rpx; line-height: 1.5; }
+.team-list { overflow: hidden; }.team-item { border-bottom: 1rpx solid #25253e; }.team-item:last-child { border-bottom: 0; }.team-row { min-height: 112rpx; padding: 14rpx 18rpx; box-sizing: border-box; display: flex; align-items: center; }
+.order-actions { width: 54rpx; min-height: 70rpx; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }.order-btn { color: #6da9e8; font-size: 27rpx; line-height: 1.45; }.order-btn.disabled { color: #3d4558; }
+.team-main { flex: 1; min-width: 0; }.team-name, .team-meta { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.team-name { color: #e7e9f0; font-size: 26rpx; font-weight: 600; }.team-meta { margin-top: 7rpx; color: #69738a; font-size: 20rpx; }
+.category { margin-left: 10rpx; padding: 8rpx 10rpx; border-radius: 8rpx; color: #78afe8; background: #202940; font-size: 20rpx; }.category-shell { color: #aa8dc2; background: #30283d; }.edit { margin-left: 14rpx; color: #6da9e8; font-size: 21rpx; }.remove { margin-left: 14rpx; color: #b8757d; font-size: 21rpx; }
+.edit-form { padding: 0 18rpx 22rpx 72rpx; }.input, .picker { padding: 18rpx; box-sizing: border-box; border: 1rpx solid #30304d; border-radius: 10rpx; color: #dce1ed; background: #111126; font-size: 24rpx; }.input + .input, .picker { margin-top: 14rpx; }.picker { color: #a4adbf; }
+.form-actions { margin-top: 16rpx; display: flex; gap: 14rpx; }.form-actions .primary-btn, .form-actions .secondary-btn { flex: 1; margin-top: 0; }
+.primary-btn, .secondary-btn, .confirm-btn { border: 0; border-radius: 10rpx; font-size: 24rpx; line-height: 2.45; }.primary-btn, .confirm-btn { color: #fff; background: #315f9a; }.secondary-btn { color: #91b9e2; background: #202b42; }.primary-btn::after, .secondary-btn::after, .confirm-btn::after { border: 0; }.primary-btn[disabled], .secondary-btn[disabled] { color: #6f7890; background: #222b40; }
+.empty-card { margin-top: 18rpx; padding: 70rpx 30rpx; text-align: center; }.empty-title, .empty-tip { display: block; }.empty-title { color: #ced3df; font-size: 27rpx; }.empty-tip { margin-top: 14rpx; color: #6c758a; font-size: 22rpx; line-height: 1.6; }.create-season-btn { margin-top: 24rpx; }
+.add-card { padding: 24rpx; }.add-card .input:first-child { margin-top: 0; }.add-btn { margin-top: 18rpx; width: 100%; }.limit-tip, .notice { display: block; color: #8790a2; font-size: 22rpx; line-height: 1.6; }.notice { margin-top: 18rpx; color: #646e84; }
+.confirm-btn { width: 100%; margin: 24rpx 0 0; }.bottom-space { height: 80rpx; }
 </style>
