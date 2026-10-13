@@ -448,9 +448,13 @@ POST /api/alliances/{alliance_id}/cwl/seasons/{period}/teams
 PUT /api/alliances/{alliance_id}/cwl/seasons/{period}/teams/{team_id}
 DELETE /api/alliances/{alliance_id}/cwl/seasons/{period}/teams/{team_id}
 POST /api/alliances/{alliance_id}/cwl/seasons/{period}/teams/{team_id}/correct-tag
+PUT /api/alliances/{alliance_id}/cwl/seasons/{period}/teams/{team_id}/amend
 POST /api/alliances/{alliance_id}/cwl/seasons/{period}/confirm
 GET /api/alliances/{alliance_id}/cwl/live
 GET /api/alliances/{alliance_id}/cwl/live/{clan_tag}
+GET /api/alliances/{alliance_id}/cwl/check-in
+GET /api/alliances/{alliance_id}/cwl/assembly
+GET /api/alliances/{alliance_id}/cwl/assembly/{clan_tag}
 POST /api/me/alliances
 PATCH /api/me/alliances/{alliance_id}/visibility
 PATCH /api/alliances/{alliance_id}
@@ -555,12 +559,31 @@ DELETE /api/me/alliance-history/{alliance_id}
 
 GET /api/platform/capability
 GET /api/platform/alliances
+POST /api/platform/alliances
 GET /api/platform/alliances/{alliance_id}
+PATCH /api/platform/alliances/{alliance_id}
+POST /api/platform/alliances/{alliance_id}/members
+PATCH /api/platform/alliances/{alliance_id}/members/{member_id}
+DELETE /api/platform/alliances/{alliance_id}/members/{member_id}
+GET /api/platform/alliances/{alliance_id}/managed-clans
+POST /api/platform/alliances/{alliance_id}/managed-clans
+PUT /api/platform/alliances/{alliance_id}/managed-clans/order
+PATCH /api/platform/alliances/{alliance_id}/managed-clans/{clan_tag}
+DELETE /api/platform/alliances/{alliance_id}/managed-clans/{clan_tag}
 PUT /api/platform/settings/free-registration
 PUT /api/platform/alliances/{alliance_id}/verification
 PUT /api/platform/alliances/{alliance_id}/plan
 PUT /api/platform/alliances/{alliance_id}/status
 DELETE /api/platform/alliances/{alliance_id}?confirmation_name=...
+
+GET /api/platform/alliances/{alliance_id}/cwl/seasons/{period}
+POST /api/platform/alliances/{alliance_id}/cwl/seasons/{period}
+POST /api/platform/alliances/{alliance_id}/cwl/seasons/{period}/copy-previous
+POST /api/platform/alliances/{alliance_id}/cwl/seasons/{period}/teams
+PUT /api/platform/alliances/{alliance_id}/cwl/seasons/{period}/teams/{team_id}
+DELETE /api/platform/alliances/{alliance_id}/cwl/seasons/{period}/teams/{team_id}
+PUT /api/platform/alliances/{alliance_id}/cwl/seasons/{period}/teams/{team_id}/amend
+POST /api/platform/alliances/{alliance_id}/cwl/seasons/{period}/confirm
 ```
 
 分享预览无需 JWT，只返回联盟名称、套餐名称、部落数量、分享类型和过期时间，不创建成员、不提交
@@ -598,6 +621,8 @@ DELETE /api/platform/alliances/{alliance_id}?confirmation_name=...
 不要求操作者先成为目标联盟成员，并可添加、软移除、修改别名、标签和调整顺序。平台添加不受目标联盟套餐
 部落数量限制，数据库通过 `alliances.clan_limit_override` 记录逐联盟扩容；普通联盟管理接口仍严格执行
 免费 1 个、付费 10 个的套餐上限。所有平台部落变更同时写入联盟审计和平台审计。
+平台月度联赛配置使用独立 `/api/platform/alliances/{alliance_id}/cwl/...` 路由，同样只接受超级管理员，
+不要求操作者成为目标联盟成员，且不受目标联盟的月度联赛队伍数量限制。普通联盟管理路由仍校验角色和套餐权益。
 
 超级管理的联盟删除采用“先停用、再删除”两阶段规则。状态接口只允许在 `active / suspended`
 之间切换；删除接口只接受已经停用且 `confirmation_name` 与联盟完整名称一致的目标。删除是软归档：

@@ -73,7 +73,9 @@ uni-app/
 │   │   ├── alliance-management.vue # 认证状态、分享和联盟成员管理
 │   │   ├── alliance-list-management.vue # 我的联盟、浏览历史、退出与删除
 │   │   ├── clan-management.vue # 当前联盟部落增删、标签与顺序管理
-│   │   └── platform-management.vue # 超级管理：人工认证、套餐、配额和审计
+│   │   ├── platform-management.vue # 超级管理首页：概览、创建、搜索和联盟列表
+│   │   ├── platform-alliance-detail.vue # 超级管理的单联盟详情与运营操作
+│   │   └── platform-settings.vue # 免费开放、同步队列、多联盟认证提示与平台审计
 │   ├── login/
 │   │   └── login.vue          # 微信登录页（已有，整合到管理流程）
 │   └── bind/
@@ -166,7 +168,10 @@ uni-app/
 | `pages/settings/cwl-settings` | 当前联盟联赛设置 | 子页 | ❌ | 自定义顶栏 `< 返回` |
 | `pages/settings/alliance-management` | 当前联盟管理 | 子页 | ❌ | 自定义顶栏 `< 返回` |
 | `pages/settings/alliance-list-management` | 个人联盟列表管理 | 子页 | ❌ | 自定义顶栏 `< 返回` |
-| `pages/settings/platform-management` | 平台运营管理 | 子页 | ❌ | 自定义顶栏 `< 返回` |
+| `pages/settings/clan-management` | 当前联盟部落管理 | 子页 | ❌ | 自定义顶栏 `< 返回` |
+| `pages/settings/platform-management` | 平台运营首页 | 子页 | ❌ | 自定义顶栏 `< 返回` |
+| `pages/settings/platform-alliance-detail` | 平台联盟详情 | 子页 | ❌ | 自定义顶栏 `< 返回` |
+| `pages/settings/platform-settings` | 平台设置与审计 | 子页 | ❌ | 自定义顶栏 `< 返回` |
 | `pages/war/detail` | 战绩详情 | 子页 | ❌ | 原生导航栏 `< 返回` |
 | `pages/war/current-detail` | 当前普通部落战详情 | 子页 | ❌ | 自定义顶栏 `< 返回` |
 | `pages/war/cwl-detail` | CWL 单部落详情 | 子页 | ❌ | 自定义顶栏 `< 返回` |
@@ -529,16 +534,25 @@ TabBar「管理」页
 | `requestAllianceJoin(id)` | `POST /api/alliances/{id}/join-requests` | ✅ |
 | `getAllianceJoinRequests(id)` | `GET /api/alliances/{id}/join-requests` | ✅ 管理 |
 | `getAllianceVerification(id)` | `GET /api/alliances/{id}/verification` | ✅ |
+| `getAllianceManagedClans(id)` | `GET /api/alliances/{id}/managed-clans` | ✅ 管理 |
+| `add/update/reorder/removeAllianceManagedClan(...)` | `/api/alliances/{id}/managed-clans...` | ✅ 管理 |
 | `createAllianceShare(id)` | `POST /api/alliances/{id}/shares` | ✅ |
 | `getAllianceUserMembers(id)` | `GET /api/alliances/{id}/user-members` | ✅ 管理 |
 | `addAllianceUserMember(id, openid, role)` | `POST /api/alliances/{id}/user-members` | ✅ 管理 |
 | `getPlatformAlliances()` | `GET /api/platform/alliances` | ✅ 超级管理 |
 | `createPlatformAlliance(name)` | `POST /api/platform/alliances` | ✅ 超级管理 |
+| `get/renamePlatformAlliance(...)` | `GET/PATCH /api/platform/alliances/{id}` | ✅ 超级管理 |
+| `add/update/removePlatformAllianceMember(...)` | `/api/platform/alliances/{id}/members...` | ✅ 超级管理 |
 | `getPlatformManagedClans(id)` | `GET /api/platform/alliances/{id}/managed-clans` | ✅ 超级管理 |
+| `add/update/reorder/removePlatformManagedClan(...)` | `/api/platform/alliances/{id}/managed-clans...` | ✅ 超级管理 |
+| `savePlatformFreeRegistration(...)` | `PUT /api/platform/settings/free-registration` | ✅ 超级管理 |
+| `savePlatformVerification/Plan/AllianceStatus(...)` | `/api/platform/alliances/{id}/...` | ✅ 超级管理 |
+| `get/create/update/...AllianceCwlSeason(...)` | `/api[/platform]/alliances/{id}/cwl/seasons...` | ✅ 联盟管理或超级管理 |
 | `bindAccount(name, tag)` | `POST /api/wechat/bind` | ✅ |
 | `getMembers()` | `GET /api/alliances/{id}/members` | 成员、浏览历史或分享令牌 |
 | `getClanOverview()` | `GET /api/alliances/{id}/clans` | 成员、浏览历史或分享令牌 |
 | `getClanOverviewDetail(tag)` | `GET /api/alliances/{id}/clans/{clan_tag}` | 成员、浏览历史或分享令牌 |
+| `getCwlCheckIn()/getCwlAssembly()` | `GET /api/alliances/{id}/cwl/check-in` 或 `/cwl/assembly` | 成员、浏览历史或分享令牌 |
 
 成员、部落概览/详情和当前战争始终使用 `/api/alliances/{alliance_id}/...`。未选择、未加入且没有
 通过有效分享打开任何联盟时，前端显示空状态，不再回退到苍穹公开旧接口。未登录分享访问通过

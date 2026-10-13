@@ -81,7 +81,8 @@ CWL 配置作为范围与权限依据。公共 COC 事实仍按全局 Tag 保存
   普通分享只建立浏览历史，邀请经接收者确认后固定加入为 `member`。被移除用户需重新申请，`blocked`
   用户不能依赖链接或申请恢复权限；
 - `alliance_plan_grants` 与 `alliances.plan_code` 分工：前者记录人工权益生命周期，后者选择套餐模板。
-  付费到期后权益状态变为 `expired`，额外部落转为 `inactive`，但联盟关系、审计和公共事实不删除；
+  付费到期后先进入 7 天 `grace`；宽限期结束后 Planner 幂等标记原权益为 `expired`、联盟降为免费套餐，
+  额外部落转为 `inactive`，但联盟关系、审计和公共事实不删除；
 - `platform_admins`、环境白名单和平台设置都不赋予联盟角色。平台 API 仍单独检查平台管理员身份，
   联盟业务 API 继续检查 `alliance_members` 和逐部落认证。
 
