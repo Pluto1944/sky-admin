@@ -23,11 +23,13 @@
                 <text class="clan-name">{{ clan.clan_name || clan.clan_tag }}</text>
                 <text class="clan-meta">{{ clan.clan_tag }}</text>
               </view>
-              <picker :range="categories" range-key="label" :value="categoryIndex(clan.category)" @change="changeCategory(clan, $event)">
-                <text class="category">{{ categoryLabel(clan.category) }}⌄</text>
-              </picker>
-              <text class="edit-name" @tap="editClanName(clan)">别名</text>
-              <text v-if="management.can_remove" class="remove" @tap="confirmRemove(clan)">移除</text>
+              <view class="clan-actions">
+                <picker :range="categories" range-key="label" :value="categoryIndex(clan.category)" @change="changeCategory(clan, $event)">
+                  <view class="clan-action category">{{ categoryLabel(clan.category) }}⌄</view>
+                </picker>
+                <view class="clan-action edit-name" @tap="editClanName(clan)">别名</view>
+                <view v-if="management.can_remove" class="clan-action remove" @tap="confirmRemove(clan)">移除</view>
+              </view>
             </view>
 
             <view class="clan-detail">
@@ -297,7 +299,9 @@ export default {
 .clan-row { min-height: 112rpx; padding: 14rpx 18rpx; box-sizing: border-box; display: flex; align-items: center; }
 .order-actions { width: 54rpx; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; }.order-btn { color: #6da9e8; font-size: 27rpx; line-height: 1.45; }.order-btn.disabled { color: #3d4558; }
 .clan-main { flex: 1; min-width: 0; }.clan-name, .clan-meta { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.clan-name { color: #e7e9f0; font-size: 26rpx; font-weight: 600; }.clan-meta { margin-top: 7rpx; color: #69738a; font-size: 20rpx; }
-.category { margin-left: 10rpx; padding: 9rpx 11rpx; border-radius: 8rpx; color: #78afe8; background: #202940; font-size: 21rpx; }.edit-name { margin-left: 12rpx; color: #7f9fca; font-size: 20rpx; }.remove { margin-left: 14rpx; color: #b8757d; font-size: 21rpx; }
+.clan-actions { flex-shrink: 0; display: flex; align-items: center; gap: 14rpx; margin-left: 14rpx; }
+.clan-action { min-width: 72rpx; height: 68rpx; padding: 0 14rpx; box-sizing: border-box; display: flex; align-items: center; justify-content: center; border: 1rpx solid transparent; border-radius: 10rpx; font-size: 20rpx; line-height: 1; }
+.category { min-width: 84rpx; color: #78afe8; background: #202940; border-color: #293651; }.edit-name { color: #8aaad2; background: #1d2639; border-color: #2b3850; }.remove { margin-left: 8rpx; color: #c77f86; background: rgba(120, 45, 54, .16); border-color: rgba(184, 95, 105, .28); }
 .clan-detail { padding: 0 18rpx 20rpx 72rpx; }
 .detail-row, .sync-row { display: flex; align-items: center; justify-content: space-between; }
 .detail-copy { display: flex; align-items: center; }.detail-label { color: #778197; font-size: 20rpx; }.detail-value { margin-left: 14rpx; color: #8d97aa; font-size: 20rpx; }

@@ -43,6 +43,27 @@
       }
     },
     {
+      "path": "pages/settings/alliance-join-requests",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "加入申请"
+      }
+    },
+    {
+      "path": "pages/settings/alliance-invite-history",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "邀请记录"
+      }
+    },
+    {
+      "path": "pages/settings/alliance-members",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "管理成员"
+      }
+    },
+    {
       "path": "pages/settings/alliance-list-management",
       "style": {
         "navigationStyle": "custom",
@@ -61,6 +82,27 @@
       "style": {
         "navigationStyle": "custom",
         "navigationBarTitleText": "超级管理"
+      }
+    },
+    {
+      "path": "pages/settings/platform-alliance-list",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "管理所有联盟"
+      }
+    },
+    {
+      "path": "pages/settings/platform-multi-verification",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "联盟多认证管理"
+      }
+    },
+    {
+      "path": "pages/settings/platform-audit-log",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "审计日志"
       }
     },
     {

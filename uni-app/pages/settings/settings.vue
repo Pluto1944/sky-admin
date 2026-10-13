@@ -8,6 +8,19 @@
       <!-- 已登录 + 不在绑定流程 -->
       <view v-if="isLoggedIn && pageState === 'main'" class="management-home">
         <view class="section-heading">
+          <text class="section-heading-title">互刷系统</text>
+          <text class="farm-system-account">独立账号</text>
+        </view>
+
+        <view class="farm-system-entry">
+          <text class="farm-system-title">互刷联盟系统</text>
+          <text class="farm-system-desc">查看开始搜战时间、匹配结果与积分</text>
+          <button class="farm-system-btn" @tap="openFarmSystem">
+            <text>进入系统</text><text class="farm-system-arrow">→</text>
+          </button>
+        </view>
+
+        <view class="section-heading">
           <text class="section-heading-title">微信账号</text>
           <text class="section-heading-status"><text class="status-dot"></text>已登录</text>
         </view>
@@ -36,19 +49,6 @@
             </view>
             <button class="openid-copy" size="mini" @tap="copyOpenId">复制OpenID</button>
           </view>
-        </view>
-
-        <view class="section-heading">
-          <text class="section-heading-title">互刷系统</text>
-          <text class="farm-system-account">独立账号</text>
-        </view>
-
-        <view class="farm-system-entry">
-          <text class="farm-system-title">互刷联盟系统</text>
-          <text class="farm-system-desc">查看开始搜战时间、匹配结果与积分</text>
-          <button class="farm-system-btn" @tap="openFarmSystem">
-            <text>进入系统</text><text class="farm-system-arrow">→</text>
-          </button>
         </view>
 
         <!-- 其他管理 -->

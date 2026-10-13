@@ -38,16 +38,14 @@
         </view>
 
         <view class="section-title">加入申请</view>
-        <view class="card">
-          <view v-for="request in joinRequests" :key="request.id" class="request-row">
+        <view class="card list-entry-card">
+          <view class="list-entry-copy">
             <view class="grow">
-              <text class="name">{{ request.display_name }}</text>
-              <text class="sub">申请于 {{ shortDate(request.created_at) }}</text>
+              <text class="name">待处理 {{ joinRequests.length }} 条</text>
+              <text class="sub">集中查看并处理全部加入申请记录</text>
             </view>
-            <text class="review reject" @tap="reviewRequest(request, 'reject')">拒绝</text>
-            <text class="review approve" @tap="reviewRequest(request, 'approve')">同意</text>
+            <button class="list-entry-btn" @tap="openJoinRequests">查看申请</button>
           </view>
-          <view v-if="!joinRequests.length" class="empty compact">暂无待处理申请</view>
         </view>
 
         <view class="section-title">邀请加入</view>
@@ -59,53 +57,25 @@
             <button class="text-btn" @tap="copySharePath">复制邀请参数</button>
             <text class="tip">有效期至 {{ shortDate(shareExpiresAt) }}</text>
           </template>
-          <view v-if="shareLinks.length" class="share-history">
-            <view v-for="link in shareLinks" :key="link.id" class="share-row">
-              <view class="grow">
-                <text class="sub">邀请 #{{ link.id }} · {{ shareStatusLabel(link.status) }} · 已加入 {{ link.use_count }} 人</text>
-                <text class="sub">有效期至 {{ shortDate(link.expires_at) }}</text>
-              </view>
-              <text v-if="link.can_revoke && link.status === 'active'" class="remove" @tap="confirmRevokeShare(link)">撤销</text>
+          <view class="list-entry-copy share-record-entry">
+            <view class="grow">
+              <text class="name">邀请记录</text>
+              <text class="sub">共 {{ shareLinks.length }} 条，查看状态、使用人数和有效期</text>
             </view>
-            <text class="tip">后台只保存令牌摘要，历史令牌不能再次显示。</text>
+            <button class="list-entry-btn" @tap="openShareHistory">查看记录</button>
           </view>
         </view>
 
         <template v-if="canManageMembers">
           <view class="section-title">联盟成员</view>
-          <view class="card member-card">
-            <view class="openid-add">
-              <text class="body">通过用户复制给你的 OpenID 添加成员。首领可直接添加管理员，管理员只能添加普通成员。</text>
-              <input v-model="memberOpenid" class="input" maxlength="200" placeholder="粘贴用户 OpenID" placeholder-style="color:#59637a" />
-              <view class="openid-actions">
-                <picker :range="availableAddRoles" range-key="label" :value="addRoleIndex" @change="changeAddRole">
-                  <view class="picker add-role-picker">添加为：{{ availableAddRoles[addRoleIndex].label }}⌄</view>
-                </picker>
-                <button class="mini-save add-member-btn" :loading="memberAddBusy" :disabled="memberAddBusy || !memberOpenid.trim()" @tap="addMemberByOpenid">添加</button>
-              </view>
-            </view>
-            <view v-for="member in members" :key="member.id" class="member-row">
+          <view class="card list-entry-card">
+            <view class="list-entry-copy">
               <view class="grow">
-                <text class="name">{{ member.display_name }}</text>
-                <text class="sub">{{ member.player_tag || '未绑定游戏账号' }} · {{ statusLabel(member.status) }}</text>
+                <text class="name">有效成员 {{ activeMemberCount }} 人</text>
+                <text class="sub">通过 OpenID 添加、搜索成员并设置联盟权限</text>
               </view>
-              <picker
-                v-if="alliance.role === 'leader' && member.role !== 'leader' && member.status === 'active'"
-                :range="roleOptions"
-                range-key="label"
-                :value="roleIndex(member.role)"
-                @change="changeRole(member, $event)"
-              >
-                <text class="role-chip">{{ roleLabel(member.role) }}⌄</text>
-              </picker>
-              <text v-else class="role-chip passive">{{ roleLabel(member.role) }}</text>
-              <text
-                v-if="member.role !== 'leader' && member.status === 'active' && (alliance.role === 'leader' || member.role === 'member')"
-                class="remove"
-                @tap="confirmRemove(member)"
-              >移除</text>
+              <button class="list-entry-btn" @tap="openMemberManagement">管理成员</button>
             </view>
-            <view v-if="!members.length" class="empty compact">暂无成员</view>
           </view>
         </template>
 
@@ -127,18 +97,13 @@
 <script>
 import TopBar from '@/components/TopBar.vue'
 import {
-  addAllianceUserMember,
   archiveAlliance,
   createAllianceShare,
   getAllianceJoinRequests,
   getAllianceShares,
   getAllianceUserMembers,
   leaveAlliance,
-  removeAllianceUser,
-  renameAlliance,
-  reviewAllianceJoinRequest,
-  revokeAllianceShare,
-  updateAllianceUserRole
+  renameAlliance
 } from '@/utils/api.js'
 import { getCurrentAlliance, loadAllianceContext, rememberAllianceShareToken } from '@/utils/alliance.js'
 
@@ -154,25 +119,15 @@ export default {
       shareLinks: [],
       shareToken: '',
       shareExpiresAt: '',
-      shareBusy: false,
-      memberOpenid: '',
-      memberAddBusy: false,
-      addRoleIndex: 0,
-      roleOptions: [
-        { key: 'member', label: '成员' },
-        { key: 'admin', label: '管理' },
-        { key: 'leader', label: '首领' }
-      ]
+      shareBusy: false
     }
   },
   computed: {
     canManageMembers() {
       return this.alliance && ['admin', 'leader'].indexOf(this.alliance.role) >= 0
     },
-    availableAddRoles() {
-      const roles = [{ key: 'member', label: '成员' }]
-      if (this.alliance && this.alliance.role === 'leader') roles.push({ key: 'admin', label: '管理员' })
-      return roles
+    activeMemberCount() {
+      return this.members.filter(item => item.status === 'active').length
     }
   },
   async onLoad() { await this.loadData() },
@@ -192,6 +147,15 @@ export default {
     },
     openCwlSettings() {
       uni.navigateTo({ url: '/pages/settings/cwl-settings' })
+    },
+    openJoinRequests() {
+      uni.navigateTo({ url: '/pages/settings/alliance-join-requests' })
+    },
+    openShareHistory() {
+      uni.navigateTo({ url: '/pages/settings/alliance-invite-history' })
+    },
+    openMemberManagement() {
+      uni.navigateTo({ url: '/pages/settings/alliance-members' })
     },
     async loadData() {
       this.loading = true
@@ -248,97 +212,11 @@ export default {
         this.shareBusy = false
       }
     },
-    async reviewRequest(request, action) {
-      if (!request || !this.alliance) return
-      try {
-        await reviewAllianceJoinRequest(this.alliance.id, request.id, action)
-        await this.loadData()
-        uni.showToast({ title: action === 'approve' ? '已同意' : '已拒绝', icon: 'success' })
-      } catch (err) {
-        uni.showToast({ title: err.message || '处理失败', icon: 'none' })
-      }
-    },
-    changeAddRole(event) {
-      this.addRoleIndex = Number(event.detail.value) || 0
-    },
-    async addMemberByOpenid() {
-      const targetOpenid = this.memberOpenid.trim()
-      const selected = this.availableAddRoles[this.addRoleIndex] || this.availableAddRoles[0]
-      if (!targetOpenid || !this.alliance || this.memberAddBusy) return
-      this.memberAddBusy = true
-      try {
-        await addAllianceUserMember(this.alliance.id, targetOpenid, selected.key)
-        this.memberOpenid = ''
-        this.addRoleIndex = 0
-        await this.loadData()
-        uni.showToast({ title: '成员已添加', icon: 'success' })
-      } catch (err) {
-        uni.showToast({ title: err.message || '添加失败', icon: 'none' })
-      } finally {
-        this.memberAddBusy = false
-      }
-    },
     copySharePath() {
       if (!this.shareToken) return
       uni.setClipboardData({
         data: `share_token=${this.shareToken}`,
         success: () => uni.showToast({ title: '邀请参数已复制', icon: 'success' })
-      })
-    },
-    confirmRevokeShare(link) {
-      uni.showModal({
-        title: '撤销联盟邀请',
-        content: '撤销后，尚未使用该链接的人将不能再加入联盟。',
-        confirmColor: '#d56b72',
-        success: async res => {
-          if (!res.confirm) return
-          try {
-            await revokeAllianceShare(this.alliance.id, link.id)
-            const result = await getAllianceShares(this.alliance.id)
-            this.shareLinks = result.links || []
-            uni.showToast({ title: '邀请已撤销', icon: 'success' })
-          } catch (err) {
-            uni.showToast({ title: err.message || '撤销失败', icon: 'none' })
-          }
-        }
-      })
-    },
-    async changeRole(member, event) {
-      const selected = this.roleOptions[Number(event.detail.value) || 0]
-      if (!selected || selected.key === member.role) return
-      if (selected.key === 'leader') {
-        const confirmed = await new Promise(resolve => {
-          uni.showModal({
-            title: '移交联盟首领',
-            content: `确认将首领移交给${member.display_name}？你将变为管理员。`,
-            success: res => resolve(Boolean(res.confirm))
-          })
-        })
-        if (!confirmed) return
-      }
-      try {
-        await updateAllianceUserRole(this.alliance.id, member.id, selected.key)
-        await loadAllianceContext(this.alliance.id, true)
-        await this.loadData()
-        uni.showToast({ title: '角色已更新', icon: 'success' })
-      } catch (err) {
-        uni.showToast({ title: err.message || '更新失败', icon: 'none' })
-      }
-    },
-    confirmRemove(member) {
-      uni.showModal({
-        title: '移除联盟成员',
-        content: `确认移除${member.display_name}？被移除后不能通过旧分享自动恢复。`,
-        confirmColor: '#d56b72',
-        success: async res => {
-          if (!res.confirm) return
-          try {
-            await removeAllianceUser(this.alliance.id, member.id, false)
-            await this.loadData()
-          } catch (err) {
-            uni.showToast({ title: err.message || '移除失败', icon: 'none' })
-          }
-        }
       })
     },
     confirmLeave() {
@@ -381,10 +259,7 @@ export default {
         }
       })
     },
-    roleIndex(value) { const index = this.roleOptions.findIndex(item => item.key === value); return index < 0 ? 0 : index },
     roleLabel(value) { return ({ leader: '首领', admin: '管理', member: '成员' }[value] || value) },
-    statusLabel(value) { return ({ active: '有效', removed: '已移除', blocked: '已封禁', left: '已离开', invited: '待加入' }[value] || value) },
-    shareStatusLabel(value) { return ({ active: '有效', revoked: '已撤销', expired: '已过期' }[value] || value) },
     planStateLabel(value) { return ({ active: '有效', grace: '7天只读宽限期', legacy: '兼容权益', expired: '已到期', revoked: '已撤销' }[value] || value || '有效') },
     shortDate(value) { return value ? String(value).replace('T', ' ').slice(0, 16) : '' }
   }
@@ -403,16 +278,16 @@ export default {
 .management-icon { width: 54rpx; height: 54rpx; margin-right: 18rpx; display: flex; align-items: center; justify-content: center; flex-shrink: 0; border-radius: 12rpx; color: #71aff1; background: #202b42; font-size: 23rpx; font-weight: 700; }
 .management-icon-league { color: #c9a766; background: #302c35; }
 .management-arrow { margin-left: 16rpx; color: #657087; font-size: 34rpx; }
-.title-row, .clan-row, .member-row, .request-row { display: flex; align-items: center; }
+.title-row, .clan-row { display: flex; align-items: center; }
 .title { color: #fff; font-size: 32rpx; font-weight: 700; }
 .role { margin-left: 12rpx; color: #5fa8ff; font-size: 22rpx; }
 .meta, .sub, .tip, .body { display: block; color: #788197; font-size: 22rpx; line-height: 1.6; }
 .meta { margin-top: 8rpx; }
-.clan-row, .member-row, .request-row { min-height: 92rpx; border-bottom: 1rpx solid #25253e; }
-.clan-row:last-of-type, .member-row:last-of-type, .request-row:last-of-type { border-bottom: 0; }
+.clan-row { min-height: 92rpx; border-bottom: 1rpx solid #25253e; }
+.clan-row:last-of-type { border-bottom: 0; }
 .grow { flex: 1; min-width: 0; }
 .name { display: block; overflow: hidden; color: #e5e8f0; font-size: 26rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.state, .role-chip { margin-left: 12rpx; color: #91a0b9; font-size: 22rpx; }
+.state { margin-left: 12rpx; color: #91a0b9; font-size: 22rpx; }
 .state-verified { color: #4bbda6; }.state-disputed { color: #d99a66; }.state-revoked { color: #c8797f; }
 .primary-btn, .secondary-btn, .text-btn { margin-top: 20rpx; border: 0; border-radius: 10rpx; font-size: 24rpx; line-height: 2.4; }
 .primary-btn { color: #fff; background: #315f9a; }.secondary-btn { color: #7eb8f6; background: #202b42; }.text-btn { color: #8995ad; background: transparent; }
@@ -420,12 +295,9 @@ export default {
 .paid-add-form { margin-top: 18rpx; padding-top: 18rpx; border-top: 1rpx solid #25253e; }.input, .picker { margin-top: 12rpx; padding: 17rpx; border: 1rpx solid #30304d; border-radius: 9rpx; color: #dce1ed; background: #111126; font-size: 23rpx; }.picker { color: #a8b0c1; }
 .rename-row { display: flex; align-items: center; margin-top: 14rpx; }.rename-row .input { margin-top: 0; }.mini-save { flex-shrink: 0; margin-left: 10rpx; padding: 5rpx 14rpx; border: 0; border-radius: 8rpx; color: #79b4f2; background: #202b42; font-size: 21rpx; line-height: 2.1; }.mini-save::after { border: 0; }
 .tip { margin-top: 14rpx; }.body { color: #a6aec0; }
-.role-chip { padding: 8rpx 12rpx; border-radius: 8rpx; background: #22223a; }.role-chip.passive { background: transparent; }
 .remove { margin-left: 12rpx; color: #bd7479; font-size: 21rpx; }
-.review { margin-left: 18rpx; font-size: 22rpx; }.review.reject { color: #a47d82; }.review.approve { color: #69a7e6; }
-.openid-add { margin-bottom: 12rpx; padding-bottom: 20rpx; border-bottom: 1rpx solid #25253e; }.openid-actions { display: flex; align-items: center; margin-top: 12rpx; }.add-role-picker { min-width: 220rpx; margin-top: 0; }.add-member-btn { margin-top: 0; }
 .restore { margin-left: 12rpx; color: #69a7e6; font-size: 21rpx; }
-.share-history { margin-top: 20rpx; border-top: 1rpx solid #25253e; }.share-row { display: flex; align-items: center; min-height: 82rpx; border-bottom: 1rpx solid #25253e; }
+.list-entry-card { padding-top: 14rpx; padding-bottom: 14rpx; }.list-entry-copy { min-height: 88rpx; display: flex; align-items: center; }.list-entry-btn { flex-shrink: 0; margin: 0 0 0 20rpx; padding: 0 22rpx; border: 1rpx solid #324966; border-radius: 9rpx; color: #82b7eb; background: #202b42; font-size: 21rpx; line-height: 2.3; }.list-entry-btn::after { border: 0; }.share-record-entry { margin-top: 22rpx; padding-top: 18rpx; border-top: 1rpx solid #25253e; }
 .leave-section { margin-top: 36rpx; }.danger-btn { border: 1rpx solid #57363f; border-radius: 10rpx; color: #c9797f; background: transparent; font-size: 24rpx; line-height: 2.4; }.danger-btn::after { border: 0; }
 .empty { padding: 120rpx 20rpx; color: #657087; font-size: 25rpx; text-align: center; }.empty.compact { padding: 36rpx 0; }
 .bottom-space { height: 80rpx; }

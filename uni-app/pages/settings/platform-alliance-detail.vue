@@ -54,11 +54,13 @@
               <text class="name small">{{ clan.clan_name || clan.clan_tag }}</text>
               <text class="sub">{{ clan.clan_tag }} · {{ verificationLabel(clan.verification_status) }}</text>
             </view>
-            <picker :range="categories" range-key="label" :value="categoryIndex(clan.category)" @change="changePlatformCategory(clan, $event)">
-              <text class="category">{{ categoryLabel(clan.category) }}⌄</text>
-            </picker>
-            <text class="edit" @tap="editPlatformClanName(clan)">别名</text>
-            <text class="remove" @tap="confirmPlatformRemove(clan)">移除</text>
+            <view class="clan-actions">
+              <picker :range="categories" range-key="label" :value="categoryIndex(clan.category)" @change="changePlatformCategory(clan, $event)">
+                <view class="clan-action category">{{ categoryLabel(clan.category) }}⌄</view>
+              </picker>
+              <view class="clan-action edit" @tap="editPlatformClanName(clan)">别名</view>
+              <view class="clan-action remove" @tap="confirmPlatformRemove(clan)">移除</view>
+            </view>
           </view>
           <view class="form-block">
             <input v-model="newClanTag" class="input" maxlength="15" placeholder="部落标签，例如 #2QQ" placeholder-style="color:#59637a" />
@@ -345,9 +347,10 @@ export default {
 .summary-name { display: block; color: #f0f2f8; font-size: 31rpx; font-weight: 700; }.name { display: block; color: #e8ebf3; font-size: 26rpx; font-weight: 600; }.name.small { font-size: 23rpx; }.sub { display: block; color: #778198; font-size: 21rpx; line-height: 1.6; }.status { font-size: 22rpx; }.status-active { color: #54b9a6; }.status-suspended { color: #d29a5f; }.status-archived { color: #737b8e; }
 .summary-actions { margin-top: 18rpx; gap: 14rpx; }.summary-actions button { flex: 1; margin: 0; }.platform-tip { display: block; margin-top: 18rpx; padding-top: 16rpx; border-top: 1rpx solid #292945; color: #69758c; font-size: 20rpx; line-height: 1.6; }.section-tip { margin-bottom: 10rpx; }
 .primary-btn, .secondary-btn, .mini-btn, .delete-btn { border: 0; border-radius: 9rpx; font-size: 23rpx; }.primary-btn { color: #fff; background: #315f9a; }.secondary-btn { color: #7eb8f6; background: #202b42; }.primary-btn::after, .secondary-btn::after, .mini-btn::after, .delete-btn::after { border: 0; }.full-btn { height: 84rpx; margin-top: 16rpx; line-height: 84rpx; }
-.member-row { min-height: 112rpx; border-bottom: 1rpx solid #25253e; }.openid { display: block; max-width: 390rpx; margin-top: 5rpx; overflow: hidden; color: #667087; font-size: 18rpx; text-overflow: ellipsis; white-space: nowrap; }.category { margin-left: 8rpx; padding: 8rpx 10rpx; border-radius: 8rpx; color: #78afe8; background: #202940; font-size: 20rpx; }.remove { margin-left: 12rpx; color: #b8757d; font-size: 20rpx; }.edit { margin-left: 10rpx; color: #7f9fca; font-size: 20rpx; }
+.member-row { min-height: 112rpx; border-bottom: 1rpx solid #25253e; }.openid { display: block; max-width: 390rpx; margin-top: 5rpx; overflow: hidden; color: #667087; font-size: 18rpx; text-overflow: ellipsis; white-space: nowrap; }.member-row .category { margin-left: 8rpx; padding: 8rpx 10rpx; border-radius: 8rpx; color: #78afe8; background: #202940; font-size: 20rpx; }.member-row .remove { margin-left: 12rpx; color: #b8757d; font-size: 20rpx; }
 .form-block { padding-top: 22rpx; }.input, .picker-field { height: 84rpx; padding: 0 20rpx; box-sizing: border-box; border: 1rpx solid #30304d; border-radius: 10rpx; color: #dce1ed; background: #111126; font-size: 24rpx; line-height: 84rpx; }.picker-field { margin-top: 14rpx; color: #a4adbf; }
 .clan-row { min-height: 104rpx; border-bottom: 1rpx solid #25253e; }.order-column { width: 48rpx; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; }.order-btn { color: #6da9e8; font-size: 25rpx; line-height: 1.45; }.order-btn.disabled { color: #3d4558; }
+.clan-actions { flex-shrink: 0; display: flex; align-items: center; gap: 12rpx; margin-left: 12rpx; }.clan-action { min-width: 68rpx; height: 64rpx; padding: 0 12rpx; box-sizing: border-box; display: flex; align-items: center; justify-content: center; border: 1rpx solid transparent; border-radius: 9rpx; font-size: 19rpx; line-height: 1; }.clan-actions .category { min-width: 80rpx; color: #78afe8; background: #202940; border-color: #293651; }.clan-actions .edit { color: #8aaad2; background: #1d2639; border-color: #2b3850; }.clan-actions .remove { margin-left: 8rpx; color: #c77f86; background: rgba(120, 45, 54, .16); border-color: rgba(184, 95, 105, .28); }
 .verification-row { min-height: 96rpx; border-bottom: 1rpx solid #25253e; }.verification-row:last-child { border-bottom: 0; }.mini-btn { margin: 0 0 0 8rpx; padding: 5rpx 12rpx; color: #7eb8f6; background: #202b42; line-height: 2; }.mini-btn.warn { color: #d4a665; }.mini-btn.danger { color: #c9797f; }
 .danger-card { border-color: #3e2934; }.danger-text { color: #c9797f; }.delete-btn { width: 100%; margin-top: 16rpx; border: 1rpx solid rgba(201, 121, 127, .45); color: #d98c91; background: rgba(120, 45, 54, .18); line-height: 2.5; }.danger-tip { margin-top: 12rpx; color: #91676f; }
 .audit-row { min-height: 62rpx; border-bottom: 1rpx solid #24243c; }.audit-row:last-child { border-bottom: 0; }.time { margin-left: 12rpx; color: #5f687e; font-size: 19rpx; }.bottom-space { height: 80rpx; }
