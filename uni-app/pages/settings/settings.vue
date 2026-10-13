@@ -25,6 +25,9 @@
               </view>
               <text v-else class="user-empty">暂未绑定 COC 账号</text>
             </view>
+            <button class="nickname-edit" size="mini" @tap="openNicknameProfile">
+              {{ userInfo && userInfo.nickname ? '修改昵称' : '设置昵称' }}
+            </button>
           </view>
           <view v-if="userInfo && userInfo.openid" class="account-id-row">
             <view class="account-id-copy">
@@ -254,9 +257,12 @@ export default {
     openPlatformManagement() {
       uni.navigateTo({ url: '/pages/settings/platform-management' })
     },
+    openNicknameProfile() {
+      uni.navigateTo({ url: '/pages/profile/nickname?mode=edit&next=settings' })
+    },
     refreshLoginState() {
       const token = uni.getStorageSync('token')
-      const consented = uni.getStorageSync('privacyConsent') === 'v1'
+      const consented = uni.getStorageSync('privacyConsent') === 'v2'
       this.privacyAgreed = consented
       if (token && consented) {
         getMyInfo()
@@ -305,7 +311,7 @@ export default {
           wechatLogin(loginRes.code)
             .then((res) => {
               uni.setStorageSync('token', res.token)
-              uni.setStorageSync('privacyConsent', 'v1')
+              uni.setStorageSync('privacyConsent', 'v2')
               this.isLoggedIn = true
               this.userInfo = res.user
               getApp().globalData.isLoggedIn = true
@@ -323,10 +329,15 @@ export default {
 
               uni.showToast({ title: '登录成功', icon: 'success', duration: 1500 })
 
-              // 未绑定则自动进入绑定流程
-              if (res.user && !res.user.account_name && !res.user.player_tag) {
-                setTimeout(() => { this.pageState = 'bind' }, 1500)
-              }
+              const needsBinding = res.user && !res.user.account_name && !res.user.player_tag
+              setTimeout(() => {
+                if (res.user && !res.user.nickname) {
+                  const next = needsBinding ? 'bind' : 'settings'
+                  uni.navigateTo({ url: `/pages/profile/nickname?mode=onboarding&next=${next}` })
+                } else if (needsBinding) {
+                  this.pageState = 'bind'
+                }
+              }, 800)
             })
             .catch((err) => {
               this.loginLoading = false
@@ -575,6 +586,23 @@ export default {
 
 .user-detail {
   flex: 1;
+  min-width: 0;
+}
+
+.nickname-edit {
+  flex-shrink: 0;
+  margin: 0 0 0 20rpx;
+  padding: 0 20rpx;
+  color: #92c6ff;
+  background: rgba(74, 144, 217, 0.08);
+  border: 1rpx solid #385072;
+  border-radius: 22rpx;
+  font-size: 20rpx;
+  line-height: 46rpx;
+}
+
+.nickname-edit::after {
+  border: 0;
 }
 
 .username {

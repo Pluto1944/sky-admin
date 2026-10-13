@@ -8,6 +8,7 @@
 - GET /api/clan/league-stats  联赛战绩统计（滚动窗口三星率）
 - POST /api/wechat/login    微信登录
 - GET /api/wechat/me        当前用户信息
+- PATCH /api/wechat/profile 更新当前用户昵称
 - POST /api/wechat/bind     绑定游戏账号
 """
 from __future__ import annotations
@@ -1592,6 +1593,56 @@ def wechat_me(user: dict = Depends(require_user), db: Database = Depends(get_db)
         "account_name": row["account_name"],
         "player_tag": row["player_tag"],
         "created_at": row["created_at"],
+    }
+
+
+@router.patch("/wechat/profile")
+def update_wechat_profile(
+    payload: dict,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    """更新当前用户主动填写的小程序昵称。
+
+    昵称仅用于页面展示，不参与登录、联盟权限或平台管理员识别。
+    """
+    raw_nickname = payload.get("nickname")
+    if not isinstance(raw_nickname, str):
+        raise HTTPException(status_code=400, detail="缺少昵称")
+    nickname = raw_nickname.strip()
+    if not nickname:
+        raise HTTPException(status_code=400, detail="昵称不能为空")
+    if len(nickname) > 20:
+        raise HTTPException(status_code=400, detail="昵称不能超过 20 个字符")
+    if any(ord(char) < 32 for char in nickname):
+        raise HTTPException(status_code=400, detail="昵称包含不支持的字符")
+
+    conn = db.conn
+    row = conn.execute(
+        "SELECT * FROM wechat_users WHERE openid = ?", (user["openid"],),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="用户不存在，请先登录")
+
+    from shared.db.connection import now_iso
+    with conn:
+        conn.execute(
+            "UPDATE wechat_users SET nickname = ?, updated_at = ? WHERE openid = ?",
+            (nickname, now_iso(), user["openid"]),
+        )
+    row = conn.execute(
+        "SELECT * FROM wechat_users WHERE openid = ?", (user["openid"],),
+    ).fetchone()
+    return {
+        "success": True,
+        "user": {
+            "openid": row["openid"],
+            "nickname": row["nickname"],
+            "avatar_url": row["avatar_url"],
+            "role": row["role"],
+            "account_name": row["account_name"],
+            "player_tag": row["player_tag"],
+        },
     }
 
 

@@ -67,7 +67,7 @@ export default {
   methods: {
     loadUserInfo() {
       const token = uni.getStorageSync('token')
-      if (!token || uni.getStorageSync('privacyConsent') !== 'v1') {
+      if (!token || uni.getStorageSync('privacyConsent') !== 'v2') {
         this.userInfo = null
         return
       }

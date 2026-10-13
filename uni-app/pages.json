@@ -124,6 +124,15 @@
       }
     },
     {
+      "path": "pages/profile/nickname",
+      "style": {
+        "navigationBarTitleText": "创建身份",
+        "navigationBarBackgroundColor": "#1a1a2e",
+        "navigationBarTextStyle": "white",
+        "backgroundColor": "#0f0f23"
+      }
+    },
+    {
       "path": "pages/bind/bind",
       "style": {
         "navigationBarTitleText": "绑定游戏账号"

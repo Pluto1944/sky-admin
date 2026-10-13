@@ -258,6 +258,11 @@ export function getMyInfo() {
   return request('/api/wechat/me', 'GET', {}, true)
 }
 
+/** 保存用户主动选择或填写的小程序昵称。 */
+export function updateWechatProfile(nickname) {
+  return request('/api/wechat/profile', 'PATCH', { nickname }, true)
+}
+
 /** 获取当前用户可以访问的联盟。 */
 export function getMyAlliances() {
   return request('/api/me/alliances', 'GET', {}, true)

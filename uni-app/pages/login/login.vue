@@ -70,7 +70,7 @@ export default {
             .then((res) => {
               // 3. 存储 token 和用户信息
               uni.setStorageSync('token', res.token)
-              uni.setStorageSync('privacyConsent', 'v1')
+              uni.setStorageSync('privacyConsent', 'v2')
               getApp().globalData.isLoggedIn = true
               getApp().globalData.userInfo = res.user
               loadAllianceContext(null, true).catch(() => {})
@@ -81,16 +81,20 @@ export default {
                 duration: 1500
               })
 
-              // 4. 判断是否需要绑定账号
+              // 4. 首次登录先让用户主动选择小程序昵称，再按需绑定游戏账号
               setTimeout(() => {
-                if (res.user && !res.user.account_name && !res.user.player_tag) {
+                const needsBinding = res.user && !res.user.account_name && !res.user.player_tag
+                if (res.user && !res.user.nickname) {
+                  const next = needsBinding ? 'bind' : 'settings'
+                  uni.redirectTo({ url: `/pages/profile/nickname?mode=onboarding&next=${next}` })
+                } else if (needsBinding) {
                   // 未绑定，跳转绑定页
                   uni.redirectTo({ url: '/pages/bind/bind' })
                 } else {
                   // 已绑定，跳转管理页
                   uni.switchTab({ url: '/pages/settings/settings' })
                 }
-              }, 1500)
+              }, 800)
             })
             .catch((err) => {
               this.loading = false

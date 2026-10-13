@@ -161,6 +161,36 @@ def test_wechat_login_does_not_auto_join_sky_alliance(db, monkeypatch):
     ).fetchone() is None
 
 
+def test_user_can_update_own_wechat_nickname(db):
+    user_id = _user(db, "profile-user")
+
+    response = legacy_routes.update_wechat_profile(
+        {"nickname": "  Pluto  "}, user={"openid": "profile-user"}, db=db,
+    )
+
+    assert response["success"] is True
+    assert response["user"]["nickname"] == "Pluto"
+    assert db.conn.execute(
+        "SELECT nickname FROM wechat_users WHERE id=?", (user_id,),
+    ).fetchone()[0] == "Pluto"
+
+
+def test_wechat_nickname_validation_rejects_empty_and_too_long(db):
+    _user(db, "profile-user")
+
+    with pytest.raises(HTTPException) as empty:
+        legacy_routes.update_wechat_profile(
+            {"nickname": "   "}, user={"openid": "profile-user"}, db=db,
+        )
+    assert empty.value.status_code == 400
+
+    with pytest.raises(HTTPException) as too_long:
+        legacy_routes.update_wechat_profile(
+            {"nickname": "长" * 21}, user={"openid": "profile-user"}, db=db,
+        )
+    assert too_long.value.status_code == 400
+
+
 def test_context_uses_per_alliance_roles_and_caps_unverified_admin(db):
     apply_sky_migration(db.conn, CLANS, now=NOW)
     user_id = _user(db, "multi")

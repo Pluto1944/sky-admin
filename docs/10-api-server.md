@@ -359,7 +359,26 @@ GET /api/wechat/me
 - `401` — Token 无效或已过期
 - `404` — 用户不存在
 
-### 4.1 互刷系统独立认证（F1）
+### 4.1 更新当前用户昵称
+
+```
+PATCH /api/wechat/profile
+```
+
+**需要认证**：`Authorization: Bearer <token>`
+
+请求体仅接受用户主动选择或填写的小程序昵称：
+
+```json
+{
+  "nickname": "Pluto"
+}
+```
+
+服务端去除首尾空白并限制为 1～20 个字符。昵称只用于页面展示，不参与微信登录、联盟角色或
+平台管理员判断；客户端通过 `input type="nickname"` 提供微信昵称快捷填写，也允许用户自行输入。
+
+### 4.2 互刷系统独立认证（F1）
 
 ```text
 POST /api/farm-system/auth/login
@@ -699,7 +718,7 @@ def me(user: dict = Depends(require_user)):
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `openid` | TEXT PK | 微信用户唯一标识 |
-| `nickname` | TEXT | 微信昵称 |
+| `nickname` | TEXT | 用户主动选择或填写的小程序昵称 |
 | `avatar_url` | TEXT | 头像 URL |
 | `role` | TEXT | 角色：admin / moderator / member |
 | `account_name` | TEXT | 绑定的游戏昵称 |
