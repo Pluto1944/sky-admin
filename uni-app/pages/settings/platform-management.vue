@@ -61,6 +61,35 @@
       <template v-if="detail">
         <view class="section-title">当前操作：{{ detail.alliance.name }}</view>
         <view class="card action-card">
+          <text class="name">联盟成员与权限</text>
+          <text class="sub">可以通过 OpenID 添加成员；把其他成员设为首领时会自动完成首领移交。</text>
+          <view v-for="member in detail.members" :key="member.id" class="member-row">
+            <view class="grow">
+              <text class="name small">{{ member.nickname || member.account_name || ('微信用户' + member.id) }}</text>
+              <text class="openid">{{ member.openid }}</text>
+              <text v-if="member.status !== 'active'" class="sub">{{ memberStatusLabel(member.status) }}</text>
+            </view>
+            <picker
+              v-if="member.status === 'active'"
+              :range="memberRoles"
+              range-key="label"
+              :value="memberRoleIndex(member.role)"
+              @change="changePlatformMemberRole(member, $event)"
+            >
+              <text class="category">{{ memberRoleLabel(member.role) }}⌄</text>
+            </picker>
+            <text v-if="member.status === 'active' && member.role !== 'leader'" class="remove" @tap="confirmPlatformMemberRemove(member)">移除</text>
+          </view>
+          <view class="platform-add">
+            <input v-model="newMemberOpenid" class="search-input" maxlength="200" placeholder="用户 OpenID" placeholder-style="color:#59637a" />
+            <picker :range="memberRoles" range-key="label" :value="newMemberRoleIndex" @change="newMemberRoleIndex = Number($event.detail.value) || 0">
+              <view class="platform-picker">角色：{{ memberRoles[newMemberRoleIndex].label }}⌄</view>
+            </picker>
+            <button class="primary-btn" :loading="memberBusy" :disabled="memberBusy || !newMemberOpenid.trim()" @tap="addPlatformMember">添加成员</button>
+          </view>
+        </view>
+
+        <view class="card action-card">
           <view class="title-row">
             <view class="grow">
               <text class="name">管理部落</text>
@@ -79,6 +108,7 @@
             <picker :range="categories" range-key="label" :value="categoryIndex(clan.category)" @change="changePlatformCategory(clan, $event)">
               <text class="category">{{ categoryLabel(clan.category) }}⌄</text>
             </picker>
+            <text class="edit-name" @tap="editPlatformClanName(clan)">别名</text>
             <text class="remove" @tap="confirmPlatformRemove(clan)">移除</text>
           </view>
           <view class="platform-add">
@@ -105,7 +135,7 @@
 
         <view class="card action-card">
           <text class="name">套餐权益</text>
-          <text class="sub">当前 {{ detail.alliance.plan_code }} · {{ detail.alliance.grant_status || '兼容权益' }}<text v-if="detail.alliance.expires_at"> · {{ shortDate(detail.alliance.expires_at) }}</text></text>
+          <text class="sub">当前 {{ detail.alliance.plan_code }} · {{ grantStatusLabel(detail.alliance.grant_status) }}<text v-if="detail.alliance.expires_at"> · {{ shortDate(detail.alliance.expires_at) }}</text></text>
           <button class="primary-btn" @tap="grantPaid">开通付费版365天</button>
           <button class="secondary-btn" @tap="grantFree">设为免费版</button>
         </view>
@@ -139,6 +169,7 @@
 <script>
 import TopBar from '@/components/TopBar.vue'
 import {
+  addPlatformAllianceMember,
   addPlatformManagedClan,
   createPlatformAlliance,
   deletePlatformAlliance,
@@ -146,11 +177,13 @@ import {
   getPlatformAlliances,
   getPlatformManagedClans,
   removePlatformManagedClan,
+  removePlatformAllianceMember,
   reorderPlatformManagedClans,
   savePlatformAllianceStatus,
   savePlatformFreeRegistration,
   savePlatformPlan,
   savePlatformVerification,
+  updatePlatformAllianceMemberRole,
   updatePlatformManagedClan
 } from '@/utils/api.js'
 
@@ -173,6 +206,14 @@ export default {
       newClanTag: '',
       platformAllianceName: '',
       createBusy: false,
+      memberBusy: false,
+      newMemberOpenid: '',
+      newMemberRoleIndex: 0,
+      memberRoles: [
+        { key: 'member', label: '成员' },
+        { key: 'admin', label: '管理员' },
+        { key: 'leader', label: '首领' }
+      ],
       newCategoryIndex: 0,
       categories: [
         { key: 'normal', label: '实战' },
@@ -266,6 +307,63 @@ export default {
         this.clanBusy = false
       }
     },
+    async addPlatformMember() {
+      if (!this.detail || this.memberBusy || !this.newMemberOpenid.trim()) return
+      this.memberBusy = true
+      try {
+        const selected = this.memberRoles[this.newMemberRoleIndex]
+        await addPlatformAllianceMember(this.detail.alliance.id, this.newMemberOpenid.trim(), selected.key)
+        this.newMemberOpenid = ''
+        await this.reloadDetail(this.detail.alliance.id)
+        await this.loadDashboard()
+        uni.showToast({ title: '成员已添加', icon: 'success' })
+      } catch (err) {
+        uni.showModal({ title: '添加失败', content: err.message || '请稍后重试', showCancel: false })
+      } finally {
+        this.memberBusy = false
+      }
+    },
+    changePlatformMemberRole(member, event) {
+      const selected = this.memberRoles[Number(event.detail.value) || 0]
+      if (!selected || selected.key === member.role) return
+      const apply = async () => {
+        try {
+          await updatePlatformAllianceMemberRole(this.detail.alliance.id, member.id, selected.key)
+          await this.reloadDetail(this.detail.alliance.id)
+          await this.loadDashboard()
+          uni.showToast({ title: '权限已更新', icon: 'success' })
+        } catch (err) {
+          uni.showModal({ title: '更新失败', content: err.message || '请稍后重试', showCancel: false })
+        }
+      }
+      if (selected.key !== 'leader') {
+        apply()
+        return
+      }
+      uni.showModal({
+        title: '移交联盟首领',
+        content: `确认将${member.nickname || member.account_name || '该用户'}设为联盟首领？原首领将变为管理员。`,
+        success: result => { if (result.confirm) apply() }
+      })
+    },
+    confirmPlatformMemberRemove(member) {
+      uni.showModal({
+        title: '移除联盟成员',
+        content: `确认移除${member.nickname || member.account_name || '该用户'}？`,
+        confirmColor: '#c9797f',
+        success: async result => {
+          if (!result.confirm) return
+          try {
+            await removePlatformAllianceMember(this.detail.alliance.id, member.id)
+            await this.reloadDetail(this.detail.alliance.id)
+            await this.loadDashboard()
+            uni.showToast({ title: '成员已移除', icon: 'success' })
+          } catch (err) {
+            uni.showToast({ title: err.message || '移除失败', icon: 'none' })
+          }
+        }
+      })
+    },
     async changePlatformCategory(clan, event) {
       const selected = this.categories[Number(event.detail.value) || 0]
       if (!selected || selected.key === clan.category) return
@@ -276,6 +374,27 @@ export default {
       } catch (err) {
         uni.showToast({ title: err.message || '更新失败', icon: 'none' })
       }
+    },
+    editPlatformClanName(clan) {
+      uni.showModal({
+        title: '修改部落别名',
+        editable: true,
+        placeholderText: clan.clan_name || clan.clan_tag,
+        content: clan.clan_name || '',
+        success: async result => {
+          if (!result.confirm) return
+          try {
+            await updatePlatformManagedClan(this.detail.alliance.id, clan.clan_tag, {
+              category: clan.category,
+              clan_name: result.content || clan.clan_tag
+            })
+            await this.reloadDetail(this.detail.alliance.id)
+            uni.showToast({ title: '别名已更新', icon: 'success' })
+          } catch (err) {
+            uni.showToast({ title: err.message || '更新失败', icon: 'none' })
+          }
+        }
+      })
     },
     async movePlatformClan(index, offset) {
       const target = index + offset
@@ -378,9 +497,13 @@ export default {
       })
     },
     statusLabel(value) { return ({ active: '正常', suspended: '已停用', archived: '已删除' }[value] || value) },
+    grantStatusLabel(value) { return ({ active: '有效', grace: '7天只读宽限期', expired: '已到期', revoked: '已撤销' }[value] || value || '兼容权益') },
     categoryIndex(value) { const index = this.categories.findIndex(item => item.key === value); return index < 0 ? 0 : index },
     categoryLabel(value) { const item = this.categories.find(entry => entry.key === value); return item ? item.label : value },
     verificationLabel(value) { return ({ verified: '已认证', disputed: '争议中', revoked: '已撤销', unverified: '未认证' }[value] || value) },
+    memberRoleIndex(value) { const index = this.memberRoles.findIndex(item => item.key === value); return index < 0 ? 0 : index },
+    memberRoleLabel(value) { const item = this.memberRoles.find(entry => entry.key === value); return item ? item.label : value },
+    memberStatusLabel(value) { return ({ active: '有效', left: '已退出', removed: '已移除', blocked: '已封禁', invited: '待加入' }[value] || value) },
     shortDate(value) { return value ? String(value).replace('T', ' ').slice(0, 16) : '' }
   }
 }
@@ -391,7 +514,7 @@ export default {
 .content { flex: 1; min-height: 0; padding: 24rpx; box-sizing: border-box; }
 .section-title { margin: 30rpx 8rpx 14rpx; color: #7f8aa2; font-size: 23rpx; }
 .card { margin-bottom: 16rpx; padding: 22rpx; border: 1rpx solid #292945; border-radius: 14rpx; background: #18182d; }
-.setting-row, .title-row, .clan-row, .queue-row, .audit-row, .search-row { display: flex; align-items: center; }
+.setting-row, .title-row, .clan-row, .member-row, .queue-row, .audit-row, .search-row { display: flex; align-items: center; }
 .setting-row { min-height: 84rpx; }.grow { flex: 1; min-width: 0; }
 .name { display: block; color: #e8ebf3; font-size: 26rpx; font-weight: 600; }.name.small { font-size: 24rpx; }
 .sub { display: block; color: #778198; font-size: 21rpx; line-height: 1.6; }
@@ -412,8 +535,10 @@ export default {
 }
 .alliance-card:active { background: #202038; }.status { color: #8d96a8; font-size: 21rpx; }.status-active { color: #54b9a6; }.status-suspended { color: #d29a5f; }.status-archived { color: #737b8e; }
 .clan-row { min-height: 100rpx; border-bottom: 1rpx solid #25253e; }.clan-row:last-child { border-bottom: 0; }
+.member-row { min-height: 112rpx; border-bottom: 1rpx solid #25253e; }.member-row:last-of-type { border-bottom: 0; }
+.openid { display: block; max-width: 390rpx; margin-top: 5rpx; overflow: hidden; color: #667087; font-size: 18rpx; text-overflow: ellipsis; white-space: nowrap; }
 .platform-order { width: 48rpx; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; }.order-btn { color: #6da9e8; font-size: 25rpx; line-height: 1.45; }.order-btn.disabled { color: #3d4558; }
-.category { margin-left: 8rpx; padding: 8rpx 10rpx; border-radius: 8rpx; color: #78afe8; background: #202940; font-size: 20rpx; }.remove { margin-left: 12rpx; color: #b8757d; font-size: 20rpx; }
+.category { margin-left: 8rpx; padding: 8rpx 10rpx; border-radius: 8rpx; color: #78afe8; background: #202940; font-size: 20rpx; }.edit-name { margin-left: 10rpx; color: #7f9fca; font-size: 20rpx; }.remove { margin-left: 12rpx; color: #b8757d; font-size: 20rpx; }
 .platform-add { padding-top: 20rpx; }.platform-picker { margin-top: 12rpx; padding: 16rpx; border: 1rpx solid #30304d; border-radius: 9rpx; color: #a4adbf; background: #111126; font-size: 22rpx; }
 .mini-btn { margin: 0 0 0 8rpx; padding: 5rpx 12rpx; color: #7eb8f6; background: #202b42; line-height: 2; }.mini-btn.warn { color: #d4a665; }.mini-btn.danger { color: #c9797f; }
 .action-card { margin-top: 16rpx; }.danger-text { color: #c9797f; }

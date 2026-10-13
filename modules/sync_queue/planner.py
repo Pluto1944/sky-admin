@@ -95,7 +95,8 @@ class SyncPlanner:
                       CASE
                         WHEN alliances.plan_code='paid' AND grants.id IS NOT NULL
                          AND (grants.status!='active' OR
-                              (grants.expires_at IS NOT NULL AND datetime(grants.expires_at) <= datetime('now')))
+                              (grants.expires_at IS NOT NULL AND
+                               datetime(grants.expires_at) <= datetime('now', '-7 days')))
                         THEN 'low' ELSE plans.sync_tier
                       END AS sync_tier
                FROM alliance_clans AS clans
@@ -159,7 +160,8 @@ class SyncPlanner:
                       CASE
                         WHEN alliances.plan_code='paid' AND grants.id IS NOT NULL
                          AND (grants.status!='active' OR
-                              (grants.expires_at IS NOT NULL AND datetime(grants.expires_at) <= datetime('now')))
+                              (grants.expires_at IS NOT NULL AND
+                               datetime(grants.expires_at) <= datetime('now', '-7 days')))
                         THEN 'low' ELSE plans.sync_tier
                       END AS sync_tier
                FROM alliance_cwl_teams AS teams
@@ -259,9 +261,9 @@ class SyncPlanner:
     ) -> dict:
         """Refresh interests and globally deduplicated targets without planning work."""
         current = _as_utc(now)
-        # Paid grants are an operational entitlement, not public COC data.  On
-        # expiry keep the oldest clan as the low-frequency fallback and retain
-        # every historical/public fact.
+        # Paid grants are an operational entitlement, not public COC data.
+        # After the seven-day read-only grace period, keep the oldest clan as
+        # the low-frequency free fallback and retain every historical/public fact.
         from modules.alliance.operations import reconcile_expired_plan_grants
         reconcile_expired_plan_grants(self.conn, now=current)
         live_types = parse_resource_types(live_resource_types)

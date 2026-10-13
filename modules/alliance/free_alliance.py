@@ -79,12 +79,14 @@ def free_alliance_capability(conn: sqlite3.Connection, openid: str) -> dict:
         existing = conn.execute(
             """SELECT id, name, status FROM alliances
                WHERE created_by_user_id = ? AND plan_code = 'free'
+                 AND creation_source = 'user'
                ORDER BY id DESC LIMIT 1""",
             (user["id"],),
         ).fetchone()
         active_existing = conn.execute(
             """SELECT id FROM alliances
                WHERE created_by_user_id = ? AND plan_code = 'free' AND status = 'active'
+                 AND creation_source = 'user'
                ORDER BY id DESC LIMIT 1""",
             (user["id"],),
         ).fetchone()
@@ -217,13 +219,20 @@ def create_free_alliance(
     timestamp = _iso(now)
     display_name = _clean_name(name)
     with conn:
-        cursor = conn.execute(
-            """INSERT INTO alliances
-               (alliance_key, name, status, plan_code, created_by_user_id,
-                created_at, updated_at)
-               VALUES (?, ?, 'active', 'free', ?, ?, ?)""",
-            (f"free-{uuid.uuid4().hex}", display_name, user["id"], timestamp, timestamp),
-        )
+        try:
+            cursor = conn.execute(
+                """INSERT INTO alliances
+                   (alliance_key, name, status, plan_code, creation_source,
+                    created_by_user_id, created_at, updated_at)
+                   VALUES (?, ?, 'active', 'free', 'user', ?, ?, ?)""",
+                (f"free-{uuid.uuid4().hex}", display_name, user["id"], timestamp, timestamp),
+            )
+        except sqlite3.IntegrityError as exc:
+            if "alliances.created_by_user_id" in str(exc):
+                raise FreeAllianceError(
+                    "每个用户只能创建一个有效的免费联盟", status_code=409,
+                ) from exc
+            raise
         alliance_id = int(cursor.lastrowid)
         conn.execute(
             """INSERT INTO alliance_members

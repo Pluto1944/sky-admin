@@ -210,7 +210,8 @@ def _context_rows(
                    CASE
                      WHEN alliances.plan_code='paid' AND grants.id IS NOT NULL
                       AND (grants.status!='active' OR
-                           (grants.expires_at IS NOT NULL AND datetime(grants.expires_at) <= datetime('now')))
+                           (grants.expires_at IS NOT NULL AND
+                            datetime(grants.expires_at) <= datetime('now', '-7 days')))
                      THEN 'low' ELSE plans.sync_tier
                    END AS sync_tier,
                    plans.max_clans, plans.entitlements_json,
@@ -220,6 +221,9 @@ def _context_rows(
                      WHEN grants.status='active' AND
                           (grants.expires_at IS NULL OR datetime(grants.expires_at) > datetime('now'))
                      THEN 'active'
+                     WHEN grants.status='active' AND grants.expires_at IS NOT NULL
+                          AND datetime(grants.expires_at) > datetime('now', '-7 days')
+                     THEN 'grace'
                      WHEN grants.status='revoked' THEN 'revoked'
                      ELSE 'expired'
                    END AS entitlement_status,
@@ -313,7 +317,14 @@ def resolve_alliance_public_context(
     row = conn.execute(
         """SELECT alliances.id AS alliance_id, alliances.alliance_key,
                   alliances.name AS alliance_name, plans.plan_code,
-                  plans.display_name AS plan_name, plans.sync_tier,
+                  plans.display_name AS plan_name,
+                  CASE
+                    WHEN alliances.plan_code='paid' AND grants.id IS NOT NULL
+                     AND (grants.status!='active' OR
+                          (grants.expires_at IS NOT NULL AND
+                           datetime(grants.expires_at) <= datetime('now', '-7 days')))
+                    THEN 'low' ELSE plans.sync_tier
+                  END AS sync_tier,
                   plans.max_clans, plans.entitlements_json,
                   CASE
                     WHEN grants.id IS NULL THEN
@@ -321,6 +332,9 @@ def resolve_alliance_public_context(
                     WHEN grants.status='active' AND
                          (grants.expires_at IS NULL OR datetime(grants.expires_at) > datetime('now'))
                     THEN 'active'
+                    WHEN grants.status='active' AND grants.expires_at IS NOT NULL
+                         AND datetime(grants.expires_at) > datetime('now', '-7 days')
+                    THEN 'grace'
                     WHEN grants.status='revoked' THEN 'revoked'
                     ELSE 'expired'
                   END AS entitlement_status,

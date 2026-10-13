@@ -16,7 +16,7 @@
           </picker>
           <text v-else class="team-name">{{ detail.team.team_name || detail.team.team_alias }}</text>
           <text class="team-tag">{{ detail.team.clan_tag }}</text>
-          <button class="share-btn" open-type="share">分享</button>
+          <button class="share-btn" open-type="share" :disabled="!shareReady">分享</button>
         </view>
         <view class="team-meta">
           <text>{{ detail.team.team_alias }}</text><text>{{ detail.team.league_level || '未定级' }}</text>
@@ -155,7 +155,7 @@
 <script>
 import TopBar from '@/components/TopBar.vue'
 import { getCwlLiveDetail } from '@/utils/api.js'
-import { ALLIANCE_CHANGED_EVENT, activateSharedAlliance, allianceQuery } from '@/utils/alliance.js'
+import { ALLIANCE_CHANGED_EVENT, ALLIANCE_SHARE_READY_EVENT, activateSharedAlliance, allianceQuery } from '@/utils/alliance.js'
 
 const CACHE_REFRESH_INTERVAL_MS = 60 * 1000
 const BUSINESS_TIMEZONE_OFFSET_MS = 8 * 60 * 60 * 1000
@@ -177,7 +177,7 @@ export default {
       clanTag: '', period: '', detail: null, loading: true, loadError: '',
       activeView: 'war-day', selectedRoundNumber: null, requestedRound: null,
       refreshTimer: null, standingMatch: null, loadedViews: {},
-      allianceChangeHandler: null,
+      allianceChangeHandler: null, shareReadyHandler: null, shareReady: false,
       viewLoading: { 'war-day': false, overview: false }, viewVersions: {}, requestGeneration: 0,
       openSections: { townHalls: false, standings: true, offense: true, defense: false }
     }
@@ -207,7 +207,13 @@ export default {
     this.activeView = options && options.view === 'overview' ? 'overview' : 'war-day'
     this.requestedRound = Number((options && options.round) || 0) || null
     try { await activateSharedAlliance(options) } catch (e) { this.loadError = e.message || '联盟切换失败' }
-    this.allianceChangeHandler = () => uni.switchTab({ url: '/pages/war/war' })
+    this.shareReady = allianceQuery().indexOf('share_token=') >= 0
+    this.shareReadyHandler = ready => { this.shareReady = Boolean(ready) }
+    uni.$on(ALLIANCE_SHARE_READY_EVENT, this.shareReadyHandler)
+    this.allianceChangeHandler = () => {
+      this.shareReady = false
+      uni.switchTab({ url: '/pages/war/war' })
+    }
     uni.$on(ALLIANCE_CHANGED_EVENT, this.allianceChangeHandler)
     rememberLeagueList()
     this.fetchDetail(this.activeView)
@@ -221,7 +227,11 @@ export default {
     }
   },
   onHide() { this.stopTimer() },
-  onUnload() { this.stopTimer(); if (this.allianceChangeHandler) uni.$off(ALLIANCE_CHANGED_EVENT, this.allianceChangeHandler) },
+  onUnload() {
+    this.stopTimer()
+    if (this.allianceChangeHandler) uni.$off(ALLIANCE_CHANGED_EVENT, this.allianceChangeHandler)
+    if (this.shareReadyHandler) uni.$off(ALLIANCE_SHARE_READY_EVENT, this.shareReadyHandler)
+  },
   async onPullDownRefresh() { await this.fetchDetail(this.activeView); uni.stopPullDownRefresh() },
   onShareAppMessage() {
     const round = this.selectedRoundNumber ? `&round=${this.selectedRoundNumber}` : ''

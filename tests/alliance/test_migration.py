@@ -161,14 +161,15 @@ def test_plan_limits_and_role_enums_are_database_constraints(db):
         )
 
 
-def test_database_allows_platform_admin_to_create_multiple_free_alliances(db):
+def test_database_separates_user_and_platform_free_alliance_limits(db):
     apply_sky_migration(db.conn, CLANS)
     user_id = _add_wechat_user(db, "creator")
     now = "2026-10-09T00:00:00+00:00"
     db.conn.execute(
         """INSERT INTO alliances
-           (alliance_key, name, status, plan_code, created_by_user_id, created_at, updated_at)
-           VALUES ('free-a', 'A', 'active', 'free', ?, ?, ?)""",
+           (alliance_key, name, status, plan_code, creation_source,
+            created_by_user_id, created_at, updated_at)
+           VALUES ('free-a', 'A', 'active', 'free', 'user', ?, ?, ?)""",
         (user_id, now, now),
     )
     db.conn.execute(
@@ -181,8 +182,9 @@ def test_database_allows_platform_admin_to_create_multiple_free_alliances(db):
     db._migrate()
     db.conn.execute(
         """INSERT INTO alliances
-           (alliance_key, name, status, plan_code, created_by_user_id, created_at, updated_at)
-           VALUES ('free-b', 'B', 'active', 'free', ?, ?, ?)""",
+           (alliance_key, name, status, plan_code, creation_source,
+            created_by_user_id, created_at, updated_at)
+           VALUES ('platform-b', 'B', 'active', 'free', 'platform', ?, ?, ?)""",
         (user_id, now, now),
     )
     assert db.conn.execute(
@@ -191,8 +193,16 @@ def test_database_allows_platform_admin_to_create_multiple_free_alliances(db):
     ).fetchone()[0] == 2
     assert db.conn.execute(
         """SELECT COUNT(*) FROM sqlite_master
-           WHERE type='index' AND name='idx_alliances_one_active_free_per_creator'"""
-    ).fetchone()[0] == 0
+           WHERE type='index' AND name='idx_alliances_one_active_user_free'"""
+    ).fetchone()[0] == 1
+    with pytest.raises(sqlite3.IntegrityError, match="UNIQUE constraint"):
+        db.conn.execute(
+            """INSERT INTO alliances
+               (alliance_key, name, status, plan_code, creation_source,
+                created_by_user_id, created_at, updated_at)
+               VALUES ('free-c', 'C', 'active', 'free', 'user', ?, ?, ?)""",
+            (user_id, now, now),
+        )
 
 
 def test_migration_removes_legacy_global_verification_triggers(db):

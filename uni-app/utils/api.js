@@ -433,6 +433,18 @@ export function getPlatformAlliance(allianceId) {
   return request(`/api/platform/alliances/${encodeURIComponent(allianceId)}`, 'GET', {}, true)
 }
 
+export function addPlatformAllianceMember(allianceId, openid, role = 'member') {
+  return request(`/api/platform/alliances/${encodeURIComponent(allianceId)}/members`, 'POST', { openid, role }, true)
+}
+
+export function updatePlatformAllianceMemberRole(allianceId, memberId, role) {
+  return request(`/api/platform/alliances/${encodeURIComponent(allianceId)}/members/${encodeURIComponent(memberId)}`, 'PATCH', { role }, true)
+}
+
+export function removePlatformAllianceMember(allianceId, memberId) {
+  return request(`/api/platform/alliances/${encodeURIComponent(allianceId)}/members/${encodeURIComponent(memberId)}`, 'DELETE', {}, true)
+}
+
 export function getPlatformManagedClans(allianceId) {
   return request(`/api/platform/alliances/${encodeURIComponent(allianceId)}/managed-clans`, 'GET', {}, true)
 }

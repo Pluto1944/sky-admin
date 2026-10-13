@@ -1060,7 +1060,8 @@ def _player_detail_clan_tags(db: Database) -> set[str]:
                  AND NOT (
                    alliances.plan_code='paid' AND grants.id IS NOT NULL
                    AND (grants.status!='active' OR
-                        (grants.expires_at IS NOT NULL AND datetime(grants.expires_at) <= datetime('now')))
+                        (grants.expires_at IS NOT NULL AND
+                         datetime(grants.expires_at) <= datetime('now', '-7 days')))
                  )"""
         ).fetchall()
     }

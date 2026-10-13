@@ -152,6 +152,8 @@ CREATE TABLE IF NOT EXISTS alliances (
     status             TEXT NOT NULL DEFAULT 'active'
                        CHECK(status IN ('active', 'suspended', 'archived')),
     plan_code          TEXT NOT NULL,
+    creation_source    TEXT NOT NULL DEFAULT 'user'
+                       CHECK(creation_source IN ('user', 'platform', 'migration')),
     clan_limit_override INTEGER CHECK(clan_limit_override IS NULL OR clan_limit_override > 0),
     created_by_user_id INTEGER,
     created_at         TEXT NOT NULL,
@@ -1184,9 +1186,27 @@ class Database:
         self.conn.execute("PRAGMA legacy_alter_table = ON")
         self.conn.execute("PRAGMA foreign_keys = OFF")
 
-        # 普通用户“一人一个免费联盟”由服务层按角色校验；超级管理员可以从
-        # 平台管理页创建多个联盟，因此旧的数据库唯一索引必须幂等移除。
+        # 普通用户创建的免费联盟由数据库硬约束为“一人一个”；平台管理和历史
+        # 迁移联盟使用独立 creation_source，不占用普通用户的创建名额。
         self.conn.execute("DROP INDEX IF EXISTS idx_alliances_one_active_free_per_creator")
+        alliance_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(alliances)")}
+        if "creation_source" not in alliance_cols:
+            self.conn.execute(
+                "ALTER TABLE alliances ADD COLUMN creation_source TEXT NOT NULL DEFAULT 'user' "
+                "CHECK(creation_source IN ('user', 'platform', 'migration'))"
+            )
+        self.conn.execute(
+            "UPDATE alliances SET creation_source='migration' WHERE alliance_key='sky-internal'"
+        )
+        self.conn.execute(
+            "UPDATE alliances SET creation_source='platform' WHERE alliance_key LIKE 'platform-%'"
+        )
+        self.conn.execute(
+            """CREATE UNIQUE INDEX IF NOT EXISTS idx_alliances_one_active_user_free
+               ON alliances(created_by_user_id)
+               WHERE plan_code='free' AND status='active'
+                 AND creation_source='user' AND created_by_user_id IS NOT NULL"""
+        )
 
         # 部落认证以 (alliance_id, clan_tag) 为单位。普通用户的自助认证流程仍在
         # 服务层拒绝已被其他联盟认证的 Tag；超级管理员可人工建立多联盟认证，

@@ -21,8 +21,11 @@ from modules.alliance.operations import (
     list_share_links,
     manual_set_clan_verification,
     platform_admin_capability,
+    platform_add_alliance_member,
     platform_alliance_detail,
     platform_dashboard,
+    platform_remove_alliance_member,
+    platform_set_alliance_member_role,
     record_share_visit,
     remove_alliance_member,
     remove_managed_clan,
@@ -109,6 +112,7 @@ class ManagedClanInput(BaseModel):
 
 class ManagedClanUpdateInput(BaseModel):
     category: str
+    clan_name: str | None = Field(default=None, max_length=40)
 
 
 class ManagedClanOrderInput(BaseModel):
@@ -241,7 +245,7 @@ def update_alliance_managed_clan(
     try:
         clan = update_managed_clan(
             db.conn, user["openid"], alliance_id, clan_tag,
-            category=payload.category,
+            category=payload.category, clan_name=payload.clan_name,
         )
         reconcile_sync_targets(db.conn)
         return clan
@@ -506,6 +510,52 @@ def platform_alliance(
         raise _error(exc) from exc
 
 
+@router.post("/platform/alliances/{alliance_id}/members", status_code=201)
+def platform_add_member(
+    alliance_id: int,
+    payload: MemberCreateInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        return platform_add_alliance_member(
+            db.conn, user["openid"], alliance_id, payload.openid, payload.role,
+        )
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.patch("/platform/alliances/{alliance_id}/members/{member_id}")
+def platform_update_member_role(
+    alliance_id: int,
+    member_id: int,
+    payload: MemberRoleInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        return platform_set_alliance_member_role(
+            db.conn, user["openid"], alliance_id, member_id, payload.role,
+        )
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.delete("/platform/alliances/{alliance_id}/members/{member_id}")
+def platform_delete_member(
+    alliance_id: int,
+    member_id: int,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        return platform_remove_alliance_member(
+            db.conn, user["openid"], alliance_id, member_id,
+        )
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
 @router.get("/platform/alliances/{alliance_id}/managed-clans")
 def platform_alliance_managed_clans(
     alliance_id: int,
@@ -570,7 +620,7 @@ def platform_update_alliance_managed_clan(
     try:
         clan = update_managed_clan(
             db.conn, user["openid"], alliance_id, clan_tag,
-            category=payload.category, platform=True,
+            category=payload.category, clan_name=payload.clan_name, platform=True,
         )
         reconcile_sync_targets(db.conn)
         return clan

@@ -65,7 +65,7 @@
                 <text class="countdown">{{ countdownLabel(clan) }}</text>
                 <view class="card-actions" @tap.stop>
                   <text class="detail-link" @tap="openDetail(clan)">详情 ›</text>
-                  <button class="share-btn" open-type="share" data-share-type="current-war" :data-clan-tag="clan.clan_tag" :data-clan-name="clan.clan_name">分享</button>
+                  <button class="share-btn" open-type="share" :disabled="!shareReady" data-share-type="current-war" :data-clan-tag="clan.clan_tag" :data-clan-name="clan.clan_name">分享</button>
                 </view>
               </view>
             </view>
@@ -109,7 +109,7 @@
               <text class="countdown">{{ formatFullDate(war.end_time) }} · {{ war.team_size }}人战</text>
               <view class="card-actions" @tap.stop>
                 <text class="detail-link" @tap="openHistoryDetail(war)">详情 ›</text>
-                <button class="share-btn" open-type="share" data-share-type="war-history" :data-clan-tag="war.clan_tag" :data-clan-name="war.clan_name" :data-war-key="war.war_key">分享</button>
+                <button class="share-btn" open-type="share" :disabled="!shareReady" data-share-type="war-history" :data-clan-tag="war.clan_tag" :data-clan-name="war.clan_name" :data-war-key="war.war_key">分享</button>
               </view>
             </view>
           </view>
@@ -182,7 +182,7 @@
                 <text class="countdown">{{ clan.member_count || 0 }}人队 · {{ clan.category === 'shell' ? '壳子队' : '实战队' }}</text>
                 <view class="card-actions" @tap.stop>
                   <text class="detail-link" @tap="openLeagueDetail(clan)">详情 ›</text>
-                  <button class="share-btn" open-type="share" data-share-type="cwl" :data-clan-tag="clan.clan_tag" :data-clan-name="clan.team_name || clan.team_alias" :data-period="leaguePeriod">分享</button>
+                  <button class="share-btn" open-type="share" :disabled="!shareReady" data-share-type="cwl" :data-clan-tag="clan.clan_tag" :data-clan-name="clan.team_name || clan.team_alias" :data-period="leaguePeriod">分享</button>
                 </view>
               </view>
             </view>
@@ -240,7 +240,7 @@
 import TopBar from '@/components/TopBar.vue'
 import CwlCheckIn from './check-in.vue'
 import { getCurrentWars, getWarHistory, getCwlLive } from '@/utils/api.js'
-import { ALLIANCE_CHANGED_EVENT, activateSharedAlliance, allianceQuery, getCurrentAlliance, getCurrentAllianceId, isSkyAlliance } from '@/utils/alliance.js'
+import { ALLIANCE_CHANGED_EVENT, ALLIANCE_SHARE_READY_EVENT, activateSharedAlliance, allianceQuery, getCurrentAlliance, getCurrentAllianceId, isSkyAlliance } from '@/utils/alliance.js'
 
 const CACHE_REFRESH_INTERVAL_MS = 60 * 1000
 const BUSINESS_TIMEZONE_OFFSET_MS = 8 * 60 * 60 * 1000
@@ -313,6 +313,8 @@ export default {
       clockTimer: null,
       refreshTimer: null,
       allianceChangeHandler: null,
+      shareReadyHandler: null,
+      shareReady: false,
       contextReady: false,
       currentAlliance: getCurrentAlliance(),
       skyAlliance: true,
@@ -408,9 +410,13 @@ export default {
       uni.showToast({ title: e.message || '联盟切换失败', icon: 'none' })
     }
     this.currentAlliance = getCurrentAlliance()
+    this.shareReady = allianceQuery().indexOf('share_token=') >= 0
+    this.shareReadyHandler = ready => { this.shareReady = Boolean(ready) }
+    uni.$on(ALLIANCE_SHARE_READY_EVENT, this.shareReadyHandler)
     this.skyAlliance = isSkyAlliance()
     this.allianceChangeHandler = alliance => {
       this.currentAlliance = alliance || getCurrentAlliance()
+      this.shareReady = false
       this.skyAlliance = isSkyAlliance()
       this.resetForAlliance()
     }
@@ -447,6 +453,7 @@ export default {
     this.stopTimers()
     if (this.$refs.checkIn) this.$refs.checkIn.stopTimers()
     if (this.allianceChangeHandler) uni.$off(ALLIANCE_CHANGED_EVENT, this.allianceChangeHandler)
+    if (this.shareReadyHandler) uni.$off(ALLIANCE_SHARE_READY_EVENT, this.shareReadyHandler)
   },
   onShareAppMessage(options) {
     const dataset = options && options.target && options.target.dataset

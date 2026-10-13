@@ -385,7 +385,7 @@ export default {
     roleLabel(value) { return ({ leader: '首领', admin: '管理', member: '成员' }[value] || value) },
     statusLabel(value) { return ({ active: '有效', removed: '已移除', blocked: '已封禁', left: '已离开', invited: '待加入' }[value] || value) },
     shareStatusLabel(value) { return ({ active: '有效', revoked: '已撤销', expired: '已过期' }[value] || value) },
-    planStateLabel(value) { return ({ active: '有效', legacy: '兼容权益', expired: '已到期', revoked: '已撤销' }[value] || value || '有效') },
+    planStateLabel(value) { return ({ active: '有效', grace: '7天只读宽限期', legacy: '兼容权益', expired: '已到期', revoked: '已撤销' }[value] || value || '有效') },
     shortDate(value) { return value ? String(value).replace('T', ' ').slice(0, 16) : '' }
   }
 }

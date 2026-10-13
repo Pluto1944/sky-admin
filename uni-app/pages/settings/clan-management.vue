@@ -26,7 +26,8 @@
               <picker :range="categories" range-key="label" :value="categoryIndex(clan.category)" @change="changeCategory(clan, $event)">
                 <text class="category">{{ categoryLabel(clan.category) }}⌄</text>
               </picker>
-              <text class="remove" @tap="confirmRemove(clan)">移除</text>
+              <text class="edit-name" @tap="editClanName(clan)">别名</text>
+              <text v-if="management.can_remove" class="remove" @tap="confirmRemove(clan)">移除</text>
             </view>
 
             <view class="clan-detail">
@@ -73,11 +74,14 @@
             </picker>
             <button class="primary-btn" :loading="saving" :disabled="saving || !newClanTag.trim()" @tap="addClan">添加部落</button>
           </template>
+          <text v-else-if="alliance.role !== 'leader'" class="limit-tip">只有联盟首领可以添加或移除部落；管理员可以调整标签和顺序。</text>
           <text v-else class="limit-tip">已达到当前套餐上限（{{ management.max_clans }} 个）。移除现有部落后可再添加。</text>
           <text class="notice">新部落默认未认证；移除只会停止当前联盟订阅，不会删除已有公共历史数据。</text>
         </view>
         <view class="bottom-space"></view>
       </template>
+      <view v-else-if="alliance && management.entitlement_status === 'grace'" class="state">付费权益处于7天只读宽限期，请续费后继续管理</view>
+      <view v-else-if="alliance && management.plan_code === 'internal'" class="state">内部联盟部落由系统配置维护</view>
       <view v-else-if="alliance" class="state">只有联盟管理员或首领可以管理部落</view>
       <view v-else class="state">请先创建或加入联盟</view>
     </scroll-view>
@@ -181,6 +185,27 @@ export default {
         uni.showToast({ title: err.message || '更新失败', icon: 'none' })
       }
     },
+    editClanName(clan) {
+      uni.showModal({
+        title: '修改部落别名',
+        editable: true,
+        placeholderText: clan.clan_name || clan.clan_tag,
+        content: clan.clan_name || '',
+        success: async result => {
+          if (!result.confirm) return
+          try {
+            const updated = await updateAllianceManagedClan(this.alliance.id, clan.clan_tag, {
+              category: clan.category,
+              clan_name: result.content || clan.clan_tag
+            })
+            clan.clan_name = updated.clan_name
+            uni.showToast({ title: '别名已更新', icon: 'success' })
+          } catch (err) {
+            uni.showToast({ title: err.message || '更新失败', icon: 'none' })
+          }
+        }
+      })
+    },
     async moveClan(index, offset) {
       const target = index + offset
       if (target < 0 || target >= this.activeClans.length) return
@@ -272,7 +297,7 @@ export default {
 .clan-row { min-height: 112rpx; padding: 14rpx 18rpx; box-sizing: border-box; display: flex; align-items: center; }
 .order-actions { width: 54rpx; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; }.order-btn { color: #6da9e8; font-size: 27rpx; line-height: 1.45; }.order-btn.disabled { color: #3d4558; }
 .clan-main { flex: 1; min-width: 0; }.clan-name, .clan-meta { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.clan-name { color: #e7e9f0; font-size: 26rpx; font-weight: 600; }.clan-meta { margin-top: 7rpx; color: #69738a; font-size: 20rpx; }
-.category { margin-left: 10rpx; padding: 9rpx 11rpx; border-radius: 8rpx; color: #78afe8; background: #202940; font-size: 21rpx; }.remove { margin-left: 14rpx; color: #b8757d; font-size: 21rpx; }
+.category { margin-left: 10rpx; padding: 9rpx 11rpx; border-radius: 8rpx; color: #78afe8; background: #202940; font-size: 21rpx; }.edit-name { margin-left: 12rpx; color: #7f9fca; font-size: 20rpx; }.remove { margin-left: 14rpx; color: #b8757d; font-size: 21rpx; }
 .clan-detail { padding: 0 18rpx 20rpx 72rpx; }
 .detail-row, .sync-row { display: flex; align-items: center; justify-content: space-between; }
 .detail-copy { display: flex; align-items: center; }.detail-label { color: #778197; font-size: 20rpx; }.detail-value { margin-left: 14rpx; color: #8d97aa; font-size: 20rpx; }

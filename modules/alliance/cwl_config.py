@@ -52,6 +52,8 @@ def editable_period(period: str) -> bool:
 def require_manager(context: AllianceContext) -> None:
     if context.role not in {"admin", "leader"}:
         raise CwlConfigError("联赛配置需要联盟管理权限")
+    if context.plan_code == "paid" and context.entitlement_status in {"grace", "expired", "revoked"}:
+        raise CwlConfigError("付费权益处于宽限期或已到期，联赛配置暂时只读")
 
 
 def max_cwl_teams(context: AllianceContext) -> int:
@@ -61,6 +63,27 @@ def max_cwl_teams(context: AllianceContext) -> int:
     except (TypeError, ValueError):
         parsed = {"free": 1, "paid": 20, "internal": 100}.get(context.plan_code, 1)
     return max(1, parsed)
+
+
+def _audit(
+    conn: sqlite3.Connection,
+    context: AllianceContext,
+    action: str,
+    entity_type: str,
+    entity_id: int,
+    details: dict,
+    now: str,
+) -> None:
+    conn.execute(
+        """INSERT INTO alliance_audit_events
+           (alliance_id, actor_user_id, action, entity_type, entity_id,
+            details_json, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (
+            context.alliance_id, context.user_id, action, entity_type,
+            str(entity_id), json.dumps(details, ensure_ascii=False, sort_keys=True), now,
+        ),
+    )
 
 
 def _season_row(conn: sqlite3.Connection, alliance_id: int, period: str):
@@ -150,6 +173,10 @@ def season_payload(
     result["max_teams"] = max_cwl_teams(context)
     result["can_edit"] = (
         context.role in {"admin", "leader"}
+        and not (
+            context.plan_code == "paid"
+            and context.entitlement_status in {"grace", "expired", "revoked"}
+        )
         and editable_period(selected)
         and status in EDITABLE_STATUSES
     )
@@ -190,12 +217,18 @@ def create_season(
         raise CwlConfigError("只能配置当前月和下月联赛")
     now = utc_now()
     with conn:
-        conn.execute(
+        cursor = conn.execute(
             """INSERT OR IGNORE INTO alliance_cwl_seasons
                (alliance_id, period, status, created_by_user_id, created_at, updated_at)
                VALUES (?, ?, 'draft', ?, ?, ?)""",
             (context.alliance_id, selected, context.user_id, now, now),
         )
+        if cursor.rowcount:
+            season = _season_row(conn, context.alliance_id, selected)
+            _audit(
+                conn, context, "cwl_season_created", "alliance_cwl_season",
+                int(season["id"]), {"period": selected}, now,
+            )
     return season_payload(conn, context, selected, include_draft=True) or {}
 
 
@@ -261,6 +294,11 @@ def add_team(
                 "UPDATE alliance_cwl_seasons SET updated_at = ? WHERE id = ?",
                 (now, season["id"]),
             )
+            _audit(
+                conn, context, "cwl_team_added", "alliance_cwl_team",
+                int(cursor.lastrowid),
+                {"period": period, "clan_tag": normalized, "category": category}, now,
+            )
     except sqlite3.IntegrityError as exc:
         raise CwlConfigError("该部落已在本月联赛队伍中") from exc
     return dict(conn.execute("SELECT * FROM alliance_cwl_teams WHERE id = ?", (cursor.lastrowid,)).fetchone())
@@ -287,6 +325,10 @@ def update_team(
     if sort_order < 0:
         raise CwlConfigError("sort_order 不能小于 0")
     now = utc_now()
+    before = conn.execute(
+        "SELECT * FROM alliance_cwl_teams WHERE id=? AND season_id=?",
+        (team_id, season["id"]),
+    ).fetchone()
     try:
         with conn:
             cursor = conn.execute(
@@ -305,6 +347,18 @@ def update_team(
                 "UPDATE alliance_cwl_seasons SET updated_at = ? WHERE id = ?",
                 (now, season["id"]),
             )
+            _audit(
+                conn, context, "cwl_team_updated", "alliance_cwl_team", team_id,
+                {
+                    "period": period,
+                    "before": dict(before) if before is not None else None,
+                    "after": {
+                        "clan_tag": normalized, "clan_name": clan_name or normalized,
+                        "team_alias": team_alias or clan_name or normalized,
+                        "category": category, "sort_order": sort_order,
+                    },
+                }, now,
+            )
     except sqlite3.IntegrityError as exc:
         raise CwlConfigError("该部落或队伍序号与现有配置冲突") from exc
     return dict(conn.execute("SELECT * FROM alliance_cwl_teams WHERE id = ?", (team_id,)).fetchone())
@@ -317,6 +371,10 @@ def delete_team(
     team_id: int,
 ) -> None:
     season = _editable_season(conn, context, period)
+    team = conn.execute(
+        "SELECT * FROM alliance_cwl_teams WHERE id=? AND season_id=?",
+        (team_id, season["id"]),
+    ).fetchone()
     with conn:
         cursor = conn.execute(
             "DELETE FROM alliance_cwl_teams WHERE id = ? AND season_id = ?",
@@ -326,6 +384,10 @@ def delete_team(
             raise CwlConfigError("联赛队伍不存在")
         now = utc_now()
         conn.execute("UPDATE alliance_cwl_seasons SET updated_at = ? WHERE id = ?", (now, season["id"]))
+        _audit(
+            conn, context, "cwl_team_deleted", "alliance_cwl_team", team_id,
+            {"period": period, "team": dict(team) if team is not None else None}, now,
+        )
 
 
 def copy_previous(
@@ -361,6 +423,10 @@ def copy_previous(
                     row["sort_order"], now, now,
                 ),
             )
+        _audit(
+            conn, context, "cwl_teams_copied", "alliance_cwl_season", int(target["id"]),
+            {"period": period, "source_period": previous, "team_count": len(rows)}, now,
+        )
     return season_payload(conn, context, period, include_draft=True) or {}
 
 

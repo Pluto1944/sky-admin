@@ -23,7 +23,7 @@
         <view class="overview-title-row">
           <text class="overview-title">部落战 · {{ statusLabel(war.status) }}</text>
           <text class="result-label" :class="resultClass(war.result)">{{ resultLabel(war.result) }}</text>
-          <button class="share-btn" open-type="share">分享</button>
+          <button class="share-btn" open-type="share" :disabled="!shareReady">分享</button>
         </view>
         <view class="match-row">
           <view class="match-side own-side"><text class="match-name">{{ war.clan.name }}</text><text class="match-tag">{{ war.clan.tag }}</text></view>
@@ -83,14 +83,14 @@
 <script>
 import TopBar from '@/components/TopBar.vue'
 import { getCurrentWar, getWarHistoryDetail } from '@/utils/api.js'
-import { ALLIANCE_CHANGED_EVENT, activateSharedAlliance, allianceQuery } from '@/utils/alliance.js'
+import { ALLIANCE_CHANGED_EVENT, ALLIANCE_SHARE_READY_EVENT, activateSharedAlliance, allianceQuery } from '@/utils/alliance.js'
 
 const CACHE_REFRESH_INTERVAL_MS = 60 * 1000
 
 export default {
   components: { TopBar },
   data() {
-    return { clanTag: '', warKey: '', war: null, renderedUpdatedAt: null, loading: true, loadError: '', nowMs: Date.now(), clockTimer: null, refreshTimer: null, allianceChangeHandler: null }
+    return { clanTag: '', warKey: '', war: null, renderedUpdatedAt: null, loading: true, loadError: '', nowMs: Date.now(), clockTimer: null, refreshTimer: null, allianceChangeHandler: null, shareReadyHandler: null, shareReady: false }
   },
   computed: {
     isHistory() { return !!this.warKey },
@@ -104,13 +104,23 @@ export default {
     try { this.clanTag = decodeURIComponent((options && options.clan_tag) || '') } catch (e) { this.clanTag = (options && options.clan_tag) || '' }
     try { this.warKey = decodeURIComponent((options && options.war_key) || '') } catch (e) { this.warKey = (options && options.war_key) || '' }
     try { await activateSharedAlliance(options) } catch (e) { this.loadError = e.message || '联盟切换失败' }
-    this.allianceChangeHandler = () => uni.switchTab({ url: '/pages/war/war' })
+    this.shareReady = allianceQuery().indexOf('share_token=') >= 0
+    this.shareReadyHandler = ready => { this.shareReady = Boolean(ready) }
+    uni.$on(ALLIANCE_SHARE_READY_EVENT, this.shareReadyHandler)
+    this.allianceChangeHandler = () => {
+      this.shareReady = false
+      uni.switchTab({ url: '/pages/war/war' })
+    }
     uni.$on(ALLIANCE_CHANGED_EVENT, this.allianceChangeHandler)
     this.fetchDetail()
   },
   onShow() { if (!this.isHistory) this.startTimers() },
   onHide() { this.stopTimers() },
-  onUnload() { this.stopTimers(); if (this.allianceChangeHandler) uni.$off(ALLIANCE_CHANGED_EVENT, this.allianceChangeHandler) },
+  onUnload() {
+    this.stopTimers()
+    if (this.allianceChangeHandler) uni.$off(ALLIANCE_CHANGED_EVENT, this.allianceChangeHandler)
+    if (this.shareReadyHandler) uni.$off(ALLIANCE_SHARE_READY_EVENT, this.shareReadyHandler)
+  },
   async onPullDownRefresh() {
     await this.fetchDetail()
     uni.stopPullDownRefresh()

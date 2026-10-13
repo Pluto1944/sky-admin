@@ -25,7 +25,10 @@ from modules.alliance.operations import (
     list_join_requests,
     manual_set_clan_verification,
     platform_admin_capability,
+    platform_add_alliance_member,
     platform_dashboard,
+    platform_remove_alliance_member,
+    platform_set_alliance_member_role,
     record_share_visit,
     reconcile_expired_plan_grants,
     remove_managed_clan,
@@ -57,6 +60,12 @@ def ops(db, monkeypatch):
             (openid, NOW_TEXT, NOW_TEXT),
         )
         ids[openid] = int(cursor.lastrowid)
+    db.conn.commit()
+    db.conn.execute(
+        """INSERT INTO platform_admins (user_id, status, note, created_at, updated_at)
+           VALUES (?, 'active', 'test operator', ?, ?)""",
+        (ids["operator"], NOW_TEXT, NOW_TEXT),
+    )
     db.conn.commit()
     monkeypatch.setenv("M5_FREE_ALLIANCE_ENABLED", "true")
     monkeypatch.setenv("M5_FREE_ALLIANCE_OPENIDS", "operator,owner,other-owner")
@@ -121,6 +130,14 @@ def test_platform_admin_dropdown_still_allows_only_one_free_alliance(ops):
         create_free_alliance(db.conn, "operator", name="平台测试二", now=NOW)
 
 
+def test_free_creation_allowlist_never_grants_platform_admin(ops):
+    db, ids = ops
+    db.conn.execute("UPDATE platform_admins SET status='revoked' WHERE user_id=?", (ids["operator"],))
+    db.conn.commit()
+    assert free_alliance_capability(db.conn, "operator")["allowed"] is True
+    assert platform_admin_capability(db.conn, "operator")["allowed"] is False
+
+
 def test_platform_admin_can_create_multiple_alliances_only_via_platform_operation(ops):
     db, _ = ops
     first = create_platform_alliance(db.conn, "operator", "平台一", now=NOW)
@@ -131,7 +148,10 @@ def test_platform_admin_can_create_multiple_alliances_only_via_platform_operatio
            WHERE created_by_user_id=(SELECT id FROM wechat_users WHERE openid='operator')
              AND status='active'"""
     ).fetchone()[0] == 2
-    assert free_alliance_capability(db.conn, "operator")["can_create"] is False
+    # 平台创建的测试联盟不占用个人普通入口的“一人一个”名额。
+    capability = free_alliance_capability(db.conn, "operator")
+    assert capability["can_create"] is True
+    assert capability["existing_alliance_id"] is None
 
 
 def test_share_join_is_member_only_idempotent_and_blocked_users_stay_blocked(ops):
@@ -174,6 +194,42 @@ def test_share_join_is_member_only_idempotent_and_blocked_users_stay_blocked(ops
     db.conn.commit()
     with pytest.raises(AllianceOperationError, match="无法通过分享重新加入"):
         join_from_share(db.conn, "blocked", shared["token"], now=NOW)
+
+
+def test_share_join_has_no_total_membership_cap_but_keeps_daily_rate_limit(ops):
+    db, ids = ops
+    for index in range(50):
+        alliance_id = _alliance(db, ids["operator"], f"joined-{index}", plan="paid")
+        db.conn.execute(
+            """INSERT INTO alliance_members
+               (alliance_id, user_id, role, status, joined_at, created_at, updated_at)
+               VALUES (?, ?, 'member', 'active', ?, ?, ?)""",
+            (alliance_id, ids["member"], NOW_TEXT, NOW_TEXT, NOW_TEXT),
+        )
+    db.conn.commit()
+
+    target_id = _alliance(db, ids["owner"], "joined-target", plan="paid")
+    shared = create_share_link(db.conn, "owner", target_id, now=NOW)
+    assert join_from_share(db.conn, "member", shared["token"], now=NOW)["joined"] is True
+    assert db.conn.execute(
+        """SELECT COUNT(*) FROM alliance_members
+           WHERE user_id=? AND status='active'""",
+        (ids["member"],),
+    ).fetchone()[0] == 51
+
+    for index in range(19):
+        db.conn.execute(
+            """INSERT INTO alliance_audit_events
+               (alliance_id, actor_user_id, action, entity_type, entity_id,
+                details_json, created_at)
+               VALUES (?, ?, 'alliance_share_joined', 'alliance_member', ?, '{}', ?)""",
+            (target_id, ids["member"], f"rate-{index}", NOW_TEXT),
+        )
+    db.conn.commit()
+    second_target_id = _alliance(db, ids["other-owner"], "joined-target-2", plan="paid")
+    second_share = create_share_link(db.conn, "other-owner", second_target_id, now=NOW)
+    with pytest.raises(AllianceOperationError, match="过于频繁"):
+        join_from_share(db.conn, "member", second_share["token"], now=NOW)
 
 
 def test_expired_share_cannot_join(ops):
@@ -430,10 +486,18 @@ def test_paid_expiry_downgrades_sync_and_preserves_rows(ops):
     before = SyncPlanner(db.conn)._clan_interests(NOW)
     assert {item["metadata"]["sync_tier"] for item in before} == {"high"}
 
-    result = reconcile_expired_plan_grants(db.conn, now=NOW + timedelta(days=2))
+    grace = reconcile_expired_plan_grants(db.conn, now=NOW + timedelta(days=2))
+    assert grace == {"expired_grants": 0, "deactivated_clans": 0}
+    during_grace = SyncPlanner(db.conn)._clan_interests(NOW + timedelta(days=2))
+    assert {item["metadata"]["sync_tier"] for item in during_grace} == {"high"}
+
+    result = reconcile_expired_plan_grants(db.conn, now=NOW + timedelta(days=9))
     assert result == {"expired_grants": 1, "deactivated_clans": 1}
-    after = SyncPlanner(db.conn)._clan_interests(NOW + timedelta(days=2))
+    after = SyncPlanner(db.conn)._clan_interests(NOW + timedelta(days=9))
     assert {item["metadata"]["sync_tier"] for item in after} == {"low"}
+    assert db.conn.execute(
+        "SELECT plan_code FROM alliances WHERE id=?", (alliance_id,),
+    ).fetchone()[0] == "free"
     assert db.conn.execute(
         "SELECT COUNT(*) FROM alliance_clans WHERE alliance_id=?", (alliance_id,),
     ).fetchone()[0] == 2
@@ -500,6 +564,41 @@ def test_free_manager_can_manage_one_clan_and_replace_removed_subscription(ops):
         db.conn, "owner", alliance_id, clan_tag="#9PY", category="farm", now=NOW,
     )
     assert replacement["clan_tag"] == "#9PY"
+
+
+def test_alliance_admin_can_edit_but_only_leader_changes_clan_membership(ops):
+    db, ids = ops
+    alliance_id = _alliance(db, ids["owner"], "admin-clan-boundary", plan="paid")
+    grant_alliance_plan(
+        db.conn, "operator", alliance_id, plan_code="paid",
+        expires_at=(NOW + timedelta(days=365)).isoformat(), now=NOW,
+    )
+    added = add_alliance_member_by_openid(
+        db.conn, "owner", alliance_id, "member", role="admin", now=NOW,
+    )
+    assert added["role"] == "admin"
+    add_managed_clan(
+        db.conn, "owner", alliance_id, clan_tag="#2QQ", category="combat", now=NOW,
+    )
+    listed = list_managed_clans(db.conn, "member", alliance_id)
+    assert listed["can_manage"] is True
+    assert listed["can_add"] is False
+    assert listed["can_remove"] is False
+    update_managed_clan(
+        db.conn, "member", alliance_id, "#2QQ", category="normal",
+        clan_name="管理员别名", now=NOW,
+    )
+    assert db.conn.execute(
+        "SELECT clan_name FROM alliance_clans WHERE alliance_id=? AND clan_tag='#2QQ'",
+        (alliance_id,),
+    ).fetchone()[0] == "管理员别名"
+    reorder_managed_clans(db.conn, "member", alliance_id, ["#2QQ"], now=NOW)
+    with pytest.raises(AllianceOperationError, match="角色没有此操作权限"):
+        add_managed_clan(
+            db.conn, "member", alliance_id, clan_tag="#9PY", category="farm", now=NOW,
+        )
+    with pytest.raises(AllianceOperationError, match="角色没有此操作权限"):
+        remove_managed_clan(db.conn, "member", alliance_id, "#2QQ", now=NOW)
 
 
 def test_paid_manager_can_reorder_active_clans(ops):
@@ -599,3 +698,29 @@ def test_platform_dashboard_requires_operator_and_exposes_no_openid(ops):
     assert "openid" not in result["alliances"][0]
     with pytest.raises(AllianceOperationError, match="平台管理员"):
         platform_dashboard(db.conn, "member")
+
+
+def test_platform_admin_can_assign_leader_and_manage_members(ops):
+    db, ids = ops
+    alliance_id = _alliance(db, ids["owner"], "platform-members")
+
+    added = platform_add_alliance_member(
+        db.conn, "operator", alliance_id, "member", "member", now=NOW,
+    )
+    platform_set_alliance_member_role(
+        db.conn, "operator", alliance_id, added["member_id"], "leader", now=NOW,
+    )
+    assert resolve_alliance_context(db.conn, "member", alliance_id).role == "leader"
+    assert resolve_alliance_context(db.conn, "owner", alliance_id).role == "admin"
+    with pytest.raises(AllianceOperationError, match="先把首领移交"):
+        platform_remove_alliance_member(
+            db.conn, "operator", alliance_id, added["member_id"], now=NOW,
+        )
+    owner_member_id = int(db.conn.execute(
+        "SELECT id FROM alliance_members WHERE alliance_id=? AND user_id=?",
+        (alliance_id, ids["owner"]),
+    ).fetchone()[0])
+    removed = platform_remove_alliance_member(
+        db.conn, "operator", alliance_id, owner_member_id, now=NOW,
+    )
+    assert removed["status"] == "removed"

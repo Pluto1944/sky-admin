@@ -299,12 +299,14 @@ def apply_sky_migration(
             )
         conn.execute(
             """INSERT INTO alliances
-                   (alliance_key, name, status, plan_code, created_at, updated_at)
-               VALUES (?, ?, 'active', 'internal', ?, ?)
+                   (alliance_key, name, status, plan_code, creation_source,
+                    created_at, updated_at)
+               VALUES (?, ?, 'active', 'internal', 'migration', ?, ?)
                ON CONFLICT(alliance_key) DO UPDATE SET
                    name = excluded.name,
                    status = 'active',
                    plan_code = 'internal',
+                   creation_source = 'migration',
                    updated_at = excluded.updated_at""",
             (SKY_ALLIANCE_KEY, SKY_ALLIANCE_NAME, timestamp, timestamp),
         )

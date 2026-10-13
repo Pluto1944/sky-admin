@@ -16,6 +16,8 @@ import {
 
 export { ALLIANCE_CHANGED_EVENT, getCurrentAlliance, getCurrentAllianceId }
 
+export const ALLIANCE_SHARE_READY_EVENT = 'alliance-share-ready'
+
 const PENDING_SHARE_KEY = 'pendingAllianceShareToken'
 const SHARE_TOKEN_CACHE_KEY = 'allianceShareTokens'
 const LOCAL_HISTORY_KEY = 'localAllianceHistory'
@@ -183,7 +185,7 @@ export function allianceQuery() {
   const query = [`alliance_id=${encodeURIComponent(id)}`]
   const cache = uni.getStorageSync(SHARE_TOKEN_CACHE_KEY) || {}
   const item = cache[String(id)]
-  if (item && item.token && item.expiresAt && Date.parse(item.expiresAt) > Date.now()) {
+  if (item && item.shareType === 'browse' && item.token && item.expiresAt && Date.parse(item.expiresAt) > Date.now()) {
     query.push(`share_token=${encodeURIComponent(item.token)}`)
   }
   return query.join('&')

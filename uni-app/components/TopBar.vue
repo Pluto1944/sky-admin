@@ -98,6 +98,8 @@
 <script>
 import {
   ALLIANCE_CHANGED_EVENT,
+  ALLIANCE_SHARE_READY_EVENT,
+  allianceQuery,
   getCurrentAlliance,
   loadAllianceContext,
   ensureBrowseShareToken,
@@ -159,6 +161,7 @@ export default {
     this.allianceButtonStyle = `width:${Math.max(120, menuLeft - 24)}px;height:${menuHeight}px;`
     this.allianceChangeHandler = alliance => {
       this.currentAlliance = alliance
+      this.prepareBrowseSharing(alliance)
       // 同时向当前页面发送组件事件。部分小程序运行时在 tab 页中恢复全局事件
       // 监听较慢，页面可通过这个事件立即按新的联盟 ID 刷新数据。
       this.$emit('alliance-change', alliance)
@@ -170,6 +173,31 @@ export default {
     if (this.allianceChangeHandler) uni.$off(ALLIANCE_CHANGED_EVENT, this.allianceChangeHandler)
   },
   methods: {
+    setShareMenuEnabled(enabled) {
+      if (enabled && typeof uni.showShareMenu === 'function') {
+        uni.showShareMenu({ menus: ['shareAppMessage', 'shareTimeline'] })
+      } else if (!enabled && typeof uni.hideShareMenu === 'function') {
+        uni.hideShareMenu({ menus: ['shareAppMessage', 'shareTimeline'] })
+      }
+    },
+    async prepareBrowseSharing(alliance) {
+      this.setShareMenuEnabled(false)
+      uni.$emit(ALLIANCE_SHARE_READY_EVENT, false)
+      if (!alliance) return false
+      try {
+        if (this.isLoggedIn && alliance.role !== 'visitor') {
+          await ensureBrowseShareToken(alliance.id)
+        }
+        const ready = allianceQuery().indexOf('share_token=') >= 0
+        this.setShareMenuEnabled(ready)
+        uni.$emit(ALLIANCE_SHARE_READY_EVENT, ready)
+        return ready
+      } catch (e) {
+        this.setShareMenuEnabled(false)
+        uni.$emit(ALLIANCE_SHARE_READY_EVENT, false)
+        return false
+      }
+    },
     allianceRoleLabel(item) {
       if (!item) return '成员'
       const role = item.role_label || ({ leader: '首领', admin: '管理', member: '成员' }[item.role] || '成员')
@@ -181,6 +209,7 @@ export default {
     },
     async refreshAlliances() {
       this.allianceLoading = true
+      this.setShareMenuEnabled(false)
       try {
         const result = await loadAllianceContext()
         this.alliances = result.alliances
@@ -188,9 +217,7 @@ export default {
         this.hiddenAlliances = result.hiddenAlliances || []
         this.allianceFeatures = result.features || {}
         this.currentAlliance = result.current
-        if (this.currentAlliance && this.currentAlliance.role !== 'visitor' && this.isLoggedIn) {
-          ensureBrowseShareToken(this.currentAlliance.id).catch(() => {})
-        }
+        await this.prepareBrowseSharing(this.currentAlliance)
       } catch (e) {
         this.alliances = []
         this.browsedAlliances = []
@@ -279,9 +306,7 @@ export default {
         this.currentAlliance = this.isLoggedIn
           ? await selectAlliance(item.id)
           : selectLocalAlliance(item)
-        if (this.currentAlliance.role !== 'visitor' && this.isLoggedIn) {
-          ensureBrowseShareToken(this.currentAlliance.id).catch(() => {})
-        }
+        await this.prepareBrowseSharing(this.currentAlliance)
         this.closeAlliancePicker()
       } catch (e) {
         uni.showToast({ title: e.message || '切换失败', icon: 'none' })
