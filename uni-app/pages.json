@@ -64,6 +64,20 @@
       }
     },
     {
+      "path": "pages/settings/platform-alliance-detail",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "联盟详情"
+      }
+    },
+    {
+      "path": "pages/settings/platform-settings",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "平台设置"
+      }
+    },
+    {
       "path": "pages/login/login",
       "style": {
         "navigationBarTitleText": "微信登录"

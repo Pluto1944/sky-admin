@@ -2016,3 +2016,45 @@ def platform_alliance_detail(
         (int(alliance_id),),
     ).fetchall()]
     return {"alliance": dict(alliance), "clans": clans, "members": members, "audit": audits}
+
+
+def platform_rename_alliance(
+    conn: sqlite3.Connection,
+    openid: str,
+    alliance_id: int,
+    name: str,
+    *,
+    now: datetime | None = None,
+) -> dict:
+    """由超级管理员修改联盟名称，并同时保留联盟与平台审计。"""
+    actor = require_platform_admin(conn, openid)
+    display_name = str(name or "").strip()
+    if not display_name:
+        raise AllianceOperationError("联盟名称不能为空", status_code=422)
+    if len(display_name) > 30:
+        raise AllianceOperationError("联盟名称不能超过 30 个字符", status_code=422)
+    row = conn.execute(
+        "SELECT name, status FROM alliances WHERE id=?", (int(alliance_id),),
+    ).fetchone()
+    if row is None:
+        raise AllianceOperationError("联盟不存在", status_code=404)
+    if row["status"] == "archived":
+        raise AllianceOperationError("已删除联盟不能修改", status_code=409)
+    timestamp = _iso(now)
+    details = {"before": row["name"], "after": display_name}
+    with conn:
+        conn.execute(
+            "UPDATE alliances SET name=?, updated_at=? WHERE id=?",
+            (display_name, timestamp, int(alliance_id)),
+        )
+        _alliance_audit(
+            conn, alliance_id=int(alliance_id), actor_user_id=int(actor["id"]),
+            action="alliance_renamed_by_platform", entity_type="alliance",
+            entity_id=int(alliance_id), details=details, timestamp=timestamp,
+        )
+        _platform_audit(
+            conn, actor_user_id=int(actor["id"]), action="alliance_renamed",
+            entity_type="alliance", entity_id=int(alliance_id), details=details,
+            timestamp=timestamp,
+        )
+    return {"alliance_id": int(alliance_id), "name": display_name}

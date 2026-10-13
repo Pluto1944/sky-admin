@@ -11,6 +11,7 @@
           <text>自有部落 · {{ clans.length }} 个</text>
           <text v-if="updatedAt">更新于 {{ formatTime(updatedAt) }}</text>
         </view>
+        <button v-if="clans.length && canManageClans" class="clan-overview-manage list-first-action" @tap="openClanManagement">管理部落</button>
         <view v-if="!clans.length" class="clan-overview-empty">
           <text class="clan-overview-empty-title">当前联盟还没有部落</text>
           <text class="clan-overview-empty-tip">添加后会进入后台同步队列，首次数据可能需要等待。</text>
@@ -55,7 +56,6 @@
             <text class="clan-overview-detail-hint">查看详情</text>
           </view>
         </view>
-        <button v-if="clans.length && canManageClans" class="clan-overview-manage" @tap="openClanManagement">管理部落</button>
         <view class="clan-overview-bottom"></view>
       </view>
     </scroll-view>
@@ -201,6 +201,7 @@ export default {
 .clan-overview-empty-title { color: #d7dbe6; font-size: 29rpx; font-weight: 600; }
 .clan-overview-empty-tip { margin-top: 16rpx; color: #6f788e; font-size: 22rpx; line-height: 1.6; }
 .clan-overview-manage { margin: 8rpx 0 0; border: 1rpx solid #303958; border-radius: 12rpx; color: #79b4f2; background: #1b2338; font-size: 25rpx; line-height: 2.6; }
+.clan-overview-manage.list-first-action { margin: 0 0 18rpx; }
 .clan-overview-manage.primary { width: 360rpx; margin-top: 30rpx; color: #fff; border-color: #315f9a; background: #315f9a; }
 .clan-overview-manage::after { border: 0; }
 .clan-overview-card { margin-bottom: 22rpx; padding: 24rpx; box-sizing: border-box; background: #1a1a2e; border: 1rpx solid #2a2a4a; border-radius: 16rpx; }

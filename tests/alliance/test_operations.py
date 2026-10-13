@@ -27,6 +27,7 @@ from modules.alliance.operations import (
     platform_admin_capability,
     platform_add_alliance_member,
     platform_dashboard,
+    platform_rename_alliance,
     platform_remove_alliance_member,
     platform_set_alliance_member_role,
     record_share_visit,
@@ -698,6 +699,27 @@ def test_platform_dashboard_requires_operator_and_exposes_no_openid(ops):
     assert "openid" not in result["alliances"][0]
     with pytest.raises(AllianceOperationError, match="平台管理员"):
         platform_dashboard(db.conn, "member")
+
+
+def test_platform_admin_can_rename_alliance_with_audit(ops):
+    db, ids = ops
+    alliance_id = _alliance(db, ids["owner"], "rename-by-platform")
+
+    result = platform_rename_alliance(
+        db.conn, "operator", alliance_id, "新联盟名称", now=NOW,
+    )
+
+    assert result["name"] == "新联盟名称"
+    assert db.conn.execute(
+        "SELECT name FROM alliances WHERE id=?", (alliance_id,),
+    ).fetchone()[0] == "新联盟名称"
+    assert db.conn.execute(
+        """SELECT COUNT(*) FROM platform_audit_events
+           WHERE action='alliance_renamed' AND entity_id=?""",
+        (str(alliance_id),),
+    ).fetchone()[0] == 1
+    with pytest.raises(AllianceOperationError, match="平台管理员"):
+        platform_rename_alliance(db.conn, "member", alliance_id, "无权修改", now=NOW)
 
 
 def test_platform_admin_can_assign_leader_and_manage_members(ops):

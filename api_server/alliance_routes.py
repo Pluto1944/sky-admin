@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -45,7 +46,7 @@ from modules.alliance.free_alliance import (
     subscribe_free_clan,
     subscription_status,
 )
-from modules.alliance.operations import platform_admin_capability
+from modules.alliance.operations import platform_admin_capability, require_platform_admin
 from modules.alliance.operations import (
     AllianceOperationError,
     archive_alliance,
@@ -1145,6 +1146,33 @@ def _configured_cwl_teams(
     return season, teams
 
 
+def _platform_cwl_context(
+    user: dict,
+    alliance_id: int,
+    db: Database,
+) -> AllianceContext:
+    """构建仅供超级管理入口使用的 CWL 管理上下文。"""
+    try:
+        actor = require_platform_admin(db.conn, user["openid"])
+    except AllianceOperationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    context = resolve_alliance_public_context(
+        db.conn, alliance_id, management=True, openid=user["openid"],
+    )
+    if context is None:
+        raise HTTPException(status_code=404, detail="联盟不存在或已停用")
+    entitlements = dict(context.entitlements)
+    entitlements["max_cwl_teams"] = 10000
+    return replace(
+        context,
+        user_id=int(actor["id"]),
+        role="leader",
+        entitlements=entitlements,
+        entitlement_status="active",
+        entitlement_expires_at=None,
+    )
+
+
 def _decorate_cwl_season_teams(db: Database, season: dict) -> dict:
     """补齐配置页需要的 COC 首领与月度联赛管理展示字段。"""
     teams = season.get("teams") or []
@@ -1409,6 +1437,151 @@ def alliance_cwl_season_confirm(
         raise _cwl_config_error(exc) from exc
 
 
+@router.get("/platform/alliances/{alliance_id}/cwl/seasons/{period}")
+def platform_cwl_season_detail(
+    alliance_id: int,
+    period: str,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    context = _platform_cwl_context(user, alliance_id, db)
+    try:
+        season = season_payload(db.conn, context, period, include_draft=True)
+    except CwlConfigError as exc:
+        raise _cwl_config_error(exc) from exc
+    if season is None:
+        raise HTTPException(status_code=404, detail="联赛月份配置不存在")
+    season = _decorate_cwl_season_teams(db, season)
+    db.conn.commit()
+    return {"alliance_id": alliance_id, "platform_admin": True, **season}
+
+
+@router.post("/platform/alliances/{alliance_id}/cwl/seasons/{period}")
+def platform_cwl_season_create(
+    alliance_id: int,
+    period: str,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    context = _platform_cwl_context(user, alliance_id, db)
+    try:
+        season = _decorate_cwl_season_teams(db, create_season(db.conn, context, period))
+        return {"alliance_id": alliance_id, "platform_admin": True, **season}
+    except CwlConfigError as exc:
+        raise _cwl_config_error(exc) from exc
+
+
+@router.post("/platform/alliances/{alliance_id}/cwl/seasons/{period}/copy-previous")
+def platform_cwl_season_copy_previous(
+    alliance_id: int,
+    period: str,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    context = _platform_cwl_context(user, alliance_id, db)
+    try:
+        season = _decorate_cwl_season_teams(db, copy_previous(db.conn, context, period))
+        return {"alliance_id": alliance_id, "platform_admin": True, **season}
+    except CwlConfigError as exc:
+        raise _cwl_config_error(exc) from exc
+
+
+@router.post("/platform/alliances/{alliance_id}/cwl/seasons/{period}/teams")
+def platform_cwl_team_add(
+    alliance_id: int,
+    period: str,
+    payload: CwlTeamInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    context = _platform_cwl_context(user, alliance_id, db)
+    try:
+        team = add_team(
+            db.conn, context, period,
+            clan_tag=payload.clan_tag, clan_name=payload.clan_name,
+            team_alias=payload.team_alias, category=payload.category,
+            manager_names=payload.manager_names,
+        )
+        return {"alliance_id": alliance_id, "period": period, "team": team}
+    except CwlConfigError as exc:
+        raise _cwl_config_error(exc) from exc
+
+
+@router.put("/platform/alliances/{alliance_id}/cwl/seasons/{period}/teams/{team_id}")
+def platform_cwl_team_update(
+    alliance_id: int,
+    period: str,
+    team_id: int,
+    payload: CwlTeamInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    context = _platform_cwl_context(user, alliance_id, db)
+    try:
+        team = update_team(
+            db.conn, context, period, team_id,
+            clan_tag=payload.clan_tag, clan_name=payload.clan_name,
+            team_alias=payload.team_alias, category=payload.category,
+            sort_order=payload.sort_order, manager_names=payload.manager_names,
+        )
+        return {"alliance_id": alliance_id, "period": period, "team": team}
+    except CwlConfigError as exc:
+        raise _cwl_config_error(exc) from exc
+
+
+@router.delete("/platform/alliances/{alliance_id}/cwl/seasons/{period}/teams/{team_id}")
+def platform_cwl_team_delete(
+    alliance_id: int,
+    period: str,
+    team_id: int,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    context = _platform_cwl_context(user, alliance_id, db)
+    try:
+        delete_team(db.conn, context, period, team_id)
+        return {"alliance_id": alliance_id, "period": period, "deleted": True}
+    except CwlConfigError as exc:
+        raise _cwl_config_error(exc) from exc
+
+
+@router.put("/platform/alliances/{alliance_id}/cwl/seasons/{period}/teams/{team_id}/amend")
+def platform_cwl_team_amend(
+    alliance_id: int,
+    period: str,
+    team_id: int,
+    payload: CwlFrozenTeamAmendInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    context = _platform_cwl_context(user, alliance_id, db)
+    try:
+        team = amend_frozen_team(
+            db.conn, context, period, team_id,
+            clan_tag=payload.clan_tag, clan_name=payload.clan_name,
+            team_alias=payload.team_alias, manager_names=payload.manager_names,
+            category=payload.category, reason=payload.reason,
+        )
+        return {"alliance_id": alliance_id, "period": period, "team": team}
+    except CwlConfigError as exc:
+        raise _cwl_config_error(exc) from exc
+
+
+@router.post("/platform/alliances/{alliance_id}/cwl/seasons/{period}/confirm")
+def platform_cwl_season_confirm(
+    alliance_id: int,
+    period: str,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    context = _platform_cwl_context(user, alliance_id, db)
+    try:
+        season = _decorate_cwl_season_teams(db, confirm_season(db.conn, context, period))
+        return {"alliance_id": alliance_id, "platform_admin": True, **season}
+    except CwlConfigError as exc:
+        raise _cwl_config_error(exc) from exc
+
+
 @router.get("/alliances/{alliance_id}/cwl/live")
 def alliance_cwl_live(
     alliance_id: int,
@@ -1463,4 +1636,59 @@ def alliance_cwl_live_detail(
     )
     result["alliance_id"] = alliance_id
     db.conn.commit()
+    return result
+
+
+@router.get("/alliances/{alliance_id}/cwl/check-in")
+def alliance_cwl_check_in(
+    alliance_id: int,
+    context: AllianceContext = Depends(alliance_view_context),
+    db: Database = Depends(get_db),
+):
+    """返回当前联盟本月联赛队伍的出刀点名；只读共享 Tag 缓存。"""
+    period = legacy_routes._current_cwl_live_period()
+    season, teams = _configured_cwl_teams(context, db, period)
+    result = legacy_routes._build_cwl_check_in(db, period, teams)
+    result.update({
+        "alliance_id": alliance_id,
+        "season_status": season.get("status") if season else None,
+        "configured_team_count": len(teams),
+        "empty_reason": "no_config" if not teams else None,
+    })
+    return result
+
+
+@router.get("/alliances/{alliance_id}/cwl/assembly")
+def alliance_cwl_assembly(
+    alliance_id: int,
+    context: AllianceContext = Depends(alliance_view_context),
+    db: Database = Depends(get_db),
+):
+    """返回当前联盟本月联赛队伍的集结检查；只读共享 Tag 缓存。"""
+    period = legacy_routes._current_cwl_live_period()
+    season, teams = _configured_cwl_teams(context, db, period)
+    result = legacy_routes._build_cwl_assembly(db, period, teams)
+    result.update({
+        "alliance_id": alliance_id,
+        "season_status": season.get("status") if season else None,
+        "configured_team_count": len(teams),
+        "empty_reason": "no_config" if not teams else None,
+    })
+    return result
+
+
+@router.get("/alliances/{alliance_id}/cwl/assembly/{clan_tag}")
+def alliance_cwl_assembly_detail(
+    alliance_id: int,
+    clan_tag: str,
+    context: AllianceContext = Depends(alliance_view_context),
+    db: Database = Depends(get_db),
+):
+    """返回当前联盟本月指定联赛部落的集结详情。"""
+    period = legacy_routes._current_cwl_live_period()
+    _season, teams = _configured_cwl_teams(context, db, period)
+    result = legacy_routes._build_cwl_assembly_detail(
+        db, period, clan_tag, teams,
+    )
+    result["alliance_id"] = alliance_id
     return result

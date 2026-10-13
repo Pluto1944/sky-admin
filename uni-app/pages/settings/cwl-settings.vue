@@ -1,12 +1,12 @@
 <template>
   <view class="page">
-    <TopBar title="联赛设置" :showBack="true" backFallback="/pages/settings/settings" />
+    <TopBar title="联赛设置" :showBack="true" :backFallback="backFallback" />
 
     <scroll-view scroll-y class="content">
       <view class="summary">
         <view>
           <text class="summary-title">{{ alliance ? alliance.name : '月度联赛队伍' }}</text>
-          <text class="summary-sub">{{ periodLabel }} · 已配置 {{ teams.length }}/{{ maxTeams }} 支队伍</text>
+          <text class="summary-sub">{{ periodLabel }} · 已配置 {{ teams.length }}/{{ maxTeamsLabel }} 支队伍</text>
         </view>
         <text class="summary-role">{{ alliance ? (alliance.role_label || roleLabel(alliance.role)) : '' }}</text>
       </view>
@@ -33,7 +33,7 @@
           </view>
           <view class="status-row">
             <text class="status-label">队伍数量</text>
-            <text class="status-value">{{ teams.length }}/{{ maxTeams }}</text>
+            <text class="status-value">{{ teams.length }}/{{ maxTeamsLabel }}</text>
           </view>
           <text v-if="!canEdit" class="status-tip">官方联赛组已发现或月份已结束，当前配置只读</text>
           <button
@@ -156,7 +156,8 @@ import {
   updateAllianceCwlTeam,
   deleteAllianceCwlTeam,
   amendAllianceCwlTeam,
-  confirmAllianceCwlSeason
+  confirmAllianceCwlSeason,
+  getPlatformAlliance
 } from '@/utils/api.js'
 import { getCurrentAlliance, loadAllianceContext } from '@/utils/alliance.js'
 
@@ -184,6 +185,7 @@ export default {
       ],
       categoryOptions: [{ key: 'combat', label: '实战队' }, { key: 'shell', label: '壳子队' }],
       categoryIndex: 0,
+      platformAllianceId: null,
       alliance: null,
       season: null,
       loading: true,
@@ -202,17 +204,32 @@ export default {
     periodLabel() { return this.periodOptions[this.periodIndex].label },
     currentPeriodValue() { return this.periodOptions[0].period },
     nextPeriodLabel() { return this.periodOptions[1].label },
-    canManage() { return this.alliance && ['admin', 'leader'].indexOf(this.alliance.role) >= 0 },
+    canManage() { return this.alliance && ['admin', 'leader', 'platform_admin'].indexOf(this.alliance.role) >= 0 },
     teams() { return this.season && this.season.teams ? this.season.teams.slice().sort((a, b) => a.sort_order - b.sort_order || a.team_index - b.team_index) : [] },
     maxTeams() { return (this.season && this.season.max_teams) || Number(this.alliance && this.alliance.plan && this.alliance.plan.entitlements && this.alliance.plan.entitlements.max_cwl_teams) || 1 },
+    maxTeamsLabel() { return this.platformAllianceId ? '不限' : this.maxTeams },
+    backFallback() { return this.platformAllianceId ? `/pages/settings/platform-alliance-detail?id=${this.platformAllianceId}` : '/pages/settings/settings' },
     status() { return this.season ? this.season.status : 'draft' },
     statusLabel() { return ({ draft: '草稿', active: '已确认', frozen: '已冻结', complete: '已结束' })[this.status] || this.status },
     canEdit() { return this.canManage && (!this.season || this.season.can_edit) }
   },
-  async onLoad() {
+  async onLoad(options) {
     try {
-      const loaded = await loadAllianceContext()
-      this.alliance = loaded.current || getCurrentAlliance()
+      const platformAllianceId = Number(options && options.platform_alliance_id)
+      if (platformAllianceId) {
+        this.platformAllianceId = platformAllianceId
+        const detail = await getPlatformAlliance(platformAllianceId)
+        this.alliance = {
+          id: detail.alliance.id,
+          name: detail.alliance.name,
+          role: 'platform_admin',
+          role_label: '超级管理',
+          plan: { entitlements: { max_cwl_teams: 10000 } }
+        }
+      } else {
+        const loaded = await loadAllianceContext()
+        this.alliance = loaded.current || getCurrentAlliance()
+      }
       if (!this.canManage) {
         uni.showToast({ title: '联赛配置需要联盟管理权限', icon: 'none' })
       }
@@ -226,14 +243,14 @@ export default {
     async loadSeason() {
       this.loading = true
       try {
-        this.season = await getAllianceCwlSeason(this.period)
+        this.season = await getAllianceCwlSeason(this.period, this.platformAllianceId)
       } catch (e) {
         if ((e.message || '').indexOf('不存在') >= 0) this.season = null
         else throw e
       } finally { this.loading = false }
     },
     async ensureSeason() {
-      if (!this.season) this.season = await createAllianceCwlSeason(this.period)
+      if (!this.season) this.season = await createAllianceCwlSeason(this.period, this.platformAllianceId)
       return this.season
     },
     async selectPeriod(period) {
@@ -247,7 +264,7 @@ export default {
       if (!this.canManage || this.busy) return
       this.busy = true
       try {
-        this.season = await createAllianceCwlSeason(this.period)
+        this.season = await createAllianceCwlSeason(this.period, this.platformAllianceId)
         uni.showToast({ title: `${this.periodLabel}联赛已创建`, icon: 'success' })
       } catch (e) { uni.showToast({ title: e.message || '创建失败', icon: 'none' }) }
       finally { this.busy = false }
@@ -268,7 +285,7 @@ export default {
       this.busy = true
       try {
         await this.ensureSeason()
-        this.season = await copyPreviousAllianceCwlSeason(this.period)
+        this.season = await copyPreviousAllianceCwlSeason(this.period, this.platformAllianceId)
       } catch (e) { uni.showToast({ title: e.message || '复制失败', icon: 'none' }) }
       finally { this.busy = false }
     },
@@ -277,7 +294,7 @@ export default {
       this.busy = true
       try {
         await this.ensureSeason()
-        await addAllianceCwlTeam(this.period, this.form)
+        await addAllianceCwlTeam(this.period, this.form, this.platformAllianceId)
         this.form = { clan_tag: '', clan_name: '', team_alias: '', manager_names: '', category: 'combat' }
         this.categoryIndex = 0
         await this.loadSeason()
@@ -293,7 +310,7 @@ export default {
         category: team.category,
         sort_order: team.sort_order
       }, overrides || {})
-      await updateAllianceCwlTeam(this.period, team.id, payload)
+      await updateAllianceCwlTeam(this.period, team.id, payload, this.platformAllianceId)
     },
     startEdit(team) {
       this.cancelCorrection()
@@ -358,7 +375,7 @@ export default {
         success: async (res) => {
           if (!res.confirm) return
           this.busy = true
-          try { await deleteAllianceCwlTeam(this.period, team.id); await this.loadSeason() }
+          try { await deleteAllianceCwlTeam(this.period, team.id, this.platformAllianceId); await this.loadSeason() }
           catch (e) { uni.showToast({ title: e.message || '删除失败', icon: 'none' }) }
           finally { this.busy = false }
         }
@@ -399,14 +416,14 @@ export default {
           manager_names: this.correction.manager_names.trim(),
           category: this.correction.category,
           reason: '联赛设置页面编辑'
-        })
+        }, this.platformAllianceId)
         this.cancelCorrection()
         await this.loadSeason()
         uni.showToast({ title: '队伍已更新', icon: 'success' })
       } catch (e) { uni.showToast({ title: e.message || '保存失败', icon: 'none' }) }
       finally { this.busy = false }
     },
-    roleLabel(value) { return ({ leader: '首领', admin: '管理', member: '成员' }[value] || value) },
+    roleLabel(value) { return ({ leader: '首领', admin: '管理', member: '成员', platform_admin: '超级管理' }[value] || value) },
     confirmSeason() {
       uni.showModal({
         title: '确认联赛队伍',
@@ -415,7 +432,7 @@ export default {
           if (!res.confirm) return
           this.busy = true
           try {
-            this.season = await confirmAllianceCwlSeason(this.period)
+            this.season = await confirmAllianceCwlSeason(this.period, this.platformAllianceId)
             uni.showToast({ title: '已确认', icon: 'success' })
           } catch (e) { uni.showToast({ title: e.message || '确认失败', icon: 'none' }) }
           finally { this.busy = false }

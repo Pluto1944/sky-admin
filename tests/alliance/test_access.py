@@ -643,6 +643,123 @@ def test_alliance_cwl_uses_monthly_config_instead_of_daily_clan_scope(db):
     assert exc.value.status_code == 404
 
 
+def test_alliance_cwl_check_in_and_assembly_use_monthly_team_scope(db, monkeypatch):
+    apply_sky_migration(db.conn, CLANS, now=NOW)
+    user_id = _user(db, "paid-check-in")
+    alliance_id = _paid_alliance(db, key="paid-check-in", name="点名联盟")
+    _membership(db, alliance_id, user_id, "member")
+    period = "2026-10"
+    monkeypatch.setattr(legacy_routes, "_current_cwl_live_period", lambda: period)
+    season_id = db.conn.execute(
+        """INSERT INTO alliance_cwl_seasons
+           (alliance_id, period, status, created_at, updated_at, confirmed_at)
+           VALUES (?, ?, 'active', ?, ?, ?)""",
+        (alliance_id, period, NOW, NOW, NOW),
+    ).lastrowid
+    db.conn.execute(
+        """INSERT INTO alliance_cwl_teams
+           (season_id, team_index, clan_tag, clan_name_snapshot, team_alias,
+            category, sort_order, source, created_at, updated_at)
+           VALUES (?, 0, '#AAA', '联盟队伍', '冠三', 'combat', 0, 'manual', ?, ?)""",
+        (season_id, NOW, NOW),
+    )
+    db.conn.executemany(
+        """INSERT INTO league_teams
+           (period, team_index, team_alias, team_name, clan_tag, category, member_count)
+           VALUES (?, ?, ?, ?, ?, ?, 15)""",
+        [
+            (period, 0, "冠三", "联盟队伍", "#AAA", "combat"),
+            (period, 1, "外部", "其他队伍", "#OUT", "shell"),
+        ],
+    )
+    snapshot_id = db.conn.execute(
+        """INSERT INTO cwl_roster_snapshots
+           (period, revision, is_active, source_sheet, content_hash, data_json, created_at)
+           VALUES (?, 1, 1, 'sheet', 'hash', '{}', ?)""",
+        (period, NOW),
+    ).lastrowid
+    db.conn.executemany(
+        """INSERT INTO cwl_assembly_cache
+           (period, clan_tag, roster_snapshot_id, team_index, team_alias, team_name,
+            category, status, data_json, updated_at, attempted_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'checking', ?, ?, ?)""",
+        [
+            (period, "#AAA", snapshot_id, 0, "冠三", "联盟队伍", "combat", '{"official_count":15}', NOW, NOW),
+            (period, "#OUT", snapshot_id, 1, "外部", "其他队伍", "shell", '{"official_count":15}', NOW, NOW),
+        ],
+    )
+    db.conn.commit()
+    context = _context(db, "paid-check-in", alliance_id)
+
+    check_in = alliance_routes.alliance_cwl_check_in(
+        alliance_id, context=context, db=db,
+    )
+    assembly = alliance_routes.alliance_cwl_assembly(
+        alliance_id, context=context, db=db,
+    )
+    detail = alliance_routes.alliance_cwl_assembly_detail(
+        alliance_id, "#aaa", context=context, db=db,
+    )
+
+    assert [item["clan_tag"] for item in check_in["teams"]] == ["#AAA"]
+    assert [item["clan_tag"] for item in assembly["teams"]] == ["#AAA"]
+    assert detail["clan_tag"] == "#AAA"
+    assert detail["alliance_id"] == alliance_id
+    with pytest.raises(HTTPException) as exc:
+        alliance_routes.alliance_cwl_assembly_detail(
+            alliance_id, "#OUT", context=context, db=db,
+        )
+    assert exc.value.status_code == 404
+
+
+def test_platform_cwl_management_bypasses_plan_team_limit(db, monkeypatch):
+    apply_sky_migration(db.conn, CLANS, now=NOW)
+    operator_id = _user(db, "platform-cwl")
+    outsider_id = _user(db, "not-platform-cwl")
+    db.conn.execute(
+        """INSERT INTO platform_admins
+           (user_id, status, note, created_at, updated_at)
+           VALUES (?, 'active', 'test', ?, ?)""",
+        (operator_id, NOW, NOW),
+    )
+    alliance_id = _paid_alliance(db, key="platform-cwl-target", name="平台联赛")
+    db.conn.execute(
+        "UPDATE alliances SET plan_code='free' WHERE id=?", (alliance_id,),
+    )
+    db.conn.commit()
+    monkeypatch.setattr("modules.alliance.cwl_config.current_period", lambda: "2026-10")
+
+    created = alliance_routes.platform_cwl_season_create(
+        alliance_id, "2026-10", user={"openid": "platform-cwl"}, db=db,
+    )
+    alliance_routes.platform_cwl_team_add(
+        alliance_id,
+        "2026-10",
+        alliance_routes.CwlTeamInput(clan_tag="#AAA", category="combat"),
+        user={"openid": "platform-cwl"},
+        db=db,
+    )
+    alliance_routes.platform_cwl_team_add(
+        alliance_id,
+        "2026-10",
+        alliance_routes.CwlTeamInput(clan_tag="#BBB", category="shell"),
+        user={"openid": "platform-cwl"},
+        db=db,
+    )
+    detail = alliance_routes.platform_cwl_season_detail(
+        alliance_id, "2026-10", user={"openid": "platform-cwl"}, db=db,
+    )
+
+    assert created["max_teams"] == 10000
+    assert detail["platform_admin"] is True
+    assert [item["clan_tag"] for item in detail["teams"]] == ["#AAA", "#BBB"]
+    with pytest.raises(HTTPException) as exc:
+        alliance_routes.platform_cwl_season_detail(
+            alliance_id, "2026-10", user={"openid": "not-platform-cwl"}, db=db,
+        )
+    assert exc.value.status_code == 403
+
+
 def test_alliance_league_stats_only_uses_its_monthly_combat_teams(db):
     apply_sky_migration(db.conn, CLANS, now=NOW)
     user_id = _user(db, "paid-stats")

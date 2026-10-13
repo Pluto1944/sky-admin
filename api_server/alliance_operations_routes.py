@@ -23,6 +23,7 @@ from modules.alliance.operations import (
     platform_admin_capability,
     platform_add_alliance_member,
     platform_alliance_detail,
+    platform_rename_alliance,
     platform_dashboard,
     platform_remove_alliance_member,
     platform_set_alliance_member_role,
@@ -84,6 +85,10 @@ class PlatformSettingsInput(BaseModel):
 
 
 class PlatformAllianceCreateInput(BaseModel):
+    name: str = Field(min_length=1, max_length=30)
+
+
+class PlatformAllianceUpdateInput(BaseModel):
     name: str = Field(min_length=1, max_length=30)
 
 
@@ -506,6 +511,21 @@ def platform_alliance(
 ):
     try:
         return platform_alliance_detail(db.conn, user["openid"], alliance_id)
+    except AllianceOperationError as exc:
+        raise _error(exc) from exc
+
+
+@router.patch("/platform/alliances/{alliance_id}")
+def platform_update_alliance(
+    alliance_id: int,
+    payload: PlatformAllianceUpdateInput,
+    user: dict = Depends(require_user),
+    db: Database = Depends(get_db),
+):
+    try:
+        return platform_rename_alliance(
+            db.conn, user["openid"], alliance_id, payload.name,
+        )
     except AllianceOperationError as exc:
         raise _error(exc) from exc
 

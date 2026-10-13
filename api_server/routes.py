@@ -818,11 +818,8 @@ def cwl_live(period: Optional[str] = None, db: Database = Depends(get_db)):
     return _build_cwl_live_summary(db, selected_period)
 
 
-@router.get("/clan/cwl-check-in")
-def cwl_check_in(db: Database = Depends(get_db)):
-    """返回当月各队当前未出刀成员及此前已结束场次漏刀记录。"""
-    period = _current_cwl_live_period()
-    teams = _cwl_live_teams(db, period)
+def _build_cwl_check_in(db: Database, period: str, teams: list[dict]) -> dict:
+    """从指定月度队伍和共享缓存组装联赛点名，供旧接口与联盟接口复用。"""
     items = []
     updated = []
     for team in teams:
@@ -878,6 +875,13 @@ def cwl_check_in(db: Database = Depends(get_db)):
     }
 
 
+@router.get("/clan/cwl-check-in")
+def cwl_check_in(db: Database = Depends(get_db)):
+    """返回当月各队当前未出刀成员及此前已结束场次漏刀记录。"""
+    period = _current_cwl_live_period()
+    return _build_cwl_check_in(db, period, _cwl_live_teams(db, period))
+
+
 def _active_cwl_roster_snapshot(db: Database, period: str) -> dict | None:
     row = db.conn.execute(
         "SELECT * FROM cwl_roster_snapshots WHERE period = ? AND is_active = 1",
@@ -909,11 +913,8 @@ def _cwl_assembly_item(team: dict, cache: dict | None) -> dict:
     }
 
 
-@router.get("/clan/cwl-assembly")
-def cwl_assembly(db: Database = Depends(get_db)):
-    """返回当月联赛集结检查的部落汇总；只读本地缓存。"""
-    period = _current_cwl_live_period()
-    teams = _cwl_live_teams(db, period)
+def _build_cwl_assembly(db: Database, period: str, teams: list[dict]) -> dict:
+    """从指定月度队伍和共享缓存组装联赛集结汇总。"""
     snapshot = _active_cwl_roster_snapshot(db, period)
     caches = {
         normalize_tag(row["clan_tag"]): dict(row)
@@ -944,13 +945,22 @@ def cwl_assembly(db: Database = Depends(get_db)):
     }
 
 
-@router.get("/clan/cwl-assembly/{clan_tag}")
-def cwl_assembly_detail(clan_tag: str, db: Database = Depends(get_db)):
-    """返回当月单个联赛部落的集结详情。"""
+@router.get("/clan/cwl-assembly")
+def cwl_assembly(db: Database = Depends(get_db)):
+    """返回当月联赛集结检查的部落汇总；只读本地缓存。"""
     period = _current_cwl_live_period()
+    return _build_cwl_assembly(db, period, _cwl_live_teams(db, period))
+
+
+def _build_cwl_assembly_detail(
+    db: Database,
+    period: str,
+    clan_tag: str,
+    teams: list[dict],
+) -> dict:
     normalized = normalize_tag(clan_tag)
     team = next(
-        (item for item in _cwl_live_teams(db, period) if item.get("clan_tag") == normalized),
+        (item for item in teams if normalize_tag(item.get("clan_tag")) == normalized),
         None,
     )
     if team is None:
@@ -970,6 +980,15 @@ def cwl_assembly_detail(clan_tag: str, db: Database = Depends(get_db)):
         "present_members": payload.get("present_members", []),
     })
     return result
+
+
+@router.get("/clan/cwl-assembly/{clan_tag}")
+def cwl_assembly_detail(clan_tag: str, db: Database = Depends(get_db)):
+    """返回当月单个联赛部落的集结详情。"""
+    period = _current_cwl_live_period()
+    return _build_cwl_assembly_detail(
+        db, period, clan_tag, _cwl_live_teams(db, period),
+    )
 
 
 @router.get("/clan/cwl-live/{clan_tag}")
