@@ -1,6 +1,6 @@
 <template>
   <view class="page">
-    <TopBar title="联盟详情" :show-back="true" back-fallback="/pages/settings/platform-management" />
+    <TopBar title="联盟详情" :show-back="true" back-fallback="/pages/settings/platform-alliance-list" />
     <scroll-view scroll-y class="content">
       <view v-if="loading && !detail" class="state">加载联盟...</view>
       <template v-else-if="detail">
@@ -12,106 +12,46 @@
             </view>
             <text :class="['status', 'status-' + detail.alliance.status]">{{ statusLabel(detail.alliance.status) }}</text>
           </view>
-          <view class="summary-actions">
-            <button class="secondary-btn" @tap="renameAlliance">修改名称</button>
-            <button v-if="detail.alliance.status === 'active'" class="primary-btn" @tap="openCwlManagement">管理联赛部落</button>
-          </view>
-          <text class="platform-tip">超级管理模式：部落和联赛队伍数量不受套餐限制，所有操作均保留审计。</text>
+          <button class="secondary-btn rename-btn" @tap="renameAlliance">修改联盟名称</button>
+          <text class="platform-tip">超级管理模式：成员、部落和联赛使用平台专用页面及权限，数量不受套餐限制，所有操作均保留审计。</text>
         </view>
 
-        <view class="section-title">联盟成员与权限</view>
-        <view class="card">
-          <text class="sub section-tip">通过 OpenID 添加成员；设置新首领时，原首领自动变为管理员。</text>
-          <view v-for="member in detail.members" :key="member.id" class="member-row">
-            <view class="grow">
-              <text class="name small">{{ member.nickname || member.account_name || ('微信用户' + member.id) }}</text>
-              <text class="openid">{{ member.openid }}</text>
-              <text v-if="member.status !== 'active'" class="sub">{{ memberStatusLabel(member.status) }}</text>
-            </view>
-            <picker v-if="member.status === 'active'" :range="memberRoles" range-key="label" :value="memberRoleIndex(member.role)" @change="changePlatformMemberRole(member, $event)">
-              <text class="category">{{ memberRoleLabel(member.role) }}⌄</text>
-            </picker>
-            <text v-if="member.status === 'active' && member.role !== 'leader'" class="remove" @tap="confirmPlatformMemberRemove(member)">移除</text>
+        <view class="section-title">业务管理</view>
+        <view class="menu-card">
+          <view class="menu-row" @tap="openPage('platform-alliance-members')">
+            <view class="menu-icon icon-member">员</view>
+            <view class="grow"><text class="name">管理联盟成员</text><text class="sub">添加、搜索、设置权限与移交首领</text></view>
+            <text class="menu-count">{{ activeMemberCount }} 人</text><text class="arrow">›</text>
           </view>
-          <view class="form-block">
-            <input v-model="newMemberOpenid" class="input" maxlength="200" placeholder="用户 OpenID" placeholder-style="color:#59637a" />
-            <picker :range="memberRoles" range-key="label" :value="newMemberRoleIndex" @change="newMemberRoleIndex = Number($event.detail.value) || 0">
-              <view class="picker-field">角色：{{ memberRoles[newMemberRoleIndex].label }}⌄</view>
-            </picker>
-            <button class="primary-btn full-btn" :loading="memberBusy" :disabled="memberBusy || !newMemberOpenid.trim()" @tap="addPlatformMember">添加成员</button>
+          <view class="menu-row" @tap="openPage('platform-clan-management')">
+            <view class="menu-icon icon-clan">部</view>
+            <view class="grow"><text class="name">管理部落</text><text class="sub">添加、移除、排序、类型、别名与认证</text></view>
+            <text class="menu-count">{{ activeClanCount }} 个</text><text class="arrow">›</text>
+          </view>
+          <view class="menu-row" @tap="openPage('platform-cwl-settings')">
+            <view class="menu-icon icon-cwl">赛</view>
+            <view class="grow"><text class="name">管理联赛部落</text><text class="sub">配置本月和下月的联赛队伍</text></view>
+            <text class="menu-count">按月配置</text><text class="arrow">›</text>
           </view>
         </view>
 
-        <view class="section-title">管理部落</view>
-        <view class="card">
-          <text class="sub section-tip">已添加 {{ platformActiveClans.length }} 个；超级管理员不受套餐数量限制。</text>
-          <view v-for="(clan, index) in platformActiveClans" :key="clan.clan_tag" class="clan-row">
-            <view class="order-column">
-              <text :class="['order-btn', { disabled: index === 0 }]" @tap="movePlatformClan(index, -1)">↑</text>
-              <text :class="['order-btn', { disabled: index === platformActiveClans.length - 1 }]" @tap="movePlatformClan(index, 1)">↓</text>
-            </view>
-            <view class="grow">
-              <text class="name small">{{ clan.clan_name || clan.clan_tag }}</text>
-              <text class="sub">{{ clan.clan_tag }} · {{ verificationLabel(clan.verification_status) }}</text>
-            </view>
-            <view class="clan-actions">
-              <picker :range="categories" range-key="label" :value="categoryIndex(clan.category)" @change="changePlatformCategory(clan, $event)">
-                <view class="clan-action category">{{ categoryLabel(clan.category) }}⌄</view>
-              </picker>
-              <view class="clan-action edit" @tap="editPlatformClanName(clan)">别名</view>
-              <view class="clan-action remove" @tap="confirmPlatformRemove(clan)">移除</view>
-            </view>
+        <view class="section-title">联盟设置</view>
+        <view class="menu-card">
+          <view class="menu-row" @tap="openPage('platform-alliance-plan')">
+            <view class="menu-icon icon-plan">权</view>
+            <view class="grow"><text class="name">套餐权益</text><text class="sub">调整免费版、付费版与权益期限</text></view>
+            <text class="menu-count">{{ planLabel(detail.alliance.plan_code) }}</text><text class="arrow">›</text>
           </view>
-          <view class="form-block">
-            <input v-model="newClanTag" class="input" maxlength="15" placeholder="部落标签，例如 #2QQ" placeholder-style="color:#59637a" />
-            <picker :range="categories" range-key="label" :value="newCategoryIndex" @change="newCategoryIndex = Number($event.detail.value) || 0">
-              <view class="picker-field">部落标签：{{ categories[newCategoryIndex].label }}⌄</view>
-            </picker>
-            <button class="primary-btn full-btn" :loading="clanBusy" :disabled="clanBusy || !newClanTag.trim()" @tap="addPlatformClan">添加部落</button>
+          <view class="menu-row" @tap="openPage('platform-alliance-status')">
+            <view class="menu-icon icon-status">态</view>
+            <view class="grow"><text class="name">联盟状态</text><text class="sub">停用、恢复或删除联盟</text></view>
+            <text :class="['menu-count', 'status-' + detail.alliance.status]">{{ statusLabel(detail.alliance.status) }}</text><text class="arrow">›</text>
           </view>
-        </view>
-
-        <view class="section-title">人工部落认证</view>
-        <view class="card">
-          <view v-for="clan in detail.clans" :key="clan.id" class="verification-row">
-            <view class="grow">
-              <text class="name small">{{ clan.clan_name || clan.clan_tag }}</text>
-              <text class="sub">{{ clan.clan_tag }} · {{ verificationLabel(clan.verification_status) }}</text>
-            </view>
-            <button v-if="clan.verification_status !== 'verified' && clan.status === 'active'" class="mini-btn" @tap="setVerification(clan, 'verified')">认证</button>
-            <button v-if="clan.verification_status === 'verified'" class="mini-btn danger" @tap="setVerification(clan, 'revoked')">撤销</button>
-            <button v-if="clan.status === 'active'" class="mini-btn warn" @tap="setVerification(clan, 'disputed')">争议</button>
+          <view class="menu-row" @tap="openPage('platform-alliance-audit')">
+            <view class="menu-icon icon-audit">记</view>
+            <view class="grow"><text class="name">联盟操作记录</text><text class="sub">查看该联盟最近的审计记录</text></view>
+            <text class="menu-count">{{ detail.audit.length }} 条</text><text class="arrow">›</text>
           </view>
-          <text v-if="!detail.clans.length" class="sub">该联盟尚未添加部落</text>
-        </view>
-
-        <view class="section-title">套餐权益</view>
-        <view class="card">
-          <text class="name">{{ planLabel(detail.alliance.plan_code) }}</text>
-          <text class="sub">{{ grantStatusLabel(detail.alliance.grant_status) }}<text v-if="detail.alliance.expires_at"> · 权益至 {{ shortDate(detail.alliance.expires_at) }}</text></text>
-          <button class="primary-btn full-btn" @tap="grantPaid">开通付费版365天</button>
-          <button class="secondary-btn full-btn" @tap="grantFree">设为免费版</button>
-        </view>
-
-        <view class="section-title">联盟状态</view>
-        <view class="card danger-card">
-          <text class="sub">当前：{{ statusLabel(detail.alliance.status) }}</text>
-          <button v-if="detail.alliance.status === 'active'" class="secondary-btn full-btn danger-text" @tap="changeStatus('suspended')">停用联盟</button>
-          <template v-else-if="detail.alliance.status === 'suspended'">
-            <button class="primary-btn full-btn" @tap="changeStatus('active')">恢复联盟</button>
-            <button class="delete-btn" @tap="deleteAlliance">删除已停用联盟</button>
-            <text class="sub danger-tip">删除后不再显示；公共历史事实和审计记录仍会保留。</text>
-          </template>
-          <text v-else class="sub">该联盟已经删除，不能恢复。</text>
-        </view>
-
-        <view class="section-title">联盟操作记录</view>
-        <view class="card">
-          <view v-for="(item, index) in detail.audit" :key="index" class="audit-row">
-            <text class="sub grow">{{ item.action }} · {{ item.entity_type }} {{ item.entity_id || '' }}</text>
-            <text class="time">{{ shortDate(item.created_at) }}</text>
-          </view>
-          <text v-if="!detail.audit.length" class="sub">暂无联盟操作</text>
         </view>
         <view class="bottom-space"></view>
       </template>
@@ -121,69 +61,25 @@
 
 <script>
 import TopBar from '@/components/TopBar.vue'
-import {
-  addPlatformAllianceMember,
-  addPlatformManagedClan,
-  deletePlatformAlliance,
-  getPlatformAlliance,
-  getPlatformManagedClans,
-  removePlatformAllianceMember,
-  removePlatformManagedClan,
-  renamePlatformAlliance,
-  reorderPlatformManagedClans,
-  savePlatformAllianceStatus,
-  savePlatformPlan,
-  savePlatformVerification,
-  updatePlatformAllianceMemberRole,
-  updatePlatformManagedClan
-} from '@/utils/api.js'
+import { getPlatformAlliance, renamePlatformAlliance } from '@/utils/api.js'
 
 export default {
   components: { TopBar },
-  data() {
-    return {
-      allianceId: null,
-      loading: true,
-      detail: null,
-      platformManagement: { clans: [] },
-      clanBusy: false,
-      memberBusy: false,
-      newClanTag: '',
-      newCategoryIndex: 0,
-      newMemberOpenid: '',
-      newMemberRoleIndex: 0,
-      memberRoles: [
-        { key: 'member', label: '成员' },
-        { key: 'admin', label: '管理员' },
-        { key: 'leader', label: '首领' }
-      ],
-      categories: [
-        { key: 'normal', label: '实战' },
-        { key: 'combat', label: '战营' },
-        { key: 'farm', label: '互刷' },
-        { key: 'flat', label: '偷矿' }
-      ]
-    }
-  },
+  data() { return { allianceId: null, loading: true, detail: null } },
   computed: {
-    platformActiveClans() { return (this.platformManagement.clans || []).filter(item => item.status === 'active') }
+    activeMemberCount() { return this.detail ? this.detail.members.filter(item => item.status === 'active').length : 0 },
+    activeClanCount() { return this.detail ? this.detail.clans.filter(item => item.status === 'active').length : 0 }
   },
   onLoad(options) { this.allianceId = Number(options && options.id) || null },
   async onShow() { if (this.allianceId) await this.reloadDetail() },
   methods: {
     async reloadDetail() {
       this.loading = true
-      try {
-        const [detail, management] = await Promise.all([
-          getPlatformAlliance(this.allianceId),
-          getPlatformManagedClans(this.allianceId)
-        ])
-        this.detail = detail
-        this.platformManagement = management
-      } catch (err) {
-        uni.showModal({ title: '联盟加载失败', content: err.message || '请稍后重试', showCancel: false })
-      } finally { this.loading = false }
+      try { this.detail = await getPlatformAlliance(this.allianceId) }
+      catch (err) { uni.showModal({ title: '联盟加载失败', content: err.message || '请稍后重试', showCancel: false }) }
+      finally { this.loading = false }
     },
+    openPage(page) { uni.navigateTo({ url: `/pages/settings/${page}?id=${this.allianceId}` }) },
     renameAlliance() {
       const alliance = this.detail.alliance
       uni.showModal({
@@ -198,160 +94,18 @@ export default {
         }
       })
     },
-    openCwlManagement() { uni.navigateTo({ url: `/pages/settings/cwl-settings?platform_alliance_id=${this.allianceId}` }) },
-    async addPlatformClan() {
-      if (this.clanBusy || !this.newClanTag.trim()) return
-      this.clanBusy = true
-      try {
-        await addPlatformManagedClan(this.allianceId, { clan_tag: this.newClanTag.trim(), category: this.categories[this.newCategoryIndex].key })
-        this.newClanTag = ''
-        await this.reloadDetail()
-        uni.showToast({ title: '部落已添加', icon: 'success' })
-      } catch (err) { uni.showModal({ title: '添加失败', content: err.message || '请稍后重试', showCancel: false }) }
-      finally { this.clanBusy = false }
-    },
-    async addPlatformMember() {
-      if (this.memberBusy || !this.newMemberOpenid.trim()) return
-      this.memberBusy = true
-      try {
-        await addPlatformAllianceMember(this.allianceId, this.newMemberOpenid.trim(), this.memberRoles[this.newMemberRoleIndex].key)
-        this.newMemberOpenid = ''
-        await this.reloadDetail()
-        uni.showToast({ title: '成员已添加', icon: 'success' })
-      } catch (err) { uni.showModal({ title: '添加失败', content: err.message || '请稍后重试', showCancel: false }) }
-      finally { this.memberBusy = false }
-    },
-    changePlatformMemberRole(member, event) {
-      const selected = this.memberRoles[Number(event.detail.value) || 0]
-      if (!selected || selected.key === member.role) return
-      const apply = async () => {
-        try {
-          await updatePlatformAllianceMemberRole(this.allianceId, member.id, selected.key)
-          await this.reloadDetail()
-          uni.showToast({ title: '权限已更新', icon: 'success' })
-        } catch (err) { uni.showModal({ title: '更新失败', content: err.message || '请稍后重试', showCancel: false }) }
-      }
-      if (selected.key !== 'leader') return apply()
-      uni.showModal({
-        title: '移交联盟首领',
-        content: `确认将${member.nickname || member.account_name || '该用户'}设为联盟首领？原首领将变为管理员。`,
-        success: result => { if (result.confirm) apply() }
-      })
-    },
-    confirmPlatformMemberRemove(member) {
-      uni.showModal({
-        title: '移除联盟成员', content: `确认移除${member.nickname || member.account_name || '该用户'}？`, confirmColor: '#c9797f',
-        success: async result => {
-          if (!result.confirm) return
-          try { await removePlatformAllianceMember(this.allianceId, member.id); await this.reloadDetail() }
-          catch (err) { uni.showToast({ title: err.message || '移除失败', icon: 'none' }) }
-        }
-      })
-    },
-    async changePlatformCategory(clan, event) {
-      const selected = this.categories[Number(event.detail.value) || 0]
-      if (!selected || selected.key === clan.category) return
-      try { await updatePlatformManagedClan(this.allianceId, clan.clan_tag, { category: selected.key }); await this.reloadDetail() }
-      catch (err) { uni.showToast({ title: err.message || '更新失败', icon: 'none' }) }
-    },
-    editPlatformClanName(clan) {
-      uni.showModal({
-        title: '修改部落别名', editable: true, content: clan.clan_name || '', placeholderText: clan.clan_tag,
-        success: async result => {
-          if (!result.confirm) return
-          try {
-            await updatePlatformManagedClan(this.allianceId, clan.clan_tag, { category: clan.category, clan_name: result.content || clan.clan_tag })
-            await this.reloadDetail()
-          } catch (err) { uni.showToast({ title: err.message || '更新失败', icon: 'none' }) }
-        }
-      })
-    },
-    async movePlatformClan(index, offset) {
-      const target = index + offset
-      if (target < 0 || target >= this.platformActiveClans.length) return
-      const ordered = this.platformActiveClans.slice()
-      const moved = ordered.splice(index, 1)[0]
-      ordered.splice(target, 0, moved)
-      try { await reorderPlatformManagedClans(this.allianceId, ordered.map(item => item.clan_tag)); await this.reloadDetail() }
-      catch (err) { uni.showToast({ title: err.message || '排序失败', icon: 'none' }) }
-    },
-    confirmPlatformRemove(clan) {
-      uni.showModal({
-        title: '移除部落', content: `确认移除${clan.clan_name || clan.clan_tag}？公共历史数据不会删除。`, confirmColor: '#c9797f',
-        success: async result => {
-          if (!result.confirm) return
-          try { await removePlatformManagedClan(this.allianceId, clan.clan_tag); await this.reloadDetail() }
-          catch (err) { uni.showToast({ title: err.message || '移除失败', icon: 'none' }) }
-        }
-      })
-    },
-    async setVerification(clan, status) {
-      try {
-        await savePlatformVerification(this.allianceId, clan.clan_tag, status, '平台人工操作')
-        await this.reloadDetail()
-        uni.showToast({ title: '认证状态已更新', icon: 'success' })
-      } catch (err) { uni.showModal({ title: '操作失败', content: err.message || '请稍后重试', showCancel: false }) }
-    },
-    async grantPaid() {
-      const expiry = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()
-      try { await savePlatformPlan(this.allianceId, 'paid', expiry, '后台人工开通'); await this.reloadDetail() }
-      catch (err) { uni.showModal({ title: '开通失败', content: err.message || '请稍后重试', showCancel: false }) }
-    },
-    async grantFree() {
-      try { await savePlatformPlan(this.allianceId, 'free', null, '后台调整为免费版'); await this.reloadDetail() }
-      catch (err) { uni.showModal({ title: '调整失败', content: err.message || '请先移除多余部落', showCancel: false }) }
-    },
-    changeStatus(status) {
-      uni.showModal({
-        title: status === 'active' ? '恢复联盟' : '停用联盟',
-        content: status === 'active' ? '确认恢复该联盟？' : '停用后成员将暂时无法访问，公共历史不会删除。',
-        success: async result => {
-          if (!result.confirm) return
-          try { await savePlatformAllianceStatus(this.allianceId, status, '平台人工操作'); await this.reloadDetail() }
-          catch (err) { uni.showToast({ title: err.message || '操作失败', icon: 'none' }) }
-        }
-      })
-    },
-    deleteAlliance() {
-      const alliance = this.detail.alliance
-      if (alliance.status !== 'suspended') return
-      uni.showModal({
-        title: '删除已停用联盟', content: `请输入联盟名称“${alliance.name}”确认删除`, editable: true, placeholderText: '联盟名称', confirmColor: '#c9797f',
-        success: async result => {
-          if (!result.confirm) return
-          try {
-            await deletePlatformAlliance(alliance.id, result.content)
-            uni.showToast({ title: '联盟已删除', icon: 'success' })
-            setTimeout(() => uni.navigateBack(), 400)
-          } catch (err) { uni.showToast({ title: err.message || '删除失败', icon: 'none' }) }
-        }
-      })
-    },
     statusLabel(value) { return ({ active: '正常', suspended: '已停用', archived: '已删除' }[value] || value) },
-    planLabel(value) { return ({ free: '免费版', paid: '付费版', internal: '内部版' }[value] || value) },
-    grantStatusLabel(value) { return ({ active: '有效', grace: '7天只读宽限期', expired: '已到期', revoked: '已撤销' }[value] || value || '兼容权益') },
-    categoryIndex(value) { const index = this.categories.findIndex(item => item.key === value); return index < 0 ? 0 : index },
-    categoryLabel(value) { const item = this.categories.find(item => item.key === value); return item ? item.label : value },
-    verificationLabel(value) { return ({ verified: '已认证', disputed: '争议中', revoked: '已撤销', unverified: '未认证' }[value] || value) },
-    memberRoleIndex(value) { const index = this.memberRoles.findIndex(item => item.key === value); return index < 0 ? 0 : index },
-    memberRoleLabel(value) { const item = this.memberRoles.find(item => item.key === value); return item ? item.label : value },
-    memberStatusLabel(value) { return ({ active: '有效', left: '已退出', removed: '已移除', blocked: '已封禁', invited: '待加入' }[value] || value) },
-    shortDate(value) { return value ? String(value).replace('T', ' ').slice(0, 16) : '' }
+    planLabel(value) { return ({ free: '免费版', paid: '付费版', internal: '内部版' }[value] || value) }
   }
 }
 </script>
 
 <style>
-.page { height: 100vh; display: flex; flex-direction: column; color: #dce1ed; background: #0f0f23; }.content { flex: 1; min-height: 0; padding: 24rpx; box-sizing: border-box; }.state { padding: 180rpx 20rpx; color: #68738a; text-align: center; }
-.summary-card, .card { padding: 22rpx; border: 1rpx solid #292945; border-radius: 14rpx; background: #18182d; }.section-title { margin: 30rpx 8rpx 14rpx; color: #7f8aa2; font-size: 23rpx; }.title-row, .member-row, .clan-row, .verification-row, .audit-row, .summary-actions { display: flex; align-items: center; }.grow { flex: 1; min-width: 0; }
-.summary-name { display: block; color: #f0f2f8; font-size: 31rpx; font-weight: 700; }.name { display: block; color: #e8ebf3; font-size: 26rpx; font-weight: 600; }.name.small { font-size: 23rpx; }.sub { display: block; color: #778198; font-size: 21rpx; line-height: 1.6; }.status { font-size: 22rpx; }.status-active { color: #54b9a6; }.status-suspended { color: #d29a5f; }.status-archived { color: #737b8e; }
-.summary-actions { margin-top: 18rpx; gap: 14rpx; }.summary-actions button { flex: 1; margin: 0; }.platform-tip { display: block; margin-top: 18rpx; padding-top: 16rpx; border-top: 1rpx solid #292945; color: #69758c; font-size: 20rpx; line-height: 1.6; }.section-tip { margin-bottom: 10rpx; }
-.primary-btn, .secondary-btn, .mini-btn, .delete-btn { border: 0; border-radius: 9rpx; font-size: 23rpx; }.primary-btn { color: #fff; background: #315f9a; }.secondary-btn { color: #7eb8f6; background: #202b42; }.primary-btn::after, .secondary-btn::after, .mini-btn::after, .delete-btn::after { border: 0; }.full-btn { height: 84rpx; margin-top: 16rpx; line-height: 84rpx; }
-.member-row { min-height: 112rpx; border-bottom: 1rpx solid #25253e; }.openid { display: block; max-width: 390rpx; margin-top: 5rpx; overflow: hidden; color: #667087; font-size: 18rpx; text-overflow: ellipsis; white-space: nowrap; }.member-row .category { margin-left: 8rpx; padding: 8rpx 10rpx; border-radius: 8rpx; color: #78afe8; background: #202940; font-size: 20rpx; }.member-row .remove { margin-left: 12rpx; color: #b8757d; font-size: 20rpx; }
-.form-block { padding-top: 22rpx; }.input, .picker-field { height: 84rpx; padding: 0 20rpx; box-sizing: border-box; border: 1rpx solid #30304d; border-radius: 10rpx; color: #dce1ed; background: #111126; font-size: 24rpx; line-height: 84rpx; }.picker-field { margin-top: 14rpx; color: #a4adbf; }
-.clan-row { min-height: 104rpx; border-bottom: 1rpx solid #25253e; }.order-column { width: 48rpx; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; }.order-btn { color: #6da9e8; font-size: 25rpx; line-height: 1.45; }.order-btn.disabled { color: #3d4558; }
-.clan-actions { flex-shrink: 0; display: flex; align-items: center; gap: 12rpx; margin-left: 12rpx; }.clan-action { min-width: 68rpx; height: 64rpx; padding: 0 12rpx; box-sizing: border-box; display: flex; align-items: center; justify-content: center; border: 1rpx solid transparent; border-radius: 9rpx; font-size: 19rpx; line-height: 1; }.clan-actions .category { min-width: 80rpx; color: #78afe8; background: #202940; border-color: #293651; }.clan-actions .edit { color: #8aaad2; background: #1d2639; border-color: #2b3850; }.clan-actions .remove { margin-left: 8rpx; color: #c77f86; background: rgba(120, 45, 54, .16); border-color: rgba(184, 95, 105, .28); }
-.verification-row { min-height: 96rpx; border-bottom: 1rpx solid #25253e; }.verification-row:last-child { border-bottom: 0; }.mini-btn { margin: 0 0 0 8rpx; padding: 5rpx 12rpx; color: #7eb8f6; background: #202b42; line-height: 2; }.mini-btn.warn { color: #d4a665; }.mini-btn.danger { color: #c9797f; }
-.danger-card { border-color: #3e2934; }.danger-text { color: #c9797f; }.delete-btn { width: 100%; margin-top: 16rpx; border: 1rpx solid rgba(201, 121, 127, .45); color: #d98c91; background: rgba(120, 45, 54, .18); line-height: 2.5; }.danger-tip { margin-top: 12rpx; color: #91676f; }
-.audit-row { min-height: 62rpx; border-bottom: 1rpx solid #24243c; }.audit-row:last-child { border-bottom: 0; }.time { margin-left: 12rpx; color: #5f687e; font-size: 19rpx; }.bottom-space { height: 80rpx; }
+.page { height: 100vh; display: flex; flex-direction: column; color: #dce1ed; background: #0f0f23; }.content { flex: 1; min-height: 0; padding: 24rpx; box-sizing: border-box; }.state { padding: 180rpx 24rpx; color: #717b91; text-align: center; }
+.summary-card, .menu-card { border: 1rpx solid #292945; border-radius: 14rpx; background: #18182d; }.summary-card { padding: 22rpx; }.title-row, .menu-row { display: flex; align-items: center; }.grow { flex: 1; min-width: 0; }
+.summary-name, .name, .sub { display: block; }.summary-name { color: #f0f2f8; font-size: 31rpx; font-weight: 700; }.name { color: #e8ebf3; font-size: 26rpx; font-weight: 600; }.sub { margin-top: 7rpx; color: #778198; font-size: 21rpx; line-height: 1.5; }
+.status { font-size: 22rpx; }.status-active { color: #54b9a6; }.status-suspended { color: #d29a5f; }.status-archived { color: #737b8e; }.secondary-btn { border: 0; border-radius: 9rpx; color: #7eb8f6; background: #202b42; font-size: 23rpx; }.secondary-btn::after { border: 0; }.rename-btn { width: 100%; margin-top: 18rpx; }
+.platform-tip { display: block; margin-top: 18rpx; padding-top: 16rpx; border-top: 1rpx solid #292945; color: #69758c; font-size: 20rpx; line-height: 1.6; }.section-title { margin: 30rpx 8rpx 14rpx; color: #7f8aa2; font-size: 23rpx; }.menu-card { overflow: hidden; }
+.menu-row { min-height: 116rpx; padding: 16rpx 20rpx; box-sizing: border-box; border-bottom: 1rpx solid #25253e; }.menu-row:last-child { border-bottom: 0; }.menu-icon { width: 58rpx; height: 58rpx; margin-right: 18rpx; display: flex; align-items: center; justify-content: center; flex-shrink: 0; border-radius: 13rpx; color: #73afe7; background: #20304d; font-size: 24rpx; font-weight: 600; }
+.icon-clan { color: #91b4d4; background: #243044; }.icon-cwl { color: #d4aa67; background: #332d38; }.icon-plan { color: #a99de0; background: #2d2948; }.icon-status { color: #66bca9; background: #243a3a; }.icon-audit { color: #aea6d7; background: #302d45; }.menu-count { margin-left: 12rpx; color: #7e89a1; font-size: 20rpx; white-space: nowrap; }.arrow { margin-left: 12rpx; color: #606b83; font-size: 36rpx; }.bottom-space { height: 80rpx; }
 </style>

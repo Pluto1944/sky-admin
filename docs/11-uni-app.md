@@ -36,8 +36,9 @@
   待处理申请数、邀请记录数和有效成员数，完整申请历史、邀请历史及成员管理分别进入独立列表页，避免记录持续增长撑长首页。
   成员管理页支持通过 OpenID 添加并设置初始权限，也可按昵称、玩家标签、成员记录 ID 或权限搜索全部成员；超级管理首页
   只保留平台统计、创建联盟，以及“平台设置”“管理所有联盟”“联盟多认证管理”“审计日志”四个入口。平台设置页只维护免费联盟开放和同步队列；
-  完整联盟列表在独立页面按名称或标识搜索并进入详情，多认证与平台审计也分别使用独立的可搜索列表页；平台页管理人工认证、套餐、
-  联盟状态、免费注册配额以及队列和审计摘要。超级管理允许同一部落人工认证给多个联盟，不覆盖原认证；
+  完整联盟列表在独立页面按名称或标识搜索并进入详情，多认证与平台审计也分别使用独立的可搜索列表页。平台联盟详情只保留摘要和
+  管理入口；成员、部落、联赛、套餐权益、联盟状态和联盟操作记录分别进入超级管理专用页面，人工认证并入平台部落管理页。
+  超级管理允许同一部落人工认证给多个联盟，不覆盖原认证；
   重复关系显示为“多联盟认证”，并可进入各联盟逐个撤销。普通联盟管理端无权处理认证冲突，须联系超级管理员。
   后端已部署，生产编译已通过，但尚未随微信版本上传发布。
 - 联赛实时看板采用“参赛部落 → 单部落详情”的两层结构；详情内再切换战斗日和联赛总览，完整设计见 `docs/19-cwl-live-dashboard.md`。
@@ -89,8 +90,14 @@ uni-app/
 │   │   ├── alliance-list-management.vue # 我的联盟、浏览历史、退出与删除
 │   │   ├── clan-management.vue # 当前联盟部落增删、标签与顺序管理
 │   │   ├── platform-management.vue # 超级管理首页：概览、创建、搜索和联盟列表
-│   │   ├── platform-alliance-detail.vue # 超级管理的单联盟详情与运营操作
-│   │   └── platform-settings.vue # 免费开放、同步队列、多联盟认证提示与平台审计
+│   │   ├── platform-alliance-detail.vue # 超级管理单联盟摘要和专用管理入口
+│   │   ├── platform-alliance-members.vue # 平台专用成员与权限管理
+│   │   ├── platform-clan-management.vue # 平台专用部落、别名、排序与人工认证
+│   │   ├── platform-cwl-settings.vue # 平台专用月度联赛队伍配置
+│   │   ├── platform-alliance-plan.vue # 平台专用套餐权益调整
+│   │   ├── platform-alliance-status.vue # 平台专用停用、恢复与删除
+│   │   ├── platform-alliance-audit.vue # 单联盟最近审计记录
+│   │   └── platform-settings.vue # 免费开放与同步队列
 │   ├── login/
 │   │   └── login.vue          # 微信登录页（已有，整合到管理流程）
 │   └── bind/
@@ -186,7 +193,13 @@ uni-app/
 | `pages/settings/clan-management` | 当前联盟部落管理 | 子页 | ❌ | 自定义顶栏 `< 返回` |
 | `pages/settings/platform-management` | 平台运营首页 | 子页 | ❌ | 自定义顶栏 `< 返回` |
 | `pages/settings/platform-alliance-detail` | 平台联盟详情 | 子页 | ❌ | 自定义顶栏 `< 返回` |
-| `pages/settings/platform-settings` | 平台设置与审计 | 子页 | ❌ | 自定义顶栏 `< 返回` |
+| `pages/settings/platform-alliance-members` | 平台联盟成员与权限 | 子页 | ❌ | 自定义顶栏 `< 返回` |
+| `pages/settings/platform-clan-management` | 平台联盟部落管理 | 子页 | ❌ | 自定义顶栏 `< 返回` |
+| `pages/settings/platform-cwl-settings` | 平台联盟联赛设置 | 子页 | ❌ | 自定义顶栏 `< 返回` |
+| `pages/settings/platform-alliance-plan` | 平台联盟套餐权益 | 子页 | ❌ | 自定义顶栏 `< 返回` |
+| `pages/settings/platform-alliance-status` | 平台联盟状态 | 子页 | ❌ | 自定义顶栏 `< 返回` |
+| `pages/settings/platform-alliance-audit` | 平台联盟操作记录 | 子页 | ❌ | 自定义顶栏 `< 返回` |
+| `pages/settings/platform-settings` | 平台设置 | 子页 | ❌ | 自定义顶栏 `< 返回` |
 | `pages/war/detail` | 战绩详情 | 子页 | ❌ | 原生导航栏 `< 返回` |
 | `pages/war/current-detail` | 当前普通部落战详情 | 子页 | ❌ | 自定义顶栏 `< 返回` |
 | `pages/war/cwl-detail` | CWL 单部落详情 | 子页 | ❌ | 自定义顶栏 `< 返回` |
@@ -295,6 +308,9 @@ TabBar「管理」页
 生产是否可进入及是否可执行登记分别受两个默认关闭的功能开关控制。2026-10-11 生产后端已打开
 系统入口开关并仅对白名单账号 ID 1 灰度，登记开关仍关闭；新版微信小程序包尚未上传发布。
 
+“其他管理”固定先显示“管理COC账号”，随后依权限显示“管理联盟”和“超级管理”，最后显示
+“关于与版本”；重排只改变展示顺序，不改变各入口原有权限判断。
+
 设置首页不再直接显示“管理联赛部落”，该入口移入“管理联盟 → 业务管理”，按当前联盟角色控制，
 仅 `admin / leader` 可进入；进入后的子页标题仍为“联赛设置”。子页支持当前月和下月、
 显式创建下月联赛、复制上月、增删队伍、切换 `combat / shell`、调整顺序和确认。页面布局参照
@@ -308,6 +324,8 @@ TabBar「管理」页
 “管理联盟”只对当前联盟的管理员和首领显示，承载联盟名称、套餐摘要、加入申请、加入邀请、联盟成员、
 管理员/首领和联盟生命周期。管理员可批准申请、生成邀请并移除普通成员；只有首领可设置或取消管理员、
 移交首领和删除联盟。普通成员在“管理联盟列表”中退出，不显示“管理联盟”入口。
+管理联盟首页依次展示联盟名称、业务管理、联盟成员、加入申请和邀请加入；调整仅影响卡片展示顺序，
+各模块原有权限与操作逻辑保持不变。
 
 “管理联盟 → 业务管理”同时提供“管理部落”入口；另一个入口仍为部落概览底部的
 “添加第一个部落 / 管理部落”。管理部落页承载部落增删、业务标签、排序、逐部落认证、
@@ -318,7 +336,26 @@ TabBar「管理」页
 完成升级后再评估废弃，不能先行删除。
 
 “超级管理”只在后端返回超级管理能力时显示，普通用户即使构造页路径也会被平台 API 拒绝。入口统一使用“超级管理”文案。联盟删除采用两阶段操作：先停用，只有已停用联盟才显示“删除已停用联盟”；删除前必须输入完整联盟名称，完成后从普通联盟列表移除，但保留历史事实和审计。
-左上角联盟下拉菜单始终按普通权限工作，超级管理员也最多通过该入口创建一个有效免费联盟。创建多个运营或测试联盟，以及不受套餐数量限制地管理任意联盟部落，只能在“设置 → 超级管理”中进行。超级管理的联盟详情支持添加/移除部落、修改标签和调整顺序，并明确显示“不受套餐数量限制”。
+左上角联盟下拉菜单始终按普通权限工作，超级管理员也最多通过该入口创建一个有效免费联盟。创建多个运营或测试联盟，以及不受套餐数量限制地管理任意联盟，只能在“设置 → 超级管理”中进行。
+
+超级管理与普通联盟管理采用**成对但完全分离的页面边界**：普通页面只调用 `/api/alliances/{id}/...`
+并使用当前联盟成员角色；平台页面使用 `platform-*` 路由，只调用 `/api/platform/alliances/{id}/...`
+并由后端独立校验 `platform_admins`。超级管理员不被伪装为目标联盟成员，也不能通过给普通页面附加参数
+获得跨联盟权限。两组页面可以复用无权限语义的视觉规范，但不得复用会切换权限模式的页面控制器。
+
+后续修改成员、部落或联赛功能时，必须同时评估普通管理页和对应的超级管理页，逐项核对字段、状态、
+校验、空状态和操作结果是否应保持一致；若因权限、套餐限制或审计要求刻意不同，须在同一变更的文档和
+测试中明确差异。禁止只更新一侧后让另一侧静默落后。当前对应关系如下：
+
+| 业务 | 普通管理页面 | 超级管理页面 | 关键差异 |
+| --- | --- | --- | --- |
+| 联盟成员 | `alliance-members.vue` | `platform-alliance-members.vue` | 普通页按 `admin / leader` 限权；平台页可跨联盟管理全部角色并显示 OpenID |
+| 日常部落 | `clan-management.vue` | `platform-clan-management.vue` | 普通页执行套餐配额；平台页突破配额并提供人工认证 |
+| 月度联赛 | `cwl-settings.vue` | `platform-cwl-settings.vue` | 普通页执行角色和套餐限制；平台页突破队伍数量限制并使用平台审计 |
+
+平台联盟详情不再内嵌持续增长的成员、部落和审计列表，只显示联盟摘要以及上述专用页面、套餐权益、
+联盟状态和联盟操作记录入口。平台部落管理页支持添加/移除、修改标签和别名、调整顺序与人工认证，
+并明确显示“不受套餐数量限制”。
 
 当前 uni-app/微信构建链会把部分页面 `<style scoped>` 编译为与 WXML 类名不匹配的属性选择器，导致
 管理页整体样式失效。因此管理首页和联赛设置页使用普通页面级 `<style>`；如果以后恢复
@@ -563,7 +600,8 @@ TabBar「管理」页
 | `add/update/reorder/removePlatformManagedClan(...)` | `/api/platform/alliances/{id}/managed-clans...` | ✅ 超级管理 |
 | `savePlatformFreeRegistration(...)` | `PUT /api/platform/settings/free-registration` | ✅ 超级管理 |
 | `savePlatformVerification/Plan/AllianceStatus(...)` | `/api/platform/alliances/{id}/...` | ✅ 超级管理 |
-| `get/create/update/...AllianceCwlSeason(...)` | `/api[/platform]/alliances/{id}/cwl/seasons...` | ✅ 联盟管理或超级管理 |
+| `get/create/update/...AllianceCwlSeason(...)` | `/api/alliances/{id}/cwl/seasons...` | ✅ 当前联盟管理 |
+| `get/create/update/...PlatformAllianceCwlSeason(...)` | `/api/platform/alliances/{id}/cwl/seasons...` | ✅ 超级管理 |
 | `bindAccount(name, tag)` | `POST /api/wechat/bind` | ✅ |
 | `getMembers()` | `GET /api/alliances/{id}/members` | 成员、浏览历史或分享令牌 |
 | `getClanOverview()` | `GET /api/alliances/{id}/clans` | 成员、浏览历史或分享令牌 |

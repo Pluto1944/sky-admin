@@ -37,6 +37,19 @@
           </view>
         </view>
 
+        <template v-if="canManageMembers">
+          <view class="section-title">联盟成员</view>
+          <view class="card list-entry-card">
+            <view class="list-entry-copy">
+              <view class="grow">
+                <text class="name">有效成员 {{ activeMemberCount }} 人</text>
+                <text class="sub">通过 OpenID 添加、搜索成员并设置联盟权限</text>
+              </view>
+              <button class="list-entry-btn" @tap="openMemberManagement">管理成员</button>
+            </view>
+          </view>
+        </template>
+
         <view class="section-title">加入申请</view>
         <view class="card list-entry-card">
           <view class="list-entry-copy">
@@ -65,19 +78,6 @@
             <button class="list-entry-btn" @tap="openShareHistory">查看记录</button>
           </view>
         </view>
-
-        <template v-if="canManageMembers">
-          <view class="section-title">联盟成员</view>
-          <view class="card list-entry-card">
-            <view class="list-entry-copy">
-              <view class="grow">
-                <text class="name">有效成员 {{ activeMemberCount }} 人</text>
-                <text class="sub">通过 OpenID 添加、搜索成员并设置联盟权限</text>
-              </view>
-              <button class="list-entry-btn" @tap="openMemberManagement">管理成员</button>
-            </view>
-          </view>
-        </template>
 
         <view v-if="alliance.role !== 'leader'" class="leave-section">
           <button class="danger-btn" @tap="confirmLeave">退出当前联盟</button>

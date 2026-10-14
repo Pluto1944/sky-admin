@@ -113,6 +113,48 @@
       }
     },
     {
+      "path": "pages/settings/platform-alliance-members",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "管理联盟成员"
+      }
+    },
+    {
+      "path": "pages/settings/platform-clan-management",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "管理部落"
+      }
+    },
+    {
+      "path": "pages/settings/platform-cwl-settings",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "管理联赛部落"
+      }
+    },
+    {
+      "path": "pages/settings/platform-alliance-plan",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "套餐权益"
+      }
+    },
+    {
+      "path": "pages/settings/platform-alliance-status",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "联盟状态"
+      }
+    },
+    {
+      "path": "pages/settings/platform-alliance-audit",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "联盟操作记录"
+      }
+    },
+    {
       "path": "pages/settings/platform-settings",
       "style": {
         "navigationStyle": "custom",

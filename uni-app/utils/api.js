@@ -646,48 +646,51 @@ export function getCwlLiveDetail(clanTag, period, round, view) {
   return request(`${scoped}${query.length ? '?' + query.join('&') : ''}`, 'GET', {}, true)
 }
 
-/** 读取当前联盟的月度联赛配置。 */
-function cwlSeasonPath(period, allianceId) {
-  if (allianceId) return `/api/platform/alliances/${encodeURIComponent(allianceId)}/cwl/seasons/${encodeURIComponent(period)}`
+/** 读取当前联盟的月度联赛配置。普通联盟与平台管理使用独立入口。 */
+function cwlSeasonPath(period) {
   return scopedPath(`/cwl/seasons/${encodeURIComponent(period)}`)
 }
 
-export function getAllianceCwlSeason(period, allianceId) {
-  const scoped = cwlSeasonPath(period, allianceId)
+function platformCwlSeasonPath(allianceId, period) {
+  return `/api/platform/alliances/${encodeURIComponent(allianceId)}/cwl/seasons/${encodeURIComponent(period)}`
+}
+
+export function getAllianceCwlSeason(period) {
+  const scoped = cwlSeasonPath(period)
   if (!scoped) return Promise.reject(new Error('请先选择联盟'))
   return request(scoped, 'GET', {}, true)
 }
 
 /** 创建当前联盟的月度联赛配置。 */
-export function createAllianceCwlSeason(period, allianceId) {
-  const scoped = cwlSeasonPath(period, allianceId)
+export function createAllianceCwlSeason(period) {
+  const scoped = cwlSeasonPath(period)
   if (!scoped) return Promise.reject(new Error('请先选择联盟'))
   return request(scoped, 'POST', {}, true)
 }
 
-export function copyPreviousAllianceCwlSeason(period, allianceId) {
-  const base = cwlSeasonPath(period, allianceId)
+export function copyPreviousAllianceCwlSeason(period) {
+  const base = cwlSeasonPath(period)
   const scoped = base ? `${base}/copy-previous` : ''
   if (!scoped) return Promise.reject(new Error('请先选择联盟'))
   return request(scoped, 'POST', {}, true)
 }
 
-export function addAllianceCwlTeam(period, payload, allianceId) {
-  const base = cwlSeasonPath(period, allianceId)
+export function addAllianceCwlTeam(period, payload) {
+  const base = cwlSeasonPath(period)
   const scoped = base ? `${base}/teams` : ''
   if (!scoped) return Promise.reject(new Error('请先选择联盟'))
   return request(scoped, 'POST', payload, true)
 }
 
-export function updateAllianceCwlTeam(period, teamId, payload, allianceId) {
-  const base = cwlSeasonPath(period, allianceId)
+export function updateAllianceCwlTeam(period, teamId, payload) {
+  const base = cwlSeasonPath(period)
   const scoped = base ? `${base}/teams/${teamId}` : ''
   if (!scoped) return Promise.reject(new Error('请先选择联盟'))
   return request(scoped, 'PUT', payload, true)
 }
 
-export function deleteAllianceCwlTeam(period, teamId, allianceId) {
-  const base = cwlSeasonPath(period, allianceId)
+export function deleteAllianceCwlTeam(period, teamId) {
+  const base = cwlSeasonPath(period)
   const scoped = base ? `${base}/teams/${teamId}` : ''
   if (!scoped) return Promise.reject(new Error('请先选择联盟'))
   return request(scoped, 'DELETE', {}, true)
@@ -701,18 +704,50 @@ export function correctAllianceCwlTeamTag(period, teamId, payload) {
 }
 
 /** 已冻结或结束月份的联赛队伍留痕编辑。 */
-export function amendAllianceCwlTeam(period, teamId, payload, allianceId) {
-  const base = cwlSeasonPath(period, allianceId)
+export function amendAllianceCwlTeam(period, teamId, payload) {
+  const base = cwlSeasonPath(period)
   const scoped = base ? `${base}/teams/${teamId}/amend` : ''
   if (!scoped) return Promise.reject(new Error('请先选择联盟'))
   return request(scoped, 'PUT', payload, true)
 }
 
-export function confirmAllianceCwlSeason(period, allianceId) {
-  const base = cwlSeasonPath(period, allianceId)
+export function confirmAllianceCwlSeason(period) {
+  const base = cwlSeasonPath(period)
   const scoped = base ? `${base}/confirm` : ''
   if (!scoped) return Promise.reject(new Error('请先选择联盟'))
   return request(scoped, 'POST', {}, true)
+}
+
+export function getPlatformAllianceCwlSeason(allianceId, period) {
+  return request(platformCwlSeasonPath(allianceId, period), 'GET', {}, true)
+}
+
+export function createPlatformAllianceCwlSeason(allianceId, period) {
+  return request(platformCwlSeasonPath(allianceId, period), 'POST', {}, true)
+}
+
+export function copyPreviousPlatformAllianceCwlSeason(allianceId, period) {
+  return request(`${platformCwlSeasonPath(allianceId, period)}/copy-previous`, 'POST', {}, true)
+}
+
+export function addPlatformAllianceCwlTeam(allianceId, period, payload) {
+  return request(`${platformCwlSeasonPath(allianceId, period)}/teams`, 'POST', payload, true)
+}
+
+export function updatePlatformAllianceCwlTeam(allianceId, period, teamId, payload) {
+  return request(`${platformCwlSeasonPath(allianceId, period)}/teams/${teamId}`, 'PUT', payload, true)
+}
+
+export function deletePlatformAllianceCwlTeam(allianceId, period, teamId) {
+  return request(`${platformCwlSeasonPath(allianceId, period)}/teams/${teamId}`, 'DELETE', {}, true)
+}
+
+export function amendPlatformAllianceCwlTeam(allianceId, period, teamId, payload) {
+  return request(`${platformCwlSeasonPath(allianceId, period)}/teams/${teamId}/amend`, 'PUT', payload, true)
+}
+
+export function confirmPlatformAllianceCwlSeason(allianceId, period) {
+  return request(`${platformCwlSeasonPath(allianceId, period)}/confirm`, 'POST', {}, true)
 }
 
 export default {
