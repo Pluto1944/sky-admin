@@ -1,6 +1,15 @@
 <template>
   <view class="detail-page">
     <TopBar title="返回参赛部落" :showBack="true" :backFallback="listFallback" />
+    <view v-if="detail && detail.refresh && isCurrentPeriod" class="detail-refresh-row">
+      <PageRefreshButton
+        :clan-tag="clanTag"
+        :resource-types="['cwl_live']"
+        :period="period"
+        :refresh="detail.refresh"
+        @reload="fetchDetail(activeView)"
+      />
+    </view>
 
     <view v-if="loading" class="state-box"><text class="state-text">加载联赛数据...</text></view>
     <view v-else-if="loadError && !detail" class="state-box">
@@ -158,6 +167,7 @@
 
 <script>
 import TopBar from '@/components/TopBar.vue'
+import PageRefreshButton from '@/components/PageRefreshButton.vue'
 import { getCwlLiveDetail } from '@/utils/api.js'
 import { ALLIANCE_CHANGED_EVENT, ALLIANCE_SHARE_READY_EVENT, activateSharedAlliance, allianceQuery } from '@/utils/alliance.js'
 
@@ -175,7 +185,7 @@ function rememberLeagueList() {
 }
 
 export default {
-  components: { TopBar },
+  components: { TopBar, PageRefreshButton },
   data() {
     return {
       clanTag: '', period: '', detail: null, loading: true, loadError: '',
@@ -260,6 +270,7 @@ export default {
         const responseVersion = res.updated_at || null
         if (this.loadedViews[requestedView] && this.viewVersions[requestedView] === responseVersion) {
           if (this.detail.error !== res.error) this.$set(this.detail, 'error', res.error)
+          if (res.refresh) this.$set(this.detail, 'refresh', res.refresh)
           return
         }
         const previous = this.detail || {}
@@ -370,7 +381,7 @@ export default {
 </script>
 
 <style>
-.detail-page { min-height: 100vh; background: #0f0f23; color: #d8dce8; }.detail-content { padding-bottom: 40rpx; }.state-box { min-height: 70vh; padding: 40rpx; display: flex; flex-direction: column; align-items: center; justify-content: center; box-sizing: border-box; }.state-text { color: #8890a0; font-size: 28rpx; }.error-text { margin-bottom: 18rpx; color: #e17055; font-size: 26rpx; text-align: center; }.retry-btn { color: #5fa8ff; font-size: 25rpx; }
+.detail-page { min-height: 100vh; background: #0f0f23; color: #d8dce8; }.detail-refresh-row { display: flex; justify-content: flex-end; padding: 16rpx 24rpx 0; }.detail-content { padding-bottom: 40rpx; }.state-box { min-height: 70vh; padding: 40rpx; display: flex; flex-direction: column; align-items: center; justify-content: center; box-sizing: border-box; }.state-text { color: #8890a0; font-size: 28rpx; }.error-text { margin-bottom: 18rpx; color: #e17055; font-size: 26rpx; text-align: center; }.retry-btn { color: #5fa8ff; font-size: 25rpx; }
 .team-card { margin: 20rpx 24rpx 0; padding: 20rpx; border: 1rpx solid #2a2a4a; border-radius: 14rpx; background: #18182d; }.team-title-row { display: flex; align-items: center; }.team-picker, .team-name { max-width: 300rpx; overflow: hidden; color: #fff; font-size: 29rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.team-tag { margin-left: 10rpx; color: #66708a; font-size: 20rpx; }.share-btn { margin: 0 0 0 auto; padding: 7rpx 16rpx; border: 0; border-radius: 6rpx; color: #aab4c8; background: #252540; font-size: 22rpx; line-height: 1.5; }.share-btn::after { border: 0; }.team-meta { margin-top: 16rpx; display: flex; flex-wrap: wrap; color: #9aa0b0; font-size: 22rpx; }.team-meta text { margin: 0 18rpx 8rpx 0; }.team-staff { margin-top: 4rpx; display: flex; flex-wrap: wrap; color: #7e8ba2; font-size: 21rpx; line-height: 1.6; }.team-staff text { margin-right: 24rpx; }.cache-warning { display: block; margin-top: 8rpx; color: #fdcb6e; font-size: 21rpx; }.updated-at { display: block; margin-top: 8rpx; color: #596178; font-size: 20rpx; }
 .inner-tab-bar { height: 76rpx; margin-top: 18rpx; display: flex; border-top: 1rpx solid #252540; border-bottom: 1rpx solid #252540; background: #141428; }.inner-tab { flex: 1; display: flex; align-items: center; justify-content: center; color: #7d8498; font-size: 27rpx; }.inner-tab.active { color: #5fa8ff; border-bottom: 4rpx solid #4a90d9; font-weight: 600; }
 .subview-loading { padding: 120rpx 30rpx; color: #66708a; font-size: 25rpx; text-align: center; }

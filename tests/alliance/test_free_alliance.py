@@ -9,19 +9,23 @@ import api_server.alliance_operations_routes as alliance_operations_routes
 import api_server.alliance_routes as alliance_routes
 import scripts.scheduler as scheduler
 from modules.alliance.access import resolve_alliance_context
+from modules.alliance.cwl_config import add_team, confirm_season, create_season
 from modules.alliance.free_alliance import (
     FreeAllianceError,
     archive_free_alliance,
     create_free_alliance,
     enqueue_initialization,
     free_alliance_capability,
+    page_refresh_status,
     reconcile_sync_targets,
     rename_free_alliance,
     request_manual_refresh,
+    request_page_refresh,
     subscribe_free_clan,
     subscription_status,
 )
 from modules.alliance.migration import apply_sky_migration
+from modules.alliance.operations import create_share_link
 
 
 NOW = datetime(2026, 10, 11, 8, 0, tzinfo=timezone.utc)
@@ -177,6 +181,139 @@ def test_initialization_reuses_fresh_cache_and_manual_refresh_has_shared_cooldow
     assert first[0]["reason"] in {"queued", "deduplicated"}
     assert second[0]["accepted"] is False
     assert second[0]["reason"] in {"deduplicated", "cooldown"}
+
+
+def test_page_refresh_allows_share_visitor_and_keeps_resource_scope(m5):
+    alliance_id = create_free_alliance(m5.conn, "owner-a", now=NOW)
+    subscribe_free_clan(
+        m5.conn, "owner-a", alliance_id,
+        clan_tag="#2QQ", category="combat", now=NOW,
+    )
+    reconcile_sync_targets(m5.conn, now=NOW)
+    shared = create_share_link(
+        m5.conn, "owner-a", alliance_id, share_type="browse", now=NOW,
+    )
+    context = alliance_routes.alliance_view_context(
+        alliance_id, user=None, share_token=shared["token"], db=m5,
+    )
+    assert context.role == "visitor"
+
+    response = alliance_routes.request_alliance_page_refresh(
+        alliance_id,
+        alliance_routes.PageRefreshInput(
+            clan_tag="#2QQ", resource_types=["clan_members"],
+        ),
+        context=context,
+        db=m5,
+    )
+    assert response["results"][0]["reason"] in {"queued", "deduplicated"}
+    assert response["refresh"]["allowed"] is True
+    assert response["refresh"]["resources"][0]["can_request"] is False
+    audit = m5.conn.execute(
+        """SELECT actor_user_id, details_json FROM alliance_audit_events
+           WHERE alliance_id=? AND action='free_page_refresh_requested'
+           ORDER BY id DESC LIMIT 1""",
+        (alliance_id,),
+    ).fetchone()
+    assert audit["actor_user_id"] is None
+    assert '"access_kind": "visitor"' in audit["details_json"]
+    assert shared["token"] not in audit["details_json"]
+
+    with pytest.raises(HTTPException) as exc_info:
+        alliance_routes.request_alliance_page_refresh(
+            alliance_id,
+            alliance_routes.PageRefreshInput(
+                clan_tag="#9PY", resource_types=["clan_members"],
+            ),
+            context=context,
+            db=m5,
+        )
+    assert exc_info.value.status_code == 404
+
+
+def test_page_refresh_cooldown_is_shared_across_access_types(m5):
+    alliance_id = create_free_alliance(m5.conn, "owner-a", now=NOW)
+    subscribe_free_clan(
+        m5.conn, "owner-a", alliance_id,
+        clan_tag="#2QQ", category="combat", now=NOW,
+    )
+    reconcile_sync_targets(m5.conn, now=NOW)
+    owner_id = int(m5.conn.execute(
+        "SELECT id FROM wechat_users WHERE openid='owner-a'",
+    ).fetchone()[0])
+
+    first = request_page_refresh(
+        m5.conn,
+        alliance_id,
+        "#2QQ",
+        resource_types=["clan_profile"],
+        actor_user_id=owner_id,
+        access_kind="leader",
+        now=NOW,
+    )
+    second = request_page_refresh(
+        m5.conn,
+        alliance_id,
+        "#2QQ",
+        resource_types=["clan_profile"],
+        actor_user_id=None,
+        access_kind="visitor",
+        now=NOW + timedelta(minutes=1),
+    )
+    assert first[0]["reason"] == "queued"
+    assert second[0]["accepted"] is False
+    assert second[0]["reason"] in {"deduplicated", "cooldown"}
+    status = page_refresh_status(
+        m5.conn,
+        alliance_id,
+        "#2QQ",
+        resource_types=["clan_profile"],
+        now=NOW + timedelta(minutes=1),
+    )
+    assert status["allowed"] is True
+    assert status["resources"][0]["can_request"] is False
+
+
+def test_page_refresh_accepts_only_current_configured_cwl_team(m5):
+    alliance_id = create_free_alliance(m5.conn, "owner-a", now=NOW)
+    context = resolve_alliance_context(m5.conn, "owner-a", alliance_id)
+    create_season(m5.conn, context, "2026-10")
+    add_team(
+        m5.conn,
+        context,
+        "2026-10",
+        clan_tag="#2QQ",
+        clan_name="联赛一队",
+        team_alias="一队",
+        category="combat",
+    )
+    confirm_season(m5.conn, context, "2026-10")
+    reconcile_sync_targets(m5.conn, now=NOW)
+
+    results = request_page_refresh(
+        m5.conn,
+        alliance_id,
+        "#2QQ",
+        resource_types=["cwl_live"],
+        period="2026-10",
+        actor_user_id=context.user_id,
+        access_kind="leader",
+        now=NOW,
+    )
+    assert results[0]["resource_key"] == "2026-10:#2QQ"
+    assert results[0]["cooldown_seconds"] == 30 * 60
+    assert results[0]["reason"] == "queued"
+
+    with pytest.raises(FreeAllianceError, match="活跃联赛队伍"):
+        request_page_refresh(
+            m5.conn,
+            alliance_id,
+            "#9PY",
+            resource_types=["cwl_live"],
+            period="2026-10",
+            actor_user_id=context.user_id,
+            now=NOW,
+        )
 
 
 def test_archive_is_audited_and_never_deletes_shared_facts(m5):

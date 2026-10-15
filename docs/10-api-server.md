@@ -452,6 +452,7 @@ POST /api/me/alliances/{alliance_id}/visit
 GET /api/alliances/{alliance_id}
 GET /api/alliances/{alliance_id}/clans
 GET /api/alliances/{alliance_id}/clans/{clan_tag}
+POST /api/alliances/{alliance_id}/sync-requests
 GET /api/alliances/{alliance_id}/members
 GET /api/alliances/{alliance_id}/wars/current
 GET /api/alliances/{alliance_id}/wars/current/{clan_tag}
@@ -493,6 +494,14 @@ DELETE /api/alliances/{alliance_id}
 普通只读接口接受三类上下文：有效成员关系、已登录用户的浏览历史，或请求头 `X-Alliance-Share`
 携带的有效分享令牌。三者的普通字段一致；访客上下文永远不授予管理字段。修改 URL 中的
 `alliance_id` 或 `clan_tag` 仍不能越过令牌来源联盟和该联盟订阅部落范围，无权访问统一返回 `404`。
+
+免费联盟页面级手动刷新复用同一个 `alliance_view_context`。因此，有效成员、已有浏览历史的登录用户和
+持有效分享令牌的访客（包括未登录访客）只要能打开页面，就可调用
+`POST /api/alliances/{alliance_id}/sync-requests` 申请刷新当前页面资源；无需加入联盟或拥有管理角色。
+请求只允许 `clan_profile / clan_members / current_war / cwl_live`，后端再次校验部落属于当前联盟页面范围；
+`cwl_live` 还必须是当前月份已配置的活跃联赛队伍。接口只创建全局去重的 `interactive` 任务，不提升
+字段权限，也不记录原始分享令牌。页面 GET 响应通过 `refresh` 返回缓存时间、任务状态、冷却截止时间和
+`can_request`，前端无需用失败请求猜测权限或套餐。
 
 免费联盟写接口首先受 `ALLIANCE_FREE_ENABLED=true`（兼容旧名 `M5_FREE_ALLIANCE_ENABLED`）
 环境总开关控制。内部测试账号可由 `M5_FREE_ALLIANCE_OPENIDS` 允许；外部用户还必须满足平台后台
@@ -632,9 +641,13 @@ POST /api/platform/alliances/{alliance_id}/cwl/seasons/{period}/confirm
 不允许在小程序中修改，防止误改苍穹存量配置。平台套餐接口是人工运营入口，不是在线支付接口。
 
 通用部落管理响应为免费套餐的有效部落附带三项本地同步状态，并通过 `manual_refresh_available` 明确
-是否允许手动刷新。通用刷新接口当前只对免费联盟的管理员或首领开放，只向全局去重队列提交任务并遵守
+是否允许手动刷新。旧管理页刷新接口当前只对免费联盟的管理员或首领开放，只向全局去重队列提交任务并遵守
 共享冷却，不在 HTTP 请求中调用 COC；普通成员返回 `403`，自动高频套餐返回 `409`。旧
 `/subscription` 三个接口继续兼容已发布小程序，新版前端不再使用其管理页面。
+
+上述管理刷新接口是已发布版本的兼容入口，不等同于页面级刷新。新版普通浏览页面调用
+`/sync-requests`，其权限边界是“能读页面即可申请刷新”；两类入口最终复用同一公共任务身份和冷却，
+所以不能通过切换入口增加 COC 请求次数。
 
 平台部落管理使用 `/api/platform/alliances/{alliance_id}/managed-clans` 专用接口。它只接受超级管理员，
 不要求操作者先成为目标联盟成员，并可添加、软移除、修改别名、标签和调整顺序。平台添加不受目标联盟套餐

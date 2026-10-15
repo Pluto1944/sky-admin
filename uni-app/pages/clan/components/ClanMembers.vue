@@ -13,6 +13,12 @@
         </view>
       </view>
       <view class="clan-members-tools">
+        <PageRefreshButton
+          :clan-tag="refreshClanTag"
+          :resource-types="['clan_members']"
+          :refresh="refreshState"
+          @reload="fetchMembers(true)"
+        />
         <view class="clan-members-tool" :class="{ active: activeFilterCount }" @tap="onFilter">
           <text class="clan-members-tool-icon">⏬</text><text>筛选</text>
           <text v-if="activeFilterCount" class="clan-members-tool-badge">{{ activeFilterCount }}</text>
@@ -68,6 +74,7 @@
 </template>
 
 <script>
+import PageRefreshButton from '@/components/PageRefreshButton.vue'
 import { getMembers } from '@/utils/api.js'
 import { getCurrentAllianceId } from '@/utils/alliance.js'
 
@@ -76,6 +83,7 @@ const MEMBER_PAGE_SIZE = 100
 
 export default {
   name: 'ClanMembers',
+  components: { PageRefreshButton },
   props: { initialClanTag: { type: String, default: '' } },
   data() {
     return {
@@ -83,7 +91,8 @@ export default {
       sortKey: 'town_hall_level', sortOrder: 'desc', searchText: '',
       memberFilter: 'member', clanFilters: [], filterPanelVisible: false,
       draftMemberFilter: 'member', draftClanFilters: [],
-      pageSize: MEMBER_PAGE_SIZE, currentPage: 1, tableScrollTop: 0, requestSerial: 0
+      pageSize: MEMBER_PAGE_SIZE, currentPage: 1, tableScrollTop: 0, requestSerial: 0,
+      refreshState: { allowed: false, resources: [] }
     }
   },
   computed: {
@@ -108,7 +117,11 @@ export default {
       return labels.length ? labels.join(' · ') : '全部成员'
     },
     totalPages() { return Math.max(1, Math.ceil(this.totalCount / this.pageSize)) },
-    pageMembers() { return this.members }
+    pageMembers() { return this.members },
+    refreshClanTag() {
+      if (this.clanFilters.length === 1) return this.clanFilters[0]
+      return this.allowedClans.length === 1 ? this.allowedClans[0].tag : ''
+    }
   },
   watch: {
     initialClanTag() { this.applyInitialClan(true) }
@@ -124,6 +137,7 @@ export default {
       this.totalCount = Number(res.count) || 0
       this.updatedAt = res.updated_at ? this.formatTime(res.updated_at) : ''
       this.currentPage = Number(res.page) || this.currentPage
+      this.refreshState = res.refresh || { allowed: false, resources: [] }
     },
     applyInitialClan(fetchAfterChange) {
       if (this.initialClanTag) {
@@ -143,11 +157,11 @@ export default {
         search: this.searchText.trim(), sortKey: this.sortKey, sortOrder: this.sortOrder
       }
     },
-    async fetchMembers() {
+    async fetchMembers(force = false) {
       const options = this.requestOptions()
       const cacheKey = `${getCurrentAllianceId() || 'public'}:${JSON.stringify(options)}`
       const serial = ++this.requestSerial
-      if (membersCache[cacheKey]) {
+      if (!force && membersCache[cacheKey]) {
         this.applyResponse(membersCache[cacheKey])
         this.loading = false
         return

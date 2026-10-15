@@ -53,6 +53,12 @@
               <text>{{ clan.updated_at ? '同步于 ' + formatTime(clan.updated_at) : '等待首次同步' }}</text>
               <text v-if="clan.verification_status && clan.verification_status !== 'verified'" class="clan-overview-verification">{{ verificationLabel(clan.verification_status) }}</text>
             </view>
+            <PageRefreshButton
+              :clan-tag="clan.clan_tag"
+              :resource-types="['clan_profile', 'clan_members']"
+              :refresh="clan.refresh"
+              @reload="reloadClanOverview"
+            />
             <text class="clan-overview-detail-hint">查看详情</text>
           </view>
         </view>
@@ -63,6 +69,7 @@
 </template>
 
 <script>
+import PageRefreshButton from '@/components/PageRefreshButton.vue'
 import { getClanOverview } from '@/utils/api.js'
 import { getCurrentAlliance, getCurrentAllianceId } from '@/utils/alliance.js'
 
@@ -70,6 +77,7 @@ const overviewCache = Object.create(null)
 
 export default {
   name: 'ClanOverview',
+  components: { PageRefreshButton },
   props: {
     allianceId: { type: [Number, String], default: 0 }
   },
@@ -122,6 +130,10 @@ export default {
       this.updatedAt = res.updated_at || ''
     },
     refresh() {
+      this.fetchData(false)
+    },
+    reloadClanOverview() {
+      delete overviewCache[this.resolvedAllianceId() || 'public']
       this.fetchData(false)
     },
     async fetchData(showLoading = true) {

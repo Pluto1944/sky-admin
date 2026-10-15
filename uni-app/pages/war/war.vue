@@ -23,7 +23,16 @@
       </view>
       <scroll-view v-else-if="warView === 'current'" scroll-y class="war-list-scroll">
         <view class="war-list-inner">
-          <view v-if="updatedAt" class="update-time">数据更新于 {{ formatTime(updatedAt) }}</view>
+          <view v-if="updatedAt || currentRefreshClan" class="page-update-row">
+            <view v-if="updatedAt" class="update-time">数据更新于 {{ formatTime(updatedAt) }}</view>
+            <PageRefreshButton
+              v-if="currentRefreshClan"
+              :clan-tag="currentRefreshClan.clan_tag"
+              :resource-types="['current_war']"
+              :refresh="currentRefreshClan.refresh"
+              @reload="fetchCurrentWars"
+            />
+          </view>
           <view v-if="isFiltered" class="filter-summary">
             <text>{{ filterLabel }}</text>
             <text class="clear-filter" @tap="resetFilters">重置</text>
@@ -138,7 +147,17 @@
       <scroll-view v-else scroll-y class="war-list-scroll">
         <view class="war-list-inner">
           <button v-if="leagueClans.length && canManageLeague" class="league-manage-btn list-first-action" @tap="openLeagueManagement">管理联赛部落</button>
-          <view v-if="leagueUpdatedAt" class="update-time">数据更新于 {{ formatTime(leagueUpdatedAt) }}</view>
+          <view v-if="leagueUpdatedAt || leagueRefreshClan" class="page-update-row">
+            <view v-if="leagueUpdatedAt" class="update-time">数据更新于 {{ formatTime(leagueUpdatedAt) }}</view>
+            <PageRefreshButton
+              v-if="leagueRefreshClan && isCurrentLeaguePeriod"
+              :clan-tag="leagueRefreshClan.clan_tag"
+              :resource-types="['cwl_live']"
+              :period="leaguePeriod"
+              :refresh="leagueRefreshClan.refresh"
+              @reload="fetchCwlLive(leaguePeriod)"
+            />
+          </view>
           <view v-if="leagueWaitingText" class="league-waiting-notice">{{ leagueWaitingText }}</view>
           <view v-if="!leagueClans.length" class="league-empty-panel">
             <text class="league-empty-title">当前联盟本月暂无联赛部落</text>
@@ -234,6 +253,7 @@
 
 <script>
 import TopBar from '@/components/TopBar.vue'
+import PageRefreshButton from '@/components/PageRefreshButton.vue'
 import CwlCheckIn from './check-in.vue'
 import { getCurrentWars, getWarHistory, getCwlLive } from '@/utils/api.js'
 import { ALLIANCE_CHANGED_EVENT, ALLIANCE_SHARE_READY_EVENT, activateSharedAlliance, allianceQuery, getCurrentAlliance, getCurrentAllianceId } from '@/utils/alliance.js'
@@ -270,7 +290,7 @@ function withAllianceQuery(query) {
 }
 
 export default {
-  components: { TopBar, CwlCheckIn },
+  components: { TopBar, CwlCheckIn, PageRefreshButton },
   data() {
     return {
       activeTopTab: 'clan-war',
@@ -387,6 +407,8 @@ export default {
     leaguePeriodIndex() { const index = this.leaguePeriods.findIndex(item => item.period === this.leaguePeriod); return index < 0 ? 0 : index },
     leaguePeriodLabel() { const item = this.leaguePeriods[this.leaguePeriodIndex]; return item ? item.label : (this.leaguePeriod || '-') },
     isCurrentLeaguePeriod() { return !this.leaguePeriod || this.leaguePeriod === currentBusinessPeriod() },
+    currentRefreshClan() { return this.clans.length === 1 ? this.clans[0] : null },
+    leagueRefreshClan() { return this.leagueClans.length === 1 ? this.leagueClans[0] : null },
     canManageLeague() {
       const alliance = this.currentAlliance
       return Boolean(alliance && ['admin', 'leader'].indexOf(alliance.role) >= 0)
@@ -728,7 +750,7 @@ export default {
 .war-toolbar { flex-shrink: 0; height: 72rpx; padding: 0 24rpx; display: flex; align-items: center; justify-content: space-between; background: #141428; border-bottom: 1rpx solid #2a2a4a; }
 .toolbar-title-wrap, .toolbar-actions { display: flex; align-items: center; }.toolbar-title { color: #d8dce8; font-size: 28rpx; font-weight: 600; }.toolbar-count { margin-left: 12rpx; color: #66708a; font-size: 22rpx; }.filter-trigger { padding: 12rpx; color: #aab4c8; font-size: 25rpx; }
 .state-box { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }.state-text { color: #8890a0; font-size: 28rpx; }.error-text { margin: 0 32rpx 20rpx; color: #e17055; font-size: 26rpx; text-align: center; }.retry-btn { color: #5fa8ff; font-size: 26rpx; }
-.war-list-scroll { flex: 1; height: 0; }.war-list-inner { padding: 18rpx 24rpx 0; }.update-time { margin-bottom: 14rpx; color: #596178; font-size: 22rpx; text-align: center; }.filter-summary { display: flex; align-items: center; justify-content: center; margin-bottom: 16rpx; padding: 12rpx; color: #9aa0b0; font-size: 22rpx; background: #15152a; border-radius: 8rpx; }.clear-filter { margin-left: 18rpx; color: #5fa8ff; }.empty-list { padding: 100rpx 0; color: #66708a; font-size: 26rpx; text-align: center; }.league-waiting-notice { display: block; margin-bottom: 16rpx; padding: 16rpx 18rpx; color: #9aa6be; background: #17172d; border: 1rpx solid #2a2c4b; border-radius: 10rpx; font-size: 24rpx; text-align: center; }
+.war-list-scroll { flex: 1; height: 0; }.war-list-inner { padding: 18rpx 24rpx 0; }.page-update-row { display: flex; align-items: center; justify-content: center; margin-bottom: 14rpx; }.page-update-row .update-time { margin-bottom: 0; }.update-time { margin-bottom: 14rpx; color: #596178; font-size: 22rpx; text-align: center; }.filter-summary { display: flex; align-items: center; justify-content: center; margin-bottom: 16rpx; padding: 12rpx; color: #9aa0b0; font-size: 22rpx; background: #15152a; border-radius: 8rpx; }.clear-filter { margin-left: 18rpx; color: #5fa8ff; }.empty-list { padding: 100rpx 0; color: #66708a; font-size: 26rpx; text-align: center; }.league-waiting-notice { display: block; margin-bottom: 16rpx; padding: 16rpx 18rpx; color: #9aa6be; background: #17172d; border: 1rpx solid #2a2c4b; border-radius: 10rpx; font-size: 24rpx; text-align: center; }
 .war-card { margin-bottom: 20rpx; overflow: hidden; border: 1rpx solid #2a2a4a; border-radius: 14rpx; background: #18182d; box-sizing: border-box; }.card-header { min-height: 68rpx; padding: 14rpx 18rpx; display: flex; align-items: center; box-sizing: border-box; border-bottom: 1rpx solid #282844; }.category-badge { flex-shrink: 0; margin-right: 10rpx; padding: 3rpx 9rpx; border-radius: 6rpx; color: #9fc9ff; background: rgba(74,144,217,.18); font-size: 20rpx; }.category-farm { color: #7fd8a8; background: rgba(0,184,148,.15); }.category-flat { color: #d9b8ff; background: rgba(162,111,212,.16); }.clan-name { min-width: 0; overflow: hidden; color: #f0f0f5; font-size: 28rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.clan-tag { flex-shrink: 0; margin-left: 8rpx; color: #66708a; font-size: 20rpx; }.status-badge { flex-shrink: 0; margin-left: auto; padding-left: 12rpx; color: #8890a0; font-size: 22rpx; }.status-in_war { color: #ff7675; }.status-preparation { color: #fdcb6e; }.status-war_ended { color: #8890a0; }.status-error { color: #e17055; }
 .simple-state { padding: 28rpx 20rpx; color: #7d8498; font-size: 25rpx; text-align: center; }.error-state { color: #e17055; }.cwl-state { color: #74b9ff; }.sync-warning { margin-bottom: 16rpx; padding: 12rpx 14rpx; border-radius: 8rpx; color: #fdcb6e; background: rgba(253,203,110,.1); font-size: 21rpx; line-height: 1.5; }
 .war-summary { padding: 18rpx; }.opponent-row { display: flex; align-items: center; }.opponent-label { margin-right: 10rpx; color: #66708a; font-size: 22rpx; }.opponent-name { max-width: 280rpx; overflow: hidden; color: #d8dce8; font-size: 26rpx; text-overflow: ellipsis; white-space: nowrap; }.opponent-tag { margin-left: 8rpx; color: #596178; font-size: 20rpx; }.result-label { margin-left: auto; font-size: 23rpx; font-weight: 600; }.result-active { color: #ff7675; }.result-preparation { color: #fdcb6e; }.result-ended { color: #8890a0; font-weight: 400; }

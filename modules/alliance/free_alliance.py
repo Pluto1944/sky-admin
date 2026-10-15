@@ -13,7 +13,9 @@ import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Iterable, Mapping
+from zoneinfo import ZoneInfo
 
+from modules.coc_sync.cwl_live import group_war_tags
 from modules.coc_sync.official.mapper import normalize_tag
 from modules.sync_queue.config import active_live_resource_types
 from modules.sync_queue.planner import SyncPlanner
@@ -30,6 +32,7 @@ FREE_CATEGORY_LABELS = {
     "flat": "偷矿",
 }
 INITIAL_RESOURCE_TYPES = ("clan_profile", "clan_members", "current_war")
+PAGE_REFRESH_RESOURCE_TYPES = (*INITIAL_RESOURCE_TYPES, "cwl_live")
 _TAG_RE = re.compile(r"^#[0289PYLQGRJCUV]{3,14}$")
 
 
@@ -142,7 +145,7 @@ def _audit(
     conn: sqlite3.Connection,
     *,
     alliance_id: int,
-    actor_user_id: int,
+    actor_user_id: int | None,
     action: str,
     entity_type: str,
     entity_id: str | int | None,
@@ -449,6 +452,25 @@ def _cache_time(conn: sqlite3.Connection, resource_type: str, clan_tag: str) -> 
     return row["updated_at"] if row and row["updated_at"] else None
 
 
+def _resource_cache_time(
+    conn: sqlite3.Connection,
+    resource_type: str,
+    resource_key: str,
+) -> str | None:
+    if resource_type != "cwl_live":
+        return _cache_time(conn, resource_type, resource_key)
+    period, separator, raw_tag = resource_key.partition(":")
+    tag = normalize_tag(raw_tag)
+    if not separator or not tag:
+        return None
+    row = conn.execute(
+        """SELECT updated_at FROM cwl_live_group_cache
+           WHERE period=? AND clan_tag=? AND data_json IS NOT NULL""",
+        (period, tag),
+    ).fetchone()
+    return row["updated_at"] if row and row["updated_at"] else None
+
+
 def _active_live_types(conn: sqlite3.Connection) -> tuple[str, ...]:
     configured = set(active_live_resource_types())
     configured.update(
@@ -493,6 +515,253 @@ def _queue_response(value: Mapping[str, object]) -> dict:
             "task_created_at": task.get("created_at"),
         })
     return safe
+
+
+def _page_refresh_resource_key(
+    resource_type: str,
+    clan_tag: str,
+    period: str | None,
+) -> str:
+    return f"{period}:{clan_tag}" if resource_type == "cwl_live" else clan_tag
+
+
+def _cwl_cooldown(conn: sqlite3.Connection, period: str, clan_tag: str) -> int:
+    row = conn.execute(
+        """SELECT data_json FROM cwl_live_group_cache
+           WHERE period=? AND clan_tag=?""",
+        (period, clan_tag),
+    ).fetchone()
+    if row is None or not row["data_json"]:
+        return 30 * 60
+    try:
+        group = json.loads(row["data_json"])
+    except (TypeError, json.JSONDecodeError):
+        return 30 * 60
+    war_tags = group_war_tags(group if isinstance(group, dict) else None)
+    if not war_tags:
+        return 30 * 60
+    placeholders = ",".join("?" for _ in war_tags)
+    active = conn.execute(
+        f"""SELECT 1 FROM cwl_live_war_cache
+            WHERE war_tag IN ({placeholders}) AND state='inWar' LIMIT 1""",
+        war_tags,
+    ).fetchone()
+    return 10 * 60 if active is not None else 30 * 60
+
+
+def _page_refresh_cooldown(
+    conn: sqlite3.Connection,
+    resource_type: str,
+    clan_tag: str,
+    period: str | None,
+    current: datetime,
+) -> int:
+    if resource_type == "current_war":
+        return _war_cooldown(conn, clan_tag, current)
+    if resource_type == "cwl_live" and period:
+        return _cwl_cooldown(conn, period, clan_tag)
+    return 2 * 60 * 60
+
+
+def _validate_page_refresh_scope(
+    conn: sqlite3.Connection,
+    alliance_id: int,
+    clan_tag: str,
+    resource_types: Iterable[str],
+    period: str | None,
+) -> tuple[str, tuple[str, ...], str | None]:
+    alliance = conn.execute(
+        "SELECT plan_code, status FROM alliances WHERE id=?",
+        (int(alliance_id),),
+    ).fetchone()
+    if alliance is None or alliance["status"] != "active":
+        raise FreeAllianceError("联盟不存在或已停用", status_code=404)
+    if alliance["plan_code"] != "free":
+        raise FreeAllianceError("页面手动刷新仅适用于免费联盟", status_code=409)
+
+    tag = _tag(clan_tag)
+    selected = tuple(dict.fromkeys(str(item) for item in resource_types))
+    if not selected or any(item not in PAGE_REFRESH_RESOURCE_TYPES for item in selected):
+        raise FreeAllianceError("不支持的刷新资源类型", status_code=422)
+    has_cwl = "cwl_live" in selected
+    if has_cwl and len(selected) != 1:
+        raise FreeAllianceError("联赛实况需要单独提交刷新", status_code=422)
+    if has_cwl:
+        current_period = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m")
+        if period != current_period:
+            raise FreeAllianceError("仅支持刷新当前月份的联赛实况", status_code=409)
+        season = conn.execute(
+            """SELECT seasons.status FROM alliance_cwl_teams AS teams
+               JOIN alliance_cwl_seasons AS seasons ON seasons.id=teams.season_id
+               WHERE seasons.alliance_id=? AND seasons.period=?
+                 AND teams.clan_tag=? AND seasons.status IN ('active','frozen')""",
+            (int(alliance_id), period, tag),
+        ).fetchone()
+        if season is None:
+            raise FreeAllianceError("部落不在当前联盟的活跃联赛队伍中", status_code=404)
+        return tag, selected, period
+
+    if period:
+        raise FreeAllianceError("该刷新资源不接受 period", status_code=422)
+    subscribed = conn.execute(
+        """SELECT 1 FROM alliance_clans
+           WHERE alliance_id=? AND clan_tag=? AND status='active'""",
+        (int(alliance_id), tag),
+    ).fetchone()
+    if subscribed is None:
+        raise FreeAllianceError("部落不在当前联盟订阅范围内", status_code=404)
+    return tag, selected, None
+
+
+def request_page_refresh(
+    conn: sqlite3.Connection,
+    alliance_id: int,
+    clan_tag: str,
+    *,
+    resource_types: Iterable[str],
+    period: str | None = None,
+    actor_user_id: int | None = None,
+    access_kind: str = "visitor",
+    now: datetime | None = None,
+) -> list[dict]:
+    """Queue refreshes authorized by an already-resolved read context.
+
+    Callers must resolve the same alliance view context used by page GETs.  This
+    service then enforces free-plan and resource scope without requiring an
+    alliance membership, so valid share visitors use the same public queue.
+    """
+    tag, selected, selected_period = _validate_page_refresh_scope(
+        conn, alliance_id, clan_tag, resource_types, period,
+    )
+    current = _now(now)
+    reconcile_sync_targets(conn, now=current)
+    queue = SyncQueueRepository(conn)
+    results = []
+    for resource_type in selected:
+        resource_key = _page_refresh_resource_key(
+            resource_type, tag, selected_period,
+        )
+        cooldown = _page_refresh_cooldown(
+            conn, resource_type, tag, selected_period, current,
+        )
+        try:
+            queued = queue.enqueue_interactive_task(
+                resource_type,
+                resource_key,
+                cooldown_seconds=cooldown,
+                now=current,
+                payload={
+                    "alliance_id": int(alliance_id),
+                    "actor_user_id": actor_user_id,
+                    "access_kind": access_kind,
+                    "trigger": "page_manual",
+                },
+            )
+        except SyncQueueError as exc:
+            queued = {
+                "accepted": False,
+                "reason": "planner_pending",
+                "message": str(exc),
+            }
+        safe = _queue_response(queued)
+        task_created = _parse_time(safe.get("task_created_at"))
+        safe["next_allowed_at"] = _iso(task_created + timedelta(seconds=cooldown)) if task_created else None
+        results.append({
+            "resource_type": resource_type,
+            "resource_key": resource_key,
+            "cooldown_seconds": cooldown,
+            **safe,
+        })
+
+    timestamp = _iso(current)
+    with conn:
+        _audit(
+            conn,
+            alliance_id=int(alliance_id),
+            actor_user_id=actor_user_id if actor_user_id else None,
+            action="free_page_refresh_requested",
+            entity_type="alliance_clan",
+            entity_id=tag,
+            details={
+                "access_kind": access_kind,
+                "period": selected_period,
+                "resource_types": list(selected),
+                "results": [
+                    {
+                        "resource_type": item["resource_type"],
+                        "accepted": item["accepted"],
+                        "reason": item["reason"],
+                    }
+                    for item in results
+                ],
+            },
+            timestamp=timestamp,
+        )
+    return results
+
+
+def page_refresh_status(
+    conn: sqlite3.Connection,
+    alliance_id: int,
+    clan_tag: str,
+    *,
+    resource_types: Iterable[str],
+    period: str | None = None,
+    now: datetime | None = None,
+) -> dict:
+    """Return button state for resources already validated by a page context."""
+    try:
+        tag, selected, selected_period = _validate_page_refresh_scope(
+            conn, alliance_id, clan_tag, resource_types, period,
+        )
+    except FreeAllianceError:
+        return {"allowed": False, "resources": []}
+    current = _now(now)
+    resources = []
+    for resource_type in selected:
+        resource_key = _page_refresh_resource_key(resource_type, tag, selected_period)
+        cooldown = _page_refresh_cooldown(
+            conn, resource_type, tag, selected_period, current,
+        )
+        target = conn.execute(
+            """SELECT id, planning_mode FROM sync_targets
+               WHERE resource_type=? AND resource_key=? AND status='active'""",
+            (resource_type, resource_key),
+        ).fetchone()
+        task = None
+        if target is not None:
+            task = conn.execute(
+                """SELECT id, status, created_at, updated_at, finished_at, last_error
+                   FROM sync_tasks WHERE target_id=? AND mode='live'
+                   ORDER BY created_at DESC, id DESC LIMIT 1""",
+                (target["id"],),
+            ).fetchone()
+        task_status = task["status"] if task else None
+        created = _parse_time(task["created_at"]) if task else None
+        next_allowed = created + timedelta(seconds=cooldown) if created else None
+        open_task = task_status in {"pending", "running", "retry_wait"}
+        cooling = bool(next_allowed and next_allowed > current)
+        resources.append({
+            "resource_type": resource_type,
+            "resource_key": resource_key,
+            "state": task_status if open_task else (
+                "failed" if task_status in {"failed", "dead"} else "ready"
+            ),
+            "cache_updated_at": _resource_cache_time(conn, resource_type, resource_key),
+            "task_id": int(task["id"]) if task else None,
+            "task_status": task_status,
+            "task_updated_at": task["updated_at"] if task else None,
+            "cooldown_seconds": cooldown,
+            "next_allowed_at": _iso(next_allowed) if cooling else None,
+            "can_request": bool(
+                target is not None
+                and target["planning_mode"] == "live"
+                and not open_task
+                and not cooling
+            ),
+            "error": task["last_error"] if task_status in {"failed", "dead"} else None,
+        })
+    return {"allowed": True, "resources": resources}
 
 
 def enqueue_initialization(

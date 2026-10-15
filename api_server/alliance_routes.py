@@ -40,8 +40,10 @@ from modules.alliance.free_alliance import (
     create_free_alliance,
     enqueue_initialization,
     free_alliance_capability,
+    page_refresh_status,
     reconcile_sync_targets,
     rename_free_alliance,
+    request_page_refresh,
     request_manual_refresh,
     subscribe_free_clan,
     subscription_status,
@@ -106,6 +108,12 @@ class FreeClanSubscriptionInput(BaseModel):
 
 class FreeRefreshInput(BaseModel):
     resource_types: list[str] = Field(default_factory=lambda: ["current_war"])
+
+
+class PageRefreshInput(BaseModel):
+    clan_tag: str
+    resource_types: list[str]
+    period: str | None = None
 
 
 class AllianceVisibilityInput(BaseModel):
@@ -188,6 +196,23 @@ def _safe_raw(value: str | None) -> dict:
     except (TypeError, json.JSONDecodeError):
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def _page_refresh(
+    db: Database,
+    context: AllianceContext,
+    clan_tag: str,
+    resource_types: list[str],
+    *,
+    period: str | None = None,
+) -> dict:
+    return page_refresh_status(
+        db.conn,
+        context.alliance_id,
+        clan_tag,
+        resource_types=resource_types,
+        period=period,
+    )
 
 
 def _number(value) -> int:
@@ -645,12 +670,59 @@ def alliance_clans(
     db: Database = Depends(get_db),
 ):
     clans = _alliance_clan_overviews(db, context)
+    for item in clans:
+        item["refresh"] = _page_refresh(
+            db, context, item["clan_tag"], ["clan_profile", "clan_members"],
+        )
     return {
         "alliance_id": alliance_id,
         "count": len(clans),
         "clans": clans,
         "updated_at": max(
             (item["updated_at"] for item in clans if item["updated_at"]), default=None
+        ),
+    }
+
+
+@router.post("/alliances/{alliance_id}/sync-requests", status_code=202)
+def request_alliance_page_refresh(
+    alliance_id: int,
+    payload: PageRefreshInput,
+    context: AllianceContext = Depends(alliance_view_context),
+    db: Database = Depends(get_db),
+):
+    """提交当前可访问页面对应的免费联盟公共资源刷新任务。"""
+    if context.clan(payload.clan_tag) is None and "cwl_live" not in payload.resource_types:
+        raise HTTPException(status_code=404, detail="部落不在当前联盟订阅范围内")
+    actor_user_id = context.user_id or None
+    if actor_user_id is None and context.openid:
+        row = db.conn.execute(
+            "SELECT id FROM wechat_users WHERE openid=?", (context.openid,),
+        ).fetchone()
+        actor_user_id = int(row["id"]) if row else None
+    try:
+        results = request_page_refresh(
+            db.conn,
+            alliance_id,
+            payload.clan_tag,
+            resource_types=payload.resource_types,
+            period=payload.period,
+            actor_user_id=actor_user_id,
+            access_kind=context.role,
+        )
+    except FreeAllianceError as exc:
+        raise _free_error(exc) from exc
+    return {
+        "alliance_id": alliance_id,
+        "clan_tag": normalize_tag(payload.clan_tag),
+        "period": payload.period,
+        "results": results,
+        "refresh": _page_refresh(
+            db,
+            context,
+            payload.clan_tag,
+            payload.resource_types,
+            period=payload.period,
         ),
     }
 
@@ -679,6 +751,9 @@ def alliance_clan_detail(
     item["profile"] = profile
     item["profile_status"] = profile_row["status"] if profile_row else "pending"
     item["profile_updated_at"] = profile_row["updated_at"] if profile_row else None
+    item["refresh"] = _page_refresh(
+        db, context, clan.clan_tag, ["clan_profile", "clan_members"],
+    )
     return item
 
 
@@ -757,6 +832,7 @@ def alliance_members(
             "alliance_id": alliance_id, "count": 0, "page": page,
             "page_size": page_size, "total_pages": 1, "members": [],
             "updated_at": None, "clans": clan_options,
+            "refresh": {"allowed": False, "resources": []},
         }
 
     placeholders = ",".join("?" for _ in selected_tags)
@@ -847,6 +923,9 @@ def alliance_members(
         "updated_at": max(
             (item["last_synced_at"] for item in items if item["last_synced_at"]), default=None
         ),
+        "refresh": _page_refresh(
+            db, context, selected_tags[0], ["clan_members"],
+        ) if len(selected_tags) == 1 else {"allowed": False, "resources": []},
     }
 
 
@@ -872,7 +951,11 @@ def alliance_current_wars(
             "category": clan.category,
             "config_order": clan.sort_order,
         })
-        items.append(current_war_summary(item))
+        summary = current_war_summary(item)
+        summary["refresh"] = _page_refresh(
+            db, context, clan.clan_tag, ["current_war"],
+        )
+        items.append(summary)
         if item.get("synced_at"):
             updated.append(item["synced_at"])
         if clan.category not in seen_categories:
@@ -904,6 +987,9 @@ def alliance_current_war_detail(
         "clan_tag": clan.clan_tag, "clan_name": clan.clan_name,
         "category": clan.category,
     })
+    item["refresh"] = _page_refresh(
+        db, context, clan.clan_tag, ["current_war"],
+    )
     return item
 
 
@@ -1604,6 +1690,14 @@ def alliance_cwl_live(
         (item.get("synced_at") for item in result["clans"] if item.get("synced_at")),
         default=None,
     )
+    for item in result["clans"]:
+        item["refresh"] = _page_refresh(
+            db,
+            context,
+            item["clan_tag"],
+            ["cwl_live"],
+            period=selected_period,
+        )
     db.conn.commit()
     return result
 
@@ -1635,6 +1729,9 @@ def alliance_cwl_live_detail(
         teams=teams,
     )
     result["alliance_id"] = alliance_id
+    result["refresh"] = _page_refresh(
+        db, context, normalized, ["cwl_live"], period=selected_period,
+    )
     db.conn.commit()
     return result
 

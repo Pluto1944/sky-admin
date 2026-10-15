@@ -36,7 +36,15 @@
           </view>
           <text v-if="detail.profile_status === 'stale'" class="clan-detail-stale">官方资料本次同步失败，正在显示上次缓存</text>
           <text v-else-if="!hasProfile" class="clan-detail-stale">官方资料等待同步</text>
-          <text class="clan-detail-updated">{{ detail.profile_updated_at ? '官方资料更新于 ' + formatTime(detail.profile_updated_at) : (detail.updated_at ? '成员更新于 ' + formatTime(detail.updated_at) : '等待首次同步') }}</text>
+          <view class="clan-detail-update-row">
+            <text class="clan-detail-updated">{{ detail.profile_updated_at ? '官方资料更新于 ' + formatTime(detail.profile_updated_at) : (detail.updated_at ? '成员更新于 ' + formatTime(detail.updated_at) : '等待首次同步') }}</text>
+            <PageRefreshButton
+              :clan-tag="detail.clan_tag"
+              :resource-types="['clan_profile', 'clan_members']"
+              :refresh="detail.refresh"
+              @reload="fetchData"
+            />
+          </view>
         </view>
 
         <view v-if="hasProfile" class="clan-detail-card">
@@ -115,6 +123,7 @@
 </template>
 
 <script>
+import PageRefreshButton from '@/components/PageRefreshButton.vue'
 import { getClanOverviewDetail } from '@/utils/api.js'
 import { getCurrentAllianceId } from '@/utils/alliance.js'
 
@@ -124,6 +133,7 @@ const LABEL_NAMES = { 'Clan Wars': '部落战', 'Clan War League': '部落战联
 
 export default {
   name: 'ClanDetail',
+  components: { PageRefreshButton },
   props: { clanTag: { type: String, required: true } },
   data() { return { loading: true, error: '', detail: {}, badgeLoadError: false } },
   computed: {
@@ -191,7 +201,7 @@ export default {
 .clan-detail-profile-row { display: flex; align-items: center; }.clan-detail-emblem-wrap { width: 150rpx; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; }.clan-detail-emblem { width: 132rpx; height: 132rpx; }.clan-detail-emblem-fallback { display: flex; width: 112rpx; height: 112rpx; align-items: center; justify-content: center; color: #66708a; background: #252540; border-radius: 50%; font-size: 58rpx; }.clan-detail-level { margin-top: 4rpx; color: #8992aa; font-size: 20rpx; }
 .clan-detail-profile-main { flex: 1; min-width: 0; margin-left: 18rpx; }.clan-detail-title-row { display: flex; align-items: center; }.clan-detail-name { min-width: 0; color: #f4f4fa; font-size: 34rpx; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }.clan-detail-badge { flex-shrink: 0; margin-left: 12rpx; padding: 6rpx 14rpx; color: #5fa8ff; background: rgba(74,144,217,.15); border-radius: 8rpx; font-size: 22rpx; }.clan-detail-tag { display: block; margin-top: 10rpx; color: #777f96; font-size: 22rpx; }.clan-detail-member-line { display: flex; align-items: center; margin-top: 14rpx; color: #a7adbd; font-size: 25rpx; }.clan-detail-separator { margin: 0 12rpx; color: #555d72; }
 .clan-detail-facts { display: flex; margin-top: 22rpx; padding-top: 20rpx; border-top: 1rpx solid #2a2a4a; }.clan-detail-facts > view { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; border-right: 1rpx solid #2a2a4a; }.clan-detail-facts > view:last-child { border-right: 0; }.clan-detail-fact-label { color: #66708a; font-size: 21rpx; }.clan-detail-fact-value { width: 100%; margin-top: 8rpx; color: #a2a9ba; font-size: 27rpx; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.clan-detail-stale { display: block; margin-top: 18rpx; color: #c49a56; font-size: 21rpx; text-align: center; }.clan-detail-updated { display: block; margin-top: 12rpx; color: #5d6478; font-size: 21rpx; text-align: center; }
+.clan-detail-stale { display: block; margin-top: 18rpx; color: #c49a56; font-size: 21rpx; text-align: center; }.clan-detail-update-row { display: flex; align-items: center; justify-content: center; margin-top: 12rpx; }.clan-detail-updated { color: #5d6478; font-size: 21rpx; text-align: center; }
 .clan-detail-card-title { display: block; margin-bottom: 20rpx; color: #d6d9e2; font-size: 28rpx; font-weight: 600; }
 .clan-detail-war-grid { display: flex; margin-bottom: 18rpx; }.clan-detail-war-grid > view { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; color: #737b90; font-size: 20rpx; }.clan-detail-war-value { margin-bottom: 6rpx; color: #aeb5c5; font-size: 30rpx; }.clan-detail-win { color: #65b886; }.clan-detail-tie { color: #62a6d8; }.clan-detail-loss { color: #d36e76; }
 .clan-detail-points-grid { display: flex; margin-bottom: 18rpx; }.clan-detail-points-grid > view { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; color: #737b90; font-size: 20rpx; }.clan-detail-points-grid > view text:last-child { margin-top: 8rpx; color: #aeb5c5; font-size: 28rpx; }
