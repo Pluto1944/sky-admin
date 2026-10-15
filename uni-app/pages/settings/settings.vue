@@ -58,7 +58,7 @@
             <view class="menu-item" @tap="pageState = 'bind'">
               <view class="menu-icon menu-icon-account">号</view>
               <view class="menu-copy">
-                <text class="menu-text">管理COC账号</text>
+                <text class="menu-text">管理账号</text>
                 <text class="menu-desc">绑定或修改 COC 玩家账号</text>
               </view>
               <text class="menu-arrow">›</text>

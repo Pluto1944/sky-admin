@@ -43,6 +43,20 @@
       }
     },
     {
+      "path": "pages/settings/alliance-settings",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "联盟设置"
+      }
+    },
+    {
+      "path": "pages/settings/alliance-invitations",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "邀请管理"
+      }
+    },
+    {
       "path": "pages/settings/alliance-join-requests",
       "style": {
         "navigationStyle": "custom",
