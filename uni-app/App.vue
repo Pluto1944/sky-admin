@@ -6,7 +6,7 @@ export default {
     console.log('App Launch')
     // 启动时验证 token 是否有效
     const token = uni.getStorageSync('token')
-    const consented = uni.getStorageSync('privacyConsent') === 'v2'
+    const consented = uni.getStorageSync('privacyConsent') === 'v3'
     if (token && consented) {
       this.checkLoginStatus()
     }

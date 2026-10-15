@@ -25,7 +25,7 @@
           @confirm="save"
         />
         <text class="field-tip">
-          {{ editing ? '可以选择微信昵称，也可以自行填写。' : '未出现微信昵称时，可点击输入框手动填写。' }}
+          {{ nicknameFieldTip }}
         </text>
       </view>
 
@@ -65,9 +65,25 @@ export default {
       nicknameReviewPassed: false,
       nicknameInputStartedEmpty: true,
       nicknameInputEvents: 0,
+      privacyAuthorizationPending: false,
+      privacyAuthorizationDenied: false,
       autoSaving: false,
       autoBlurTimer: null,
-      autoSaveTimer: null
+      autoSaveTimer: null,
+      nicknameFocusTimer: null
+    }
+  },
+  computed: {
+    nicknameFieldTip() {
+      if (this.privacyAuthorizationPending) {
+        return '正在确认微信隐私授权…'
+      }
+      if (this.privacyAuthorizationDenied) {
+        return '未授权微信昵称，可继续手动输入或暂不设置。'
+      }
+      return this.editing
+        ? '可以选择微信昵称，也可以自行填写。'
+        : '未出现微信昵称时，可点击输入框手动填写。'
     }
   },
   watch: {
@@ -99,11 +115,7 @@ export default {
     }
   },
   onReady() {
-    if (!this.editing && !this.nickname) {
-      setTimeout(() => {
-        this.nicknameFocused = true
-      }, 180)
-    }
+    this.requireNicknamePrivacyAuthorization()
   },
   onUnload() {
     if (this.autoBlurTimer) {
@@ -112,8 +124,46 @@ export default {
     if (this.autoSaveTimer) {
       clearTimeout(this.autoSaveTimer)
     }
+    if (this.nicknameFocusTimer) {
+      clearTimeout(this.nicknameFocusTimer)
+    }
   },
   methods: {
+    focusNicknameAfterPrivacyAuthorization() {
+      if (this.editing || this.nickname) return
+      if (this.nicknameFocusTimer) {
+        clearTimeout(this.nicknameFocusTimer)
+      }
+      this.nicknameFocusTimer = setTimeout(() => {
+        this.nicknameFocusTimer = null
+        this.nicknameFocused = true
+      }, 180)
+    },
+    requireNicknamePrivacyAuthorization() {
+      // input type="nickname" 在用户尚未完成微信侧隐私授权时会直接降级为普通文本框，
+      // 且不会触发 onNeedPrivacyAuthorization。先模拟一次隐私接口调用，让微信官方
+      // 弹窗完成授权同步；拒绝或旧基础库不支持时仍允许手动填写昵称。
+      const wechat = typeof wx !== 'undefined' ? wx : null
+      if (!wechat || typeof wechat.requirePrivacyAuthorize !== 'function') {
+        this.focusNicknameAfterPrivacyAuthorization()
+        return
+      }
+
+      this.privacyAuthorizationPending = true
+      wechat.requirePrivacyAuthorize({
+        success: () => {
+          this.privacyAuthorizationPending = false
+          this.privacyAuthorizationDenied = false
+          this.focusNicknameAfterPrivacyAuthorization()
+        },
+        fail: () => {
+          this.privacyAuthorizationPending = false
+          this.privacyAuthorizationDenied = true
+          this.nicknameFocused = false
+          uni.showToast({ title: '可手动输入昵称或暂不设置', icon: 'none' })
+        }
+      })
+    },
     handleNicknameFocus() {
       if (this.editing) return
       this.pendingNickname = ''

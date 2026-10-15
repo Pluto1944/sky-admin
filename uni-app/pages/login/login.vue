@@ -70,7 +70,7 @@ export default {
             .then((res) => {
               // 3. 存储 token 和用户信息
               uni.setStorageSync('token', res.token)
-              uni.setStorageSync('privacyConsent', 'v2')
+              uni.setStorageSync('privacyConsent', 'v3')
               getApp().globalData.isLoggedIn = true
               getApp().globalData.userInfo = res.user
               loadAllianceContext(null, true).catch(() => {})

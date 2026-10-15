@@ -262,7 +262,7 @@ export default {
     },
     refreshLoginState() {
       const token = uni.getStorageSync('token')
-      const consented = uni.getStorageSync('privacyConsent') === 'v2'
+      const consented = uni.getStorageSync('privacyConsent') === 'v3'
       this.privacyAgreed = consented
       if (token && consented) {
         getMyInfo()
@@ -311,7 +311,7 @@ export default {
           wechatLogin(loginRes.code)
             .then((res) => {
               uni.setStorageSync('token', res.token)
-              uni.setStorageSync('privacyConsent', 'v2')
+              uni.setStorageSync('privacyConsent', 'v3')
               this.isLoggedIn = true
               this.userInfo = res.user
               getApp().globalData.isLoggedIn = true
