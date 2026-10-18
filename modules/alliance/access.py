@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from modules.coc_sync.official.mapper import normalize_tag
 
 from .migration import SKY_ALLIANCE_KEY
+from .plans import TIME_LIMITED_PLAN_SQL
 
 
 ROLE_LABELS = {
@@ -208,7 +209,7 @@ def _context_rows(
                    alliances.name AS alliance_name, members.role,
                    plans.plan_code, plans.display_name AS plan_name,
                    CASE
-                     WHEN alliances.plan_code='paid' AND grants.id IS NOT NULL
+                     WHEN alliances.plan_code IN {TIME_LIMITED_PLAN_SQL} AND grants.id IS NOT NULL
                       AND (grants.status!='active' OR
                            (grants.expires_at IS NOT NULL AND
                             datetime(grants.expires_at) <= datetime('now', '-7 days')))
@@ -217,7 +218,7 @@ def _context_rows(
                    plans.max_clans, plans.entitlements_json,
                    CASE
                      WHEN grants.id IS NULL THEN
-                       CASE WHEN alliances.plan_code='paid' THEN 'legacy' ELSE 'active' END
+                       CASE WHEN alliances.plan_code IN {TIME_LIMITED_PLAN_SQL} THEN 'legacy' ELSE 'active' END
                      WHEN grants.status='active' AND
                           (grants.expires_at IS NULL OR datetime(grants.expires_at) > datetime('now'))
                      THEN 'active'
@@ -315,11 +316,11 @@ def resolve_alliance_public_context(
     超级管理员读取时可显式跳过逐部落认证限制。
     """
     row = conn.execute(
-        """SELECT alliances.id AS alliance_id, alliances.alliance_key,
+        f"""SELECT alliances.id AS alliance_id, alliances.alliance_key,
                   alliances.name AS alliance_name, plans.plan_code,
                   plans.display_name AS plan_name,
                   CASE
-                    WHEN alliances.plan_code='paid' AND grants.id IS NOT NULL
+                    WHEN alliances.plan_code IN {TIME_LIMITED_PLAN_SQL} AND grants.id IS NOT NULL
                      AND (grants.status!='active' OR
                           (grants.expires_at IS NOT NULL AND
                            datetime(grants.expires_at) <= datetime('now', '-7 days')))
@@ -328,7 +329,7 @@ def resolve_alliance_public_context(
                   plans.max_clans, plans.entitlements_json,
                   CASE
                     WHEN grants.id IS NULL THEN
-                      CASE WHEN alliances.plan_code='paid' THEN 'legacy' ELSE 'active' END
+                      CASE WHEN alliances.plan_code IN {TIME_LIMITED_PLAN_SQL} THEN 'legacy' ELSE 'active' END
                     WHEN grants.status='active' AND
                          (grants.expires_at IS NULL OR datetime(grants.expires_at) > datetime('now'))
                     THEN 'active'

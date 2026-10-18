@@ -49,7 +49,7 @@ def _paid_alliance(db, key: str = "paid-a", name: str = "A联盟") -> int:
     cursor = db.conn.execute(
         """INSERT INTO alliances
            (alliance_key, name, status, plan_code, created_at, updated_at)
-           VALUES (?, ?, 'active', 'paid', ?, ?)""",
+           VALUES (?, ?, 'active', 'premium', ?, ?)""",
         (key, name, NOW, NOW),
     )
     return int(cursor.lastrowid)

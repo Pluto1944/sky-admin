@@ -49,6 +49,7 @@ from modules.alliance.free_alliance import (
     subscription_status,
 )
 from modules.alliance.operations import platform_admin_capability, require_platform_admin
+from modules.alliance.plans import plan_uses_on_demand_refresh
 from modules.alliance.operations import (
     AllianceOperationError,
     archive_alliance,
@@ -474,8 +475,8 @@ def refresh_free_subscription(
     db: Database = Depends(get_db),
 ):
     context = _context(user, alliance_id, db)
-    if context.plan_code != "free" or not context.clans:
-        raise HTTPException(status_code=409, detail="当前免费联盟尚未订阅部落")
+    if not plan_uses_on_demand_refresh(context.plan_code) or not context.clans:
+        raise HTTPException(status_code=409, detail="当前联盟尚未订阅可按需刷新的部落")
     clan = context.clans[0]
     try:
         results = request_manual_refresh(
@@ -692,7 +693,7 @@ def request_alliance_page_refresh(
     context: AllianceContext = Depends(alliance_view_context),
     db: Database = Depends(get_db),
 ):
-    """提交当前可访问页面对应的免费联盟公共资源刷新任务。"""
+    """提交当前可访问页面对应的按需刷新套餐公共资源任务。"""
     if context.clan(payload.clan_tag) is None and "cwl_live" not in payload.resource_types:
         raise HTTPException(status_code=404, detail="部落不在当前联盟订阅范围内")
     actor_user_id = context.user_id or None

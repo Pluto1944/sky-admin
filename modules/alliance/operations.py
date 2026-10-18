@@ -18,6 +18,13 @@ from typing import Mapping
 
 from modules.coc_sync.official.mapper import normalize_tag
 
+from .plans import (
+    ACTIVE_PLAN_CODES,
+    TIME_LIMITED_PLAN_SQL,
+    plan_allows_user_management,
+    plan_requires_expiry,
+)
+
 
 _TAG_RE = re.compile(r"^#[0289PYLQGRJCUV]{3,14}$")
 _CATEGORIES = {"normal", "combat", "farm", "flat"}
@@ -351,9 +358,9 @@ def _managed_clan_actor(
         conn, openid, alliance_id,
         roles={"leader"} if leader_required else {"admin", "leader"},
     )
-    if actor["plan_code"] not in {"free", "paid"}:
+    if not plan_allows_user_management(actor["plan_code"]):
         raise AllianceOperationError("当前联盟的部落由系统配置，不能在小程序内修改", status_code=409)
-    if actor["plan_code"] == "paid":
+    if plan_requires_expiry(actor["plan_code"]):
         latest_grant = conn.execute(
             """SELECT status, expires_at FROM alliance_plan_grants
                WHERE alliance_id=? ORDER BY id DESC LIMIT 1""",
@@ -364,7 +371,7 @@ def _managed_clan_actor(
             latest_grant["status"] != "active"
             or (grant_expiry is not None and grant_expiry <= _now(now))
         ):
-            raise AllianceOperationError("付费权益已到期，请先续期", status_code=409)
+            raise AllianceOperationError("会员权益已到期，请先续期", status_code=409)
     return {**dict(actor), "platform_admin": False}
 
 
@@ -404,9 +411,11 @@ def list_managed_clans(
         (int(alliance_id),),
     ).fetchall()
     active_count = sum(1 for row in rows if row["status"] == "active")
-    plan_allows_management = bool(plan and plan["plan_code"] in {"free", "paid"})
+    plan_allows_management = bool(
+        plan and plan_allows_user_management(plan["plan_code"])
+    )
     entitlement_status = "active"
-    if plan and plan["plan_code"] == "paid":
+    if plan and plan_requires_expiry(plan["plan_code"]):
         latest_grant = conn.execute(
             """SELECT status, expires_at FROM alliance_plan_grants
                WHERE alliance_id=? ORDER BY id DESC LIMIT 1""",
@@ -1664,7 +1673,7 @@ def grant_alliance_plan(
     now: datetime | None = None,
 ) -> dict:
     actor = require_platform_admin(conn, openid)
-    if plan_code not in {"free", "paid", "internal"}:
+    if plan_code not in ACTIVE_PLAN_CODES:
         raise AllianceOperationError("不支持的套餐", status_code=422)
     plan = conn.execute(
         "SELECT max_clans FROM alliance_plans WHERE plan_code=? AND status='active'",
@@ -1681,10 +1690,10 @@ def grant_alliance_plan(
     current = _now(now)
     timestamp = _iso(current)
     expiry = _parse_time(expires_at)
-    if plan_code == "paid" and expiry is None:
-        raise AllianceOperationError("付费权益必须设置有效期", status_code=422)
-    if plan_code != "paid" and expiry is not None:
-        raise AllianceOperationError("仅付费权益支持设置到期时间", status_code=422)
+    if plan_requires_expiry(plan_code) and expiry is None:
+        raise AllianceOperationError("会员权益必须设置有效期", status_code=422)
+    if not plan_requires_expiry(plan_code) and expiry is not None:
+        raise AllianceOperationError("仅会员权益支持设置到期时间", status_code=422)
     if expiry is not None and expiry <= current:
         raise AllianceOperationError("套餐到期时间必须晚于当前时间", status_code=422)
     with conn:
@@ -1738,9 +1747,9 @@ def reconcile_expired_plan_grants(
     timestamp = _iso(current)
     downgrade_before = _iso(current - timedelta(days=7))
     rows = conn.execute(
-        """SELECT grants.id, grants.alliance_id, grants.plan_code, grants.expires_at
+        f"""SELECT grants.id, grants.alliance_id, grants.plan_code, grants.expires_at
            FROM alliance_plan_grants AS grants
-           WHERE grants.status='active' AND grants.plan_code='paid'
+           WHERE grants.status='active' AND grants.plan_code IN {TIME_LIMITED_PLAN_SQL}
              AND grants.expires_at IS NOT NULL
              AND grants.expires_at <= ?
            ORDER BY grants.id""",
@@ -1748,19 +1757,23 @@ def reconcile_expired_plan_grants(
     ).fetchall()
     expired = 0
     deactivated = 0
+    free_plan = conn.execute(
+        "SELECT max_clans FROM alliance_plans WHERE plan_code='free' AND status='active'",
+    ).fetchone()
+    free_limit = int(free_plan["max_clans"]) if free_plan else 3
     with conn:
         for row in rows:
             conn.execute(
                 "UPDATE alliance_plan_grants SET status='expired', updated_at=? WHERE id=?",
                 (timestamp, row["id"]),
             )
-            # Keep the oldest subscribed clan as the low-frequency free fallback;
+            # Keep the oldest subscribed clans within the free-plan capacity;
             # private subscription rows are retained and public facts are untouched.
             extras = conn.execute(
                 """SELECT id FROM alliance_clans
                    WHERE alliance_id=? AND status='active'
-                   ORDER BY sort_order, id LIMIT -1 OFFSET 1""",
-                (row["alliance_id"],),
+                   ORDER BY sort_order, id LIMIT -1 OFFSET ?""",
+                (row["alliance_id"], free_limit),
             ).fetchall()
             for extra in extras:
                 conn.execute(
@@ -1779,7 +1792,7 @@ def reconcile_expired_plan_grants(
                    (alliance_id, plan_code, status, starts_at, expires_at,
                     granted_by_user_id, note, created_at, updated_at)
                    VALUES (?, 'free', 'active', ?, NULL, NULL,
-                           '付费权益宽限期结束后自动降级', ?, ?)""",
+                           '会员权益宽限期结束后自动降级', ?, ?)""",
                 (row["alliance_id"], timestamp, timestamp, timestamp),
             )
             _alliance_audit(

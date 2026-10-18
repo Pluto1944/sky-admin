@@ -200,7 +200,7 @@ def test_share_join_is_member_only_idempotent_and_blocked_users_stay_blocked(ops
 def test_share_join_has_no_total_membership_cap_but_keeps_daily_rate_limit(ops):
     db, ids = ops
     for index in range(50):
-        alliance_id = _alliance(db, ids["operator"], f"joined-{index}", plan="paid")
+        alliance_id = _alliance(db, ids["operator"], f"joined-{index}", plan="premium")
         db.conn.execute(
             """INSERT INTO alliance_members
                (alliance_id, user_id, role, status, joined_at, created_at, updated_at)
@@ -209,7 +209,7 @@ def test_share_join_has_no_total_membership_cap_but_keeps_daily_rate_limit(ops):
         )
     db.conn.commit()
 
-    target_id = _alliance(db, ids["owner"], "joined-target", plan="paid")
+    target_id = _alliance(db, ids["owner"], "joined-target", plan="premium")
     shared = create_share_link(db.conn, "owner", target_id, now=NOW)
     assert join_from_share(db.conn, "member", shared["token"], now=NOW)["joined"] is True
     assert db.conn.execute(
@@ -227,7 +227,7 @@ def test_share_join_has_no_total_membership_cap_but_keeps_daily_rate_limit(ops):
             (target_id, ids["member"], f"rate-{index}", NOW_TEXT),
         )
     db.conn.commit()
-    second_target_id = _alliance(db, ids["other-owner"], "joined-target-2", plan="paid")
+    second_target_id = _alliance(db, ids["other-owner"], "joined-target-2", plan="premium")
     second_share = create_share_link(db.conn, "other-owner", second_target_id, now=NOW)
     with pytest.raises(AllianceOperationError, match="过于频繁"):
         join_from_share(db.conn, "member", second_share["token"], now=NOW)
@@ -474,14 +474,14 @@ def test_member_can_leave_and_rejoin_but_leader_must_transfer_first(ops):
         leave_alliance(db.conn, "owner", alliance_id, now=NOW)
 
 
-def test_paid_expiry_downgrades_sync_and_preserves_rows(ops):
+def test_premium_expiry_downgrades_sync_and_preserves_rows(ops):
     db, ids = ops
-    alliance_id = _alliance(db, ids["owner"], "paid-a", plan="paid")
+    alliance_id = _alliance(db, ids["owner"], "paid-a", plan="premium")
     _clan(db, alliance_id, "#2QQ", order=0)
     _clan(db, alliance_id, "#9PY", order=1)
     expiry = NOW + timedelta(days=1)
     grant_alliance_plan(
-        db.conn, "operator", alliance_id, plan_code="paid",
+        db.conn, "operator", alliance_id, plan_code="premium",
         expires_at=expiry.isoformat(), now=NOW,
     )
     before = SyncPlanner(db.conn)._clan_interests(NOW)
@@ -493,7 +493,7 @@ def test_paid_expiry_downgrades_sync_and_preserves_rows(ops):
     assert {item["metadata"]["sync_tier"] for item in during_grace} == {"high"}
 
     result = reconcile_expired_plan_grants(db.conn, now=NOW + timedelta(days=9))
-    assert result == {"expired_grants": 1, "deactivated_clans": 1}
+    assert result == {"expired_grants": 1, "deactivated_clans": 0}
     after = SyncPlanner(db.conn)._clan_interests(NOW + timedelta(days=9))
     assert {item["metadata"]["sync_tier"] for item in after} == {"low"}
     assert db.conn.execute(
@@ -505,14 +505,36 @@ def test_paid_expiry_downgrades_sync_and_preserves_rows(ops):
     assert db.conn.execute(
         "SELECT COUNT(*) FROM alliance_clans WHERE alliance_id=? AND status='active'",
         (alliance_id,),
-    ).fetchone()[0] == 1
+    ).fetchone()[0] == 2
 
 
-def test_paid_manager_can_add_and_remove_clans_without_deleting_public_cache(ops):
+def test_platform_can_grant_standard_and_legacy_paid_is_not_newly_grantable(ops):
     db, ids = ops
-    alliance_id = _alliance(db, ids["owner"], "paid-manage", plan="paid")
+    alliance_id = _alliance(db, ids["owner"], "standard-grant")
+    _clan(db, alliance_id, "#2QQ")
+
+    with pytest.raises(AllianceOperationError, match="必须设置有效期"):
+        grant_alliance_plan(
+            db.conn, "operator", alliance_id, plan_code="standard",
+            expires_at=None, now=NOW,
+        )
+    granted = grant_alliance_plan(
+        db.conn, "operator", alliance_id, plan_code="standard",
+        expires_at=(NOW + timedelta(days=365)).isoformat(), now=NOW,
+    )
+    assert granted["plan_code"] == "standard"
+    assert {item["metadata"]["sync_tier"] for item in SyncPlanner(db.conn)._clan_interests(NOW)} == {"low"}
+
+    with pytest.raises(AllianceOperationError, match="不支持的套餐"):
+        grant_alliance_plan(
+            db.conn, "operator", alliance_id, plan_code="paid",
+            expires_at=(NOW + timedelta(days=365)).isoformat(), now=NOW,
+        )
+def test_premium_manager_can_add_and_remove_clans_without_deleting_public_cache(ops):
+    db, ids = ops
+    alliance_id = _alliance(db, ids["owner"], "paid-manage", plan="premium")
     grant_alliance_plan(
-        db.conn, "operator", alliance_id, plan_code="paid",
+        db.conn, "operator", alliance_id, plan_code="premium",
         expires_at=(NOW + timedelta(days=365)).isoformat(), now=NOW,
     )
     added = add_managed_clan(
@@ -533,22 +555,28 @@ def test_paid_manager_can_add_and_remove_clans_without_deleting_public_cache(ops
     ).fetchone()[0] == 1
 
 
-def test_free_manager_can_manage_one_clan_and_replace_removed_subscription(ops):
+def test_free_manager_can_manage_three_clans_and_replace_removed_subscription(ops):
     db, ids = ops
     alliance_id = _alliance(db, ids["owner"], "free-manage")
 
     listed = list_managed_clans(db.conn, "owner", alliance_id)
     assert listed["can_manage"] is True
     assert listed["can_add"] is True
-    assert listed["max_clans"] == 1
+    assert listed["max_clans"] == 3
 
     added = add_managed_clan(
         db.conn, "owner", alliance_id, clan_tag="#2QQ", category="combat", now=NOW,
     )
     assert added["category"] == "combat"
+    add_managed_clan(
+        db.conn, "owner", alliance_id, clan_tag="#9PY", category="farm", now=NOW,
+    )
+    add_managed_clan(
+        db.conn, "owner", alliance_id, clan_tag="#GGR", category="normal", now=NOW,
+    )
     with pytest.raises(AllianceOperationError, match="数量上限"):
         add_managed_clan(
-            db.conn, "owner", alliance_id, clan_tag="#9PY", category="farm", now=NOW,
+            db.conn, "owner", alliance_id, clan_tag="#JCU", category="farm", now=NOW,
         )
 
     manual_set_clan_verification(
@@ -562,16 +590,16 @@ def test_free_manager_can_manage_one_clan_and_replace_removed_subscription(ops):
 
     remove_managed_clan(db.conn, "owner", alliance_id, "#2QQ", now=NOW)
     replacement = add_managed_clan(
-        db.conn, "owner", alliance_id, clan_tag="#9PY", category="farm", now=NOW,
+        db.conn, "owner", alliance_id, clan_tag="#JCU", category="farm", now=NOW,
     )
-    assert replacement["clan_tag"] == "#9PY"
+    assert replacement["clan_tag"] == "#JCU"
 
 
 def test_alliance_admin_can_edit_but_only_leader_changes_clan_membership(ops):
     db, ids = ops
-    alliance_id = _alliance(db, ids["owner"], "admin-clan-boundary", plan="paid")
+    alliance_id = _alliance(db, ids["owner"], "admin-clan-boundary", plan="premium")
     grant_alliance_plan(
-        db.conn, "operator", alliance_id, plan_code="paid",
+        db.conn, "operator", alliance_id, plan_code="premium",
         expires_at=(NOW + timedelta(days=365)).isoformat(), now=NOW,
     )
     added = add_alliance_member_by_openid(
@@ -602,11 +630,11 @@ def test_alliance_admin_can_edit_but_only_leader_changes_clan_membership(ops):
         remove_managed_clan(db.conn, "member", alliance_id, "#2QQ", now=NOW)
 
 
-def test_paid_manager_can_reorder_active_clans(ops):
+def test_premium_manager_can_reorder_active_clans(ops):
     db, ids = ops
-    alliance_id = _alliance(db, ids["owner"], "paid-order", plan="paid")
+    alliance_id = _alliance(db, ids["owner"], "paid-order", plan="premium")
     grant_alliance_plan(
-        db.conn, "operator", alliance_id, plan_code="paid",
+        db.conn, "operator", alliance_id, plan_code="premium",
         expires_at=(NOW + timedelta(days=365)).isoformat(), now=NOW,
     )
     add_managed_clan(db.conn, "owner", alliance_id, clan_tag="#2QQ", category="combat", now=NOW)

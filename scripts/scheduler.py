@@ -1027,11 +1027,12 @@ def _run_coc_sync(
 def _player_detail_clan_tags(db: Database) -> set[str]:
     """Return clans eligible for the expensive daily per-player scan."""
     from modules.coc_sync.official.mapper import normalize_tag
+    from modules.alliance.plans import TIME_LIMITED_PLAN_SQL
 
     result = {
         row["clan_tag"]
         for row in db.conn.execute(
-            """SELECT DISTINCT clans.clan_tag
+            f"""SELECT DISTINCT clans.clan_tag
                FROM alliance_clans AS clans
                JOIN alliances ON alliances.id=clans.alliance_id AND alliances.status='active'
                JOIN alliance_plans AS plans
@@ -1042,7 +1043,7 @@ def _player_detail_clan_tags(db: Database) -> set[str]:
                WHERE clans.status='active'
                  AND plans.sync_tier IN ('high','internal')
                  AND NOT (
-                   alliances.plan_code='paid' AND grants.id IS NOT NULL
+                   alliances.plan_code IN {TIME_LIMITED_PLAN_SQL} AND grants.id IS NOT NULL
                    AND (grants.status!='active' OR
                         (grants.expires_at IS NOT NULL AND
                          datetime(grants.expires_at) <= datetime('now', '-7 days')))

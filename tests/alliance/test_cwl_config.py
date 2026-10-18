@@ -30,7 +30,7 @@ def _bootstrap_plans(db):
     )
 
 
-def _context(db, *, plan="paid", role="admin", key="test-alliance"):
+def _context(db, *, plan="premium", role="admin", key="test-alliance"):
     user_id = db.conn.execute(
         "INSERT INTO wechat_users (openid, role, created_at, updated_at) VALUES (?, 'member', ?, ?)",
         (f"{key}-user", NOW, NOW),
@@ -70,8 +70,15 @@ def test_schema_and_plan_entitlements_are_ready(db):
             "SELECT plan_code, entitlements_json FROM alliance_plans"
         ).fetchall()
     }
-    assert entitlements["free"]["max_cwl_teams"] == 1
-    assert entitlements["paid"]["max_cwl_teams"] == 20
+    assert entitlements["free"]["max_cwl_teams"] == 3
+    assert entitlements["free"]["manual_refresh"] is True
+    assert entitlements["free"]["automatic_refresh"] is False
+    assert entitlements["standard"]["max_cwl_teams"] == 10
+    assert entitlements["standard"]["manual_refresh"] is True
+    assert entitlements["standard"]["automatic_refresh"] is False
+    assert entitlements["premium"]["max_cwl_teams"] == 10
+    assert entitlements["premium"]["manual_refresh"] is False
+    assert entitlements["premium"]["automatic_refresh"] is True
     assert entitlements["internal"]["cwl_registration"] is True
 
 
@@ -90,20 +97,19 @@ def test_free_plan_limit_and_confirmation(db, monkeypatch):
         team_alias="一队",
         category="combat",
     )
-    with pytest.raises(CwlConfigError, match="最多配置 1"):
-        add_team(
-            db.conn,
-            context,
-            "2026-10",
-            clan_tag="#BBB",
-            clan_name="二队",
-            team_alias="二队",
-            category="shell",
-        )
+    add_team(
+        db.conn,
+        context,
+        "2026-10",
+        clan_tag="#BBB",
+        clan_name="二队",
+        team_alias="二队",
+        category="shell",
+    )
 
     confirmed = confirm_season(db.conn, context, "2026-10")
     assert confirmed["status"] == "active"
-    assert confirmed["team_count"] == 1
+    assert confirmed["team_count"] == 2
 
 
 def test_group_detection_freezes_and_correction_is_audited(db, monkeypatch):

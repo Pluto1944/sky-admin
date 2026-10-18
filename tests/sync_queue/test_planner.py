@@ -13,7 +13,15 @@ def _seed_alliance(db, key: str, name: str, plan_code: str) -> int:
            (plan_code, display_name, max_clans, sync_tier, entitlements_json,
             status, created_at, updated_at)
            VALUES (?, ?, 100, ?, '{}', 'active', ?, ?)""",
-        (plan_code, plan_code, "internal" if plan_code == "internal" else "low", TS, TS),
+        (
+            plan_code,
+            plan_code,
+            "internal" if plan_code == "internal" else (
+                "high" if plan_code == "premium" else "low"
+            ),
+            TS,
+            TS,
+        ),
     )
     cursor = db.conn.execute(
         """INSERT INTO alliances
@@ -148,3 +156,20 @@ def test_live_cutover_only_creates_live_tasks_for_selected_types(db):
         "current_war": "live",
         "cwl_live": "shadow",
     }
+
+
+def test_standard_uses_low_tier_and_premium_uses_high_tier(db):
+    standard = _seed_alliance(db, "standard", "Standard", "standard")
+    premium = _seed_alliance(db, "premium", "Premium", "premium")
+    _seed_clan_and_cwl(db, standard, "#2QQ")
+    _seed_clan_and_cwl(db, premium, "#9PY")
+    db.conn.commit()
+
+    interests = SyncPlanner(db.conn)._clan_interests(NOW)
+    tiers = {
+        (item["metadata"]["plan_code"], item["resource_type"]): item["metadata"]["sync_tier"]
+        for item in interests
+    }
+
+    assert tiers[("standard", "current_war")] == "low"
+    assert tiers[("premium", "current_war")] == "high"

@@ -48,6 +48,7 @@ from modules.alliance.free_alliance import (
     request_manual_refresh,
     subscription_status,
 )
+from modules.alliance.plans import plan_uses_on_demand_refresh
 from shared.db.connection import Database
 
 from .auth import require_user
@@ -186,14 +187,15 @@ def alliance_managed_clans(
 ):
     try:
         result = list_managed_clans(db.conn, user["openid"], alliance_id)
-        if result["plan_code"] == "free":
+        if plan_uses_on_demand_refresh(result["plan_code"]):
             for clan in result["clans"]:
                 if clan["status"] == "active":
                     clan["sync"] = subscription_status(
                         db.conn, alliance_id, clan["clan_tag"],
                     )
         result["manual_refresh_available"] = bool(
-            result["plan_code"] == "free" and result["can_manage"]
+            plan_uses_on_demand_refresh(result["plan_code"])
+            and result["can_manage"]
         )
         return result
     except AllianceOperationError as exc:
@@ -288,7 +290,7 @@ def refresh_alliance_managed_clan(
         management = list_managed_clans(db.conn, user["openid"], alliance_id)
         if not management["can_manage"]:
             raise AllianceOperationError("只有联盟管理员或首领可以刷新部落", status_code=403)
-        if management["plan_code"] != "free":
+        if not plan_uses_on_demand_refresh(management["plan_code"]):
             raise AllianceOperationError("当前套餐使用自动刷新，无需手动提交", status_code=409)
         results = request_manual_refresh(
             db.conn, user["openid"], alliance_id, clan_tag,

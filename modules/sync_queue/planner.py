@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 
 import config
 from modules.coc_sync.official.mapper import normalize_tag
+from modules.alliance.plans import TIME_LIMITED_PLAN_SQL
 
 from .config import RESOURCE_TYPES, parse_resource_types
 from .refresh_policy import (
@@ -39,7 +40,7 @@ def _current_war_policy(
     cache: dict | None,
     current: datetime,
 ) -> tuple[str, int]:
-    """Return the shared paid cadence or low-tier lifecycle safety net."""
+    """Return the shared high-tier cadence or low-tier lifecycle safety net."""
     if sync_tier == "low":
         return "scheduled", low_current_war_interval_seconds(cache, current)
     interval = paid_current_war_interval_seconds(cache, current)
@@ -63,10 +64,10 @@ class SyncPlanner:
             if normalize_tag(row["clan_tag"])
         }
         rows = self.conn.execute(
-            """SELECT clans.id, clans.alliance_id, clans.clan_tag, clans.category,
+            f"""SELECT clans.id, clans.alliance_id, clans.clan_tag, clans.category,
                       alliances.plan_code,
                       CASE
-                        WHEN alliances.plan_code='paid' AND grants.id IS NOT NULL
+                        WHEN alliances.plan_code IN {TIME_LIMITED_PLAN_SQL} AND grants.id IS NOT NULL
                          AND (grants.status!='active' OR
                               (grants.expires_at IS NOT NULL AND
                                datetime(grants.expires_at) <= datetime('now', '-7 days')))
@@ -128,10 +129,10 @@ class SyncPlanner:
             return []
         period = local_now.strftime("%Y-%m")
         rows = self.conn.execute(
-            """SELECT teams.id, seasons.alliance_id, seasons.period,
+            f"""SELECT teams.id, seasons.alliance_id, seasons.period,
                       teams.clan_tag, teams.category, alliances.plan_code,
                       CASE
-                        WHEN alliances.plan_code='paid' AND grants.id IS NOT NULL
+                        WHEN alliances.plan_code IN {TIME_LIMITED_PLAN_SQL} AND grants.id IS NOT NULL
                          AND (grants.status!='active' OR
                               (grants.expires_at IS NOT NULL AND
                                datetime(grants.expires_at) <= datetime('now', '-7 days')))
@@ -239,9 +240,9 @@ class SyncPlanner:
     ) -> dict:
         """Refresh interests and globally deduplicated targets without planning work."""
         current = _as_utc(now)
-        # Paid grants are an operational entitlement, not public COC data.
-        # After the seven-day read-only grace period, keep the oldest clan as
-        # the low-frequency free fallback and retain every historical/public fact.
+        # Membership grants are operational entitlements, not public COC data.
+        # After the seven-day read-only grace period, retain clans up to the
+        # free-plan capacity as low-frequency fallbacks and keep public facts.
         from modules.alliance.operations import reconcile_expired_plan_grants
         reconcile_expired_plan_grants(self.conn, now=current)
         live_types = parse_resource_types(live_resource_types)

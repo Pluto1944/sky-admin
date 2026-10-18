@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 
 import pytest
@@ -11,6 +12,7 @@ from modules.alliance.migration import (
     build_sky_manifest,
     preview_sky_migration,
 )
+from modules.alliance.plans import ensure_plan_catalog
 
 
 CLANS = [
@@ -145,11 +147,17 @@ def test_plan_limits_and_role_enums_are_database_constraints(db):
            VALUES (?, '#ONE', 'active', ?, ?)""",
         (free_id, now, now),
     )
+    db.conn.executemany(
+        """INSERT INTO alliance_clans
+           (alliance_id, clan_tag, status, created_at, updated_at)
+           VALUES (?, ?, 'active', ?, ?)""",
+        [(free_id, "#TWO", now, now), (free_id, "#THREE", now, now)],
+    )
     with pytest.raises(sqlite3.IntegrityError, match="active clan limit"):
         db.conn.execute(
             """INSERT INTO alliance_clans
                (alliance_id, clan_tag, status, created_at, updated_at)
-               VALUES (?, '#TWO', 'active', ?, ?)""",
+               VALUES (?, '#FOUR', 'active', ?, ?)""",
             (free_id, now, now),
         )
     with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint"):
@@ -233,6 +241,14 @@ def test_migration_removes_legacy_global_verification_triggers(db):
 
 def test_plan_change_cannot_bypass_active_clan_limit(db):
     apply_sky_migration(db.conn, CLANS)
+    sky_id = _alliance_id(db)
+    now = "2026-10-09T00:00:00+00:00"
+    db.conn.executemany(
+        """INSERT INTO alliance_clans
+           (alliance_id, clan_tag, status, created_at, updated_at)
+           VALUES (?, ?, 'active', ?, ?)""",
+        [(sky_id, "#CCC", now, now), (sky_id, "#DDD", now, now)],
+    )
     with pytest.raises(sqlite3.IntegrityError, match="plan change"):
         db.conn.execute(
             "UPDATE alliances SET plan_code = 'free' WHERE alliance_key = ?",
@@ -247,7 +263,7 @@ def test_memberships_and_subscriptions_are_isolated_by_alliance(db):
     db.conn.execute(
         """INSERT INTO alliances
            (alliance_key, name, status, plan_code, created_at, updated_at)
-           VALUES ('paid-a', 'A联盟', 'active', 'paid', ?, ?)""",
+           VALUES ('paid-a', 'A联盟', 'active', 'premium', ?, ?)""",
         (now, now),
     )
     sky_id = _alliance_id(db)
@@ -281,7 +297,7 @@ def test_database_allows_same_clan_verified_by_multiple_alliances(db):
     db.conn.execute(
         """INSERT INTO alliances
            (alliance_key, name, status, plan_code, created_at, updated_at)
-           VALUES ('paid-verified', '认证测试联盟', 'active', 'paid', ?, ?)""",
+           VALUES ('paid-verified', '认证测试联盟', 'active', 'premium', ?, ?)""",
         (now, now),
     )
     paid_id = int(db.conn.execute(
@@ -298,6 +314,79 @@ def test_database_allows_same_clan_verified_by_multiple_alliances(db):
         """SELECT COUNT(*) FROM alliance_clans
            WHERE clan_tag='#AAA' AND status='active' AND verification_status='verified'"""
     ).fetchone()[0] == 2
+
+
+def test_plan_catalog_defines_three_user_tiers_and_migrates_legacy_paid(db):
+    apply_sky_migration(db.conn, CLANS)
+    now = "2026-10-09T00:00:00+00:00"
+    plans = {
+        row["plan_code"]: dict(row)
+        for row in db.conn.execute(
+            """SELECT plan_code, max_clans, sync_tier, status
+               FROM alliance_plans"""
+        ).fetchall()
+    }
+    assert (plans["free"]["max_clans"], plans["free"]["sync_tier"]) == (3, "low")
+    assert (plans["standard"]["max_clans"], plans["standard"]["sync_tier"]) == (10, "low")
+    assert (plans["premium"]["max_clans"], plans["premium"]["sync_tier"]) == (10, "high")
+
+    db.conn.execute(
+        """INSERT INTO alliance_plans
+           (plan_code, display_name, max_clans, sync_tier, entitlements_json,
+            status, created_at, updated_at)
+           VALUES ('paid', '旧付费版', 10, 'high', '{}', 'active', ?, ?)""",
+        (now, now),
+    )
+    alliance_id = db.conn.execute(
+        """INSERT INTO alliances
+           (alliance_key, name, status, plan_code, created_at, updated_at)
+           VALUES ('legacy-paid', '旧付费联盟', 'active', 'paid', ?, ?)""",
+        (now, now),
+    ).lastrowid
+    db.conn.execute(
+        """INSERT INTO alliance_plan_grants
+           (alliance_id, plan_code, status, starts_at, expires_at,
+            created_at, updated_at)
+           VALUES (?, 'paid', 'active', ?, '2027-10-09T00:00:00+00:00', ?, ?)""",
+        (alliance_id, now, now, now),
+    )
+
+    migrated = ensure_plan_catalog(db.conn, now=now)
+
+    assert migrated["migrated_alliances"] == 1
+    assert migrated["migrated_grants"] == 1
+    assert db.conn.execute(
+        "SELECT plan_code FROM alliances WHERE id=?", (alliance_id,),
+    ).fetchone()[0] == "premium"
+    assert db.conn.execute(
+        "SELECT plan_code FROM alliance_plan_grants WHERE alliance_id=?", (alliance_id,),
+    ).fetchone()[0] == "premium"
+    assert tuple(db.conn.execute(
+        "SELECT display_name, status FROM alliance_plans WHERE plan_code='paid'",
+    ).fetchone()) == ("历史付费版", "inactive")
+
+
+def test_plan_catalog_preserves_internal_operational_configuration(db):
+    apply_sky_migration(db.conn, CLANS)
+    db.conn.execute(
+        """UPDATE alliance_plans
+           SET max_clans=55,
+               entitlements_json='{"max_cwl_teams": 42, "custom_internal": true}'
+           WHERE plan_code='internal'"""
+    )
+
+    ensure_plan_catalog(db.conn, now="2026-10-19T00:00:00+00:00")
+
+    row = db.conn.execute(
+        """SELECT max_clans, sync_tier, entitlements_json
+           FROM alliance_plans WHERE plan_code='internal'"""
+    ).fetchone()
+    assert row["max_clans"] == 55
+    assert row["sync_tier"] == "internal"
+    assert json.loads(row["entitlements_json"]) == {
+        "max_cwl_teams": 42,
+        "custom_internal": True,
+    }
 
 
 def test_preview_is_read_only_and_reports_config_drift(db):

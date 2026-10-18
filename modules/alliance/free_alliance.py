@@ -1,4 +1,4 @@
-"""M5 free single-clan alliance lifecycle and asynchronous synchronization.
+"""Free-alliance lifecycle and on-demand asynchronous synchronization.
 
 All mutations in this module are alliance-private.  Public COC facts remain
 keyed by clan/player/war identifiers and synchronization is submitted through
@@ -26,6 +26,7 @@ from modules.sync_queue.refresh_policy import (
 from modules.sync_queue.repository import SyncQueueError, SyncQueueRepository
 
 from .operations import free_registration_policy
+from .plans import plan_requires_expiry, plan_uses_on_demand_refresh
 
 
 FREE_CATEGORIES = ("normal", "combat", "farm", "flat")
@@ -195,6 +196,42 @@ def _free_member(
         raise FreeAllianceError("联盟已停用", status_code=409)
     if leader_required and row["role"] != "leader":
         raise FreeAllianceError("只有联盟首领可以执行此操作", status_code=403)
+    return row
+
+
+def _on_demand_member(
+    conn: sqlite3.Connection,
+    openid: str,
+    alliance_id: int,
+) -> sqlite3.Row:
+    row = conn.execute(
+        """SELECT users.id AS user_id, alliances.id, alliances.name,
+                  alliances.status, alliances.plan_code, members.role
+           FROM wechat_users AS users
+           JOIN alliance_members AS members
+             ON members.user_id = users.id AND members.status = 'active'
+           JOIN alliances ON alliances.id = members.alliance_id
+           WHERE users.openid = ? AND alliances.id = ?""",
+        (openid, int(alliance_id)),
+    ).fetchone()
+    if row is None:
+        raise FreeAllianceError("联盟不存在或当前用户无权访问", status_code=404)
+    if not plan_uses_on_demand_refresh(row["plan_code"]):
+        raise FreeAllianceError("当前套餐使用自动刷新，无需手动提交", status_code=409)
+    if row["status"] != "active":
+        raise FreeAllianceError("联盟已停用", status_code=409)
+    if plan_requires_expiry(row["plan_code"]):
+        grant = conn.execute(
+            """SELECT status, expires_at FROM alliance_plan_grants
+               WHERE alliance_id=? ORDER BY id DESC LIMIT 1""",
+            (int(alliance_id),),
+        ).fetchone()
+        expiry = _parse_time(grant["expires_at"]) if grant else None
+        if grant is not None and (
+            grant["status"] != "active"
+            or (expiry is not None and expiry <= _now())
+        ):
+            raise FreeAllianceError("会员权益已到期，请先续期", status_code=409)
     return row
 
 
@@ -561,8 +598,20 @@ def _validate_page_refresh_scope(
     ).fetchone()
     if alliance is None or alliance["status"] != "active":
         raise FreeAllianceError("联盟不存在或已停用", status_code=404)
-    if alliance["plan_code"] != "free":
-        raise FreeAllianceError("页面手动刷新仅适用于免费联盟", status_code=409)
+    if not plan_uses_on_demand_refresh(alliance["plan_code"]):
+        raise FreeAllianceError("页面主动刷新仅适用于免费版和普通会员", status_code=409)
+    if plan_requires_expiry(alliance["plan_code"]):
+        grant = conn.execute(
+            """SELECT status, expires_at FROM alliance_plan_grants
+               WHERE alliance_id=? ORDER BY id DESC LIMIT 1""",
+            (int(alliance_id),),
+        ).fetchone()
+        expiry = _parse_time(grant["expires_at"]) if grant else None
+        if grant is not None and (
+            grant["status"] != "active"
+            or (expiry is not None and expiry <= _now())
+        ):
+            raise FreeAllianceError("会员权益已到期，请先续期", status_code=409)
 
     tag = _tag(clan_tag)
     selected = tuple(dict.fromkeys(str(item) for item in resource_types))
@@ -613,7 +662,7 @@ def request_page_refresh(
     """Queue refreshes authorized by an already-resolved read context.
 
     Callers must resolve the same alliance view context used by page GETs.  This
-    service then enforces free-plan and resource scope without requiring an
+    service then enforces on-demand-plan and resource scope without requiring an
     alliance membership, so valid share visitors use the same public queue.
     """
     tag, selected, selected_period = _validate_page_refresh_scope(
@@ -668,7 +717,7 @@ def request_page_refresh(
             conn,
             alliance_id=int(alliance_id),
             actor_user_id=actor_user_id if actor_user_id else None,
-            action="free_page_refresh_requested",
+            action="page_refresh_requested",
             entity_type="alliance_clan",
             entity_id=tag,
             details={
@@ -801,7 +850,7 @@ def request_manual_refresh(
     resource_types: Iterable[str] = ("current_war",),
     now: datetime | None = None,
 ) -> list[dict]:
-    member = _free_member(conn, openid, alliance_id)
+    member = _on_demand_member(conn, openid, alliance_id)
     tag = _tag(clan_tag)
     subscribed = conn.execute(
         """SELECT 1 FROM alliance_clans
@@ -838,7 +887,7 @@ def request_manual_refresh(
     with conn:
         _audit(
             conn, alliance_id=alliance_id, actor_user_id=int(member["user_id"]),
-            action="free_manual_refresh_requested", entity_type="alliance_clan",
+            action="manual_refresh_requested", entity_type="alliance_clan",
             entity_id=tag,
             details={
                 "resource_types": list(selected),

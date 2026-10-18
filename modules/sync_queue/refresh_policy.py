@@ -120,7 +120,7 @@ def cwl_page_interval_seconds(
     period: str,
     clan_tag: str,
 ) -> int:
-    """Match the paid CWL state cadence for an explicit page refresh."""
+    """Match the high-quality CWL cadence for an explicit page refresh."""
     rows = _cwl_war_rows(conn, period, clan_tag)
     return CWL_ACTIVE_SECONDS if any(row["state"] == "inWar" for row in rows) else CWL_OTHER_SECONDS
 

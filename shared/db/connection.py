@@ -1578,6 +1578,9 @@ class Database:
 
         # M3.1：为既有套餐补齐 CWL 权益。只合并缺失键，保留运营期间可能增加的
         # 其他 entitlement，不用一次 schema 初始化覆盖整份 JSON。
+        from modules.alliance.plans import ensure_plan_catalog
+
+        ensure_plan_catalog(self.conn, now=now_iso())
         cwl_team_cols = {
             row[1] for row in self.conn.execute("PRAGMA table_info(alliance_cwl_teams)")
         }
@@ -1585,8 +1588,9 @@ class Database:
             self.conn.execute("ALTER TABLE alliance_cwl_teams ADD COLUMN manager_names TEXT")
 
         cwl_entitlements = {
-            "free": {"max_cwl_teams": 1, "cwl_data": True, "cwl_registration": False},
-            "paid": {"max_cwl_teams": 20, "cwl_data": True, "cwl_registration": False},
+            "free": {"max_cwl_teams": 3, "cwl_data": True, "cwl_registration": False},
+            "standard": {"max_cwl_teams": 10, "cwl_data": True, "cwl_registration": False},
+            "premium": {"max_cwl_teams": 10, "cwl_data": True, "cwl_registration": False},
             "internal": {
                 "max_cwl_teams": 100,
                 "cwl_data": True,

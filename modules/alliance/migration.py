@@ -14,54 +14,12 @@ from typing import Iterable, Mapping, Sequence
 
 from modules.coc_sync.official.mapper import normalize_tag
 
+from .plans import ensure_plan_catalog
+
 
 SKY_ALLIANCE_KEY = "sky-internal"
 SKY_ALLIANCE_NAME = "苍穹联盟"
 _VALID_ROLES = {"member", "admin", "leader"}
-
-_PLAN_ROWS = (
-    {
-        "plan_code": "free",
-        "display_name": "免费联盟",
-        "max_clans": 1,
-        "sync_tier": "low",
-        "entitlements": {
-            "history_scope": "full",
-            "manual_refresh": True,
-            "max_cwl_teams": 1,
-            "cwl_data": True,
-            "cwl_registration": False,
-        },
-    },
-    {
-        "plan_code": "paid",
-        "display_name": "付费联盟",
-        "max_clans": 10,
-        "sync_tier": "high",
-        "entitlements": {
-            "history_scope": "full",
-            "automatic_refresh": True,
-            "max_cwl_teams": 20,
-            "cwl_data": True,
-            "cwl_registration": False,
-        },
-    },
-    {
-        "plan_code": "internal",
-        "display_name": "内部联盟",
-        "max_clans": 100,
-        "sync_tier": "internal",
-        "entitlements": {
-            "history_scope": "full",
-            "automatic_refresh": True,
-            "max_cwl_teams": 100,
-            "cwl_data": True,
-            "cwl_registration": True,
-            "registration_source": "tencent_docs",
-        },
-    },
-)
-
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -278,25 +236,7 @@ def apply_sky_migration(
     manifest = build_sky_manifest(clans)
     assignments = validate_member_assignments(conn, member_assignments)
     with conn:
-        for plan in _PLAN_ROWS:
-            conn.execute(
-                """INSERT INTO alliance_plans
-                       (plan_code, display_name, max_clans, sync_tier,
-                        entitlements_json, status, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, 'active', ?, ?)
-                   ON CONFLICT(plan_code) DO UPDATE SET
-                       display_name = excluded.display_name,
-                       max_clans = excluded.max_clans,
-                       sync_tier = excluded.sync_tier,
-                       entitlements_json = excluded.entitlements_json,
-                       status = 'active',
-                       updated_at = excluded.updated_at""",
-                (
-                    plan["plan_code"], plan["display_name"], plan["max_clans"],
-                    plan["sync_tier"], _canonical_json(plan["entitlements"]),
-                    timestamp, timestamp,
-                ),
-            )
+        ensure_plan_catalog(conn, now=timestamp)
         conn.execute(
             """INSERT INTO alliances
                    (alliance_key, name, status, plan_code, creation_source,

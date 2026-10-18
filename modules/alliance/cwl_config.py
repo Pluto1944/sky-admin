@@ -11,6 +11,7 @@ from modules.coc_sync.official.mapper import normalize_tag
 
 from .access import AllianceContext
 from .migration import SKY_ALLIANCE_KEY
+from .plans import plan_requires_expiry
 
 
 PERIOD_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
@@ -52,8 +53,8 @@ def editable_period(period: str) -> bool:
 def require_manager(context: AllianceContext) -> None:
     if context.role not in {"admin", "leader"}:
         raise CwlConfigError("联赛配置需要联盟管理权限")
-    if context.plan_code == "paid" and context.entitlement_status in {"grace", "expired", "revoked"}:
-        raise CwlConfigError("付费权益处于宽限期或已到期，联赛配置暂时只读")
+    if plan_requires_expiry(context.plan_code) and context.entitlement_status in {"grace", "expired", "revoked"}:
+        raise CwlConfigError("会员权益处于宽限期或已到期，联赛配置暂时只读")
 
 
 def max_cwl_teams(context: AllianceContext) -> int:
@@ -61,7 +62,13 @@ def max_cwl_teams(context: AllianceContext) -> int:
     try:
         parsed = int(value)
     except (TypeError, ValueError):
-        parsed = {"free": 1, "paid": 20, "internal": 100}.get(context.plan_code, 1)
+        parsed = {
+            "free": 3,
+            "standard": 10,
+            "premium": 10,
+            "paid": 10,
+            "internal": 100,
+        }.get(context.plan_code, 3)
     return max(1, parsed)
 
 
@@ -179,7 +186,7 @@ def season_payload(
     result["can_edit"] = (
         context.role in {"admin", "leader"}
         and not (
-            context.plan_code == "paid"
+            plan_requires_expiry(context.plan_code)
             and context.entitlement_status in {"grace", "expired", "revoked"}
         )
         and editable_period(selected)

@@ -354,7 +354,7 @@ export function refreshAllianceManagedClan(allianceId, clanTag, resourceTypes = 
 }
 
 /**
- * 为当前可访问的免费联盟页面提交公共资源刷新任务。
+ * 为当前可访问的按需刷新套餐页面提交公共资源刷新任务。
  * 认证用户、历史访问者和有效分享访客都复用页面读取权限。
  */
 export function requestAlliancePageRefresh(allianceId, clanTag, resourceTypes, period = '', trigger = 'manual') {

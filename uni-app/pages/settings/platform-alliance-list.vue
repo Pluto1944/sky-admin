@@ -90,7 +90,7 @@ export default {
       return ({ active: '正常', suspended: '已停用', archived: '已删除' }[value] || value)
     },
     planLabel(value) {
-      return ({ free: '免费版', paid: '付费版', internal: '内部版' }[value] || value)
+      return ({ free: '免费版', standard: '普通会员', premium: '高级会员', paid: '历史付费版', internal: '内部版' }[value] || value)
     },
     shortDate(value) {
       return value ? String(value).replace('T', ' ').slice(0, 16) : ''

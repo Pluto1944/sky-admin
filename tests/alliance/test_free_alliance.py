@@ -211,7 +211,7 @@ def test_page_refresh_allows_share_visitor_and_keeps_resource_scope(m5):
     assert response["refresh"]["resources"][0]["can_request"] is False
     audit = m5.conn.execute(
         """SELECT actor_user_id, details_json FROM alliance_audit_events
-           WHERE alliance_id=? AND action='free_page_refresh_requested'
+               WHERE alliance_id=? AND action='page_refresh_requested'
            ORDER BY id DESC LIMIT 1""",
         (alliance_id,),
     ).fetchone()
@@ -229,6 +229,46 @@ def test_page_refresh_allows_share_visitor_and_keeps_resource_scope(m5):
             db=m5,
         )
     assert exc_info.value.status_code == 404
+
+
+def test_standard_supports_on_demand_refresh_but_premium_uses_automatic_refresh(m5):
+    alliance_id = create_free_alliance(m5.conn, "owner-a", now=NOW)
+    subscribe_free_clan(
+        m5.conn, "owner-a", alliance_id,
+        clan_tag="#2QQ", category="combat", now=NOW,
+    )
+    m5.conn.execute(
+        "UPDATE alliances SET plan_code='standard' WHERE id=?", (alliance_id,),
+    )
+    m5.conn.execute(
+        """INSERT INTO alliance_plan_grants
+           (alliance_id, plan_code, status, starts_at, expires_at,
+            created_at, updated_at)
+           VALUES (?, 'standard', 'active', ?, '2027-10-11T08:00:00+00:00', ?, ?)""",
+        (alliance_id, NOW_TEXT, NOW_TEXT, NOW_TEXT),
+    )
+    m5.conn.commit()
+    reconcile_sync_targets(m5.conn, now=NOW)
+
+    result = request_manual_refresh(
+        m5.conn, "owner-a", alliance_id, "#2QQ",
+        resource_types=["current_war"], now=NOW,
+    )
+    assert result[0]["reason"] in {"queued", "deduplicated"}
+    status = page_refresh_status(
+        m5.conn, alliance_id, "#2QQ", resource_types=["current_war"], now=NOW,
+    )
+    assert status["allowed"] is True
+
+    m5.conn.execute(
+        "UPDATE alliances SET plan_code='premium' WHERE id=?", (alliance_id,),
+    )
+    m5.conn.commit()
+    with pytest.raises(FreeAllianceError, match="自动刷新"):
+        request_manual_refresh(
+            m5.conn, "owner-a", alliance_id, "#2QQ",
+            resource_types=["current_war"], now=NOW,
+        )
 
 
 def test_page_refresh_cooldown_is_shared_across_access_types(m5):
@@ -353,7 +393,7 @@ def test_page_refresh_uses_paid_cadence_and_records_trigger(m5):
     assert all('"trigger": "page_open"' in row["payload_json"] for row in rows)
     audit = m5.conn.execute(
         """SELECT details_json FROM alliance_audit_events
-           WHERE alliance_id=? AND action='free_page_refresh_requested'
+               WHERE alliance_id=? AND action='page_refresh_requested'
            ORDER BY id DESC LIMIT 1""",
         (alliance_id,),
     ).fetchone()
@@ -472,7 +512,7 @@ def test_free_only_clan_is_excluded_from_daily_player_detail_scan(m5, monkeypatc
     assert "#9PY" not in scheduler._player_detail_clan_tags(m5)
 
     m5.conn.execute(
-        "UPDATE alliances SET plan_code='paid' WHERE id=?", (alliance_id,),
+        "UPDATE alliances SET plan_code='premium' WHERE id=?", (alliance_id,),
     )
     m5.conn.commit()
     assert "#9PY" in scheduler._player_detail_clan_tags(m5)

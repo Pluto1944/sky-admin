@@ -103,7 +103,7 @@ export default {
       if (!alliance || Number(alliance.id) !== this.resolvedAllianceId() || ['admin', 'leader'].indexOf(alliance.role) < 0) return false
       const code = alliance.plan && alliance.plan.code
       const state = alliance.plan && alliance.plan.status
-      return code === 'free' || (code === 'paid' && ['active', 'legacy'].indexOf(state) >= 0)
+      return code === 'free' || (['standard', 'premium', 'paid'].indexOf(code) >= 0 && ['active', 'legacy'].indexOf(state) >= 0)
     }
   },
   methods: {

@@ -39,7 +39,7 @@
         <view class="menu-card">
           <view class="menu-row" @tap="openPage('platform-alliance-plan')">
             <view class="menu-icon icon-plan">权</view>
-            <view class="grow"><text class="name">套餐权益</text><text class="sub">调整免费版、付费版与权益期限</text></view>
+            <view class="grow"><text class="name">套餐权益</text><text class="sub">调整免费版、普通会员、高级会员与权益期限</text></view>
             <text class="menu-count">{{ planLabel(detail.alliance.plan_code) }}</text><text class="arrow">›</text>
           </view>
           <view class="menu-row" @tap="openPage('platform-alliance-status')">
@@ -95,7 +95,7 @@ export default {
       })
     },
     statusLabel(value) { return ({ active: '正常', suspended: '已停用', archived: '已删除' }[value] || value) },
-    planLabel(value) { return ({ free: '免费版', paid: '付费版', internal: '内部版' }[value] || value) }
+    planLabel(value) { return ({ free: '免费版', standard: '普通会员', premium: '高级会员', paid: '历史付费版', internal: '内部版' }[value] || value) }
   }
 }
 </script>

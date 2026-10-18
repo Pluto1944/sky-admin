@@ -82,7 +82,7 @@
         </view>
         <view class="bottom-space"></view>
       </template>
-      <view v-else-if="alliance && management.entitlement_status === 'grace'" class="state">付费权益处于7天只读宽限期，请续费后继续管理</view>
+      <view v-else-if="alliance && management.entitlement_status === 'grace'" class="state">会员权益处于7天只读宽限期，请续费后继续管理</view>
       <view v-else-if="alliance && management.plan_code === 'internal'" class="state">内部联盟部落由系统配置维护</view>
       <view v-else-if="alliance" class="state">只有联盟管理员或首领可以管理部落</view>
       <view v-else class="state">请先创建或加入联盟</view>
