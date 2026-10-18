@@ -114,6 +114,7 @@ class PageRefreshInput(BaseModel):
     clan_tag: str
     resource_types: list[str]
     period: str | None = None
+    trigger: str = "manual"
 
 
 class AllianceVisibilityInput(BaseModel):
@@ -709,6 +710,7 @@ def request_alliance_page_refresh(
             period=payload.period,
             actor_user_id=actor_user_id,
             access_kind=context.role,
+            trigger=payload.trigger,
         )
     except FreeAllianceError as exc:
         raise _free_error(exc) from exc
@@ -716,6 +718,7 @@ def request_alliance_page_refresh(
         "alliance_id": alliance_id,
         "clan_tag": normalize_tag(payload.clan_tag),
         "period": payload.period,
+        "trigger": payload.trigger,
         "results": results,
         "refresh": _page_refresh(
             db,

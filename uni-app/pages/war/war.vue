@@ -21,12 +21,17 @@
         <text class="error-text">{{ loadError }}</text>
         <text class="retry-btn" @tap="fetchCurrentWars">点击重试</text>
       </view>
-      <scroll-view v-else-if="warView === 'current'" scroll-y class="war-list-scroll">
+      <scroll-view
+        v-else-if="warView === 'current'" scroll-y class="war-list-scroll"
+        refresher-enabled :refresher-triggered="currentPullRefreshing"
+        refresher-background="#0f0f23" @refresherrefresh="handleCurrentPullRefresh"
+      >
         <view class="war-list-inner">
           <view v-if="updatedAt || currentRefreshClan" class="page-update-row">
             <view v-if="updatedAt" class="update-time">数据更新于 {{ formatTime(updatedAt) }}</view>
             <PageRefreshButton
               v-if="currentRefreshClan"
+              ref="currentRefreshButton"
               :clan-tag="currentRefreshClan.clan_tag"
               :resource-types="['current_war']"
               :refresh="currentRefreshClan.refresh"
@@ -144,13 +149,18 @@
         <text class="error-text">{{ leagueError }}</text>
         <text class="retry-btn" @tap="fetchCwlLive">点击重试</text>
       </view>
-      <scroll-view v-else scroll-y class="war-list-scroll">
+      <scroll-view
+        v-else scroll-y class="war-list-scroll"
+        refresher-enabled :refresher-triggered="leaguePullRefreshing"
+        refresher-background="#0f0f23" @refresherrefresh="handleLeaguePullRefresh"
+      >
         <view class="war-list-inner">
           <button v-if="leagueClans.length && canManageLeague" class="league-manage-btn list-first-action" @tap="openLeagueManagement">管理联赛部落</button>
           <view v-if="leagueUpdatedAt || leagueRefreshClan" class="page-update-row">
             <view v-if="leagueUpdatedAt" class="update-time">数据更新于 {{ formatTime(leagueUpdatedAt) }}</view>
             <PageRefreshButton
               v-if="leagueRefreshClan && isCurrentLeaguePeriod"
+              ref="leagueRefreshButton"
               :clan-tag="leagueRefreshClan.clan_tag"
               :resource-types="['cwl_live']"
               :period="leaguePeriod"
@@ -328,6 +338,8 @@ export default {
       nowMs: Date.now(),
       clockTimer: null,
       refreshTimer: null,
+      currentPullRefreshing: false,
+      leaguePullRefreshing: false,
       allianceChangeHandler: null,
       shareReadyHandler: null,
       shareReady: false,
@@ -458,7 +470,11 @@ export default {
     this.startTimers()
     if (this.activeTopTab === 'check-in') this.$nextTick(() => { if (this.$refs.checkIn) this.$refs.checkIn.startTimers() })
     if (this.activeTopTab === 'league' && this.isCurrentLeaguePeriod) this.fetchCwlLive(this.leaguePeriod)
-    else if (this.activeTopTab === 'clan-war' && this.warView === 'current' && this.clans.length) this.fetchCurrentWars()
+    else if (this.activeTopTab === 'clan-war' && this.warView === 'current') this.fetchCurrentWars()
+    this.$nextTick(() => {
+      const button = this.activeTopTab === 'league' ? this.$refs.leagueRefreshButton : this.$refs.currentRefreshButton
+      if (button) button.requestOnEntry()
+    })
   },
   onHide() {
     this.stopTimers()
@@ -492,6 +508,24 @@ export default {
     return { title: this.warView === 'history' ? `苍穹联赛助手｜${this.selectedHistoryClan ? this.selectedHistoryClan.clan_name : '历史部落战'}` : '苍穹联赛助手｜当前部落战', query: withAllianceQuery(this.warView === 'history' ? `view=history&clan_tag=${encodeURIComponent(this.selectedHistoryClanTag)}` : '') }
   },
   methods: {
+    async handleCurrentPullRefresh() {
+      this.currentPullRefreshing = true
+      try {
+        if (this.$refs.currentRefreshButton) await this.$refs.currentRefreshButton.triggerRefresh('pull_down')
+        await this.fetchCurrentWars()
+      } finally {
+        this.currentPullRefreshing = false
+      }
+    },
+    async handleLeaguePullRefresh() {
+      this.leaguePullRefreshing = true
+      try {
+        if (this.$refs.leagueRefreshButton) await this.$refs.leagueRefreshButton.triggerRefresh('pull_down')
+        await this.fetchCwlLive(this.leaguePeriod)
+      } finally {
+        this.leaguePullRefreshing = false
+      }
+    },
     resetForAlliance() {
       this.activeTopTab = 'clan-war'
       this.warView = 'current'

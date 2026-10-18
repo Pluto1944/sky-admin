@@ -10,12 +10,13 @@
       :alliance-id="activeAllianceId"
       @open-detail="openDetail"
     />
-    <ClanMembers v-else-if="activeSection === 'members'" :key="'members-' + allianceVersion" class="clan-section" :initial-clan-tag="memberClanTag" />
+    <ClanMembers v-else-if="activeSection === 'members'" :key="'members-' + allianceVersion" ref="members" class="clan-section" :initial-clan-tag="memberClanTag" />
     <ClanStats v-else-if="activeSection === 'stats'" :key="'stats-' + allianceVersion" class="clan-section" />
     <ClanFarm v-else-if="activeSection === 'farm'" :key="'farm-' + allianceVersion" class="clan-section" />
     <ClanDetail
       v-else-if="activeSection === 'clan-detail'"
       :key="'detail-' + allianceVersion"
+      ref="detail"
       class="clan-section"
       :clan-tag="selectedClanTag"
       @loaded="onDetailLoaded"
@@ -76,7 +77,10 @@ export default {
   onShow() {
     if (!this.contextReady) return
     this.$nextTick(() => {
-      if (this.activeSection === 'overview' && this.$refs.overview) this.$refs.overview.refresh()
+      const section = this.activeSection === 'clan-detail' ? 'detail' : this.activeSection
+      const component = this.$refs[section]
+      if (section === 'overview' && component) component.refresh()
+      if (component && component.requestPageEntryRefresh) component.requestPageEntryRefresh()
     })
   },
   onUnload() {

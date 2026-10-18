@@ -14,6 +14,7 @@
       </view>
       <view class="clan-members-tools">
         <PageRefreshButton
+          ref="refreshButton"
           :clan-tag="refreshClanTag"
           :resource-types="['clan_members']"
           :refresh="refreshState"
@@ -35,7 +36,11 @@
     </view>
     <view v-if="loading" class="clan-members-state"><text>加载成员...</text></view>
     <view v-else-if="!members.length" class="clan-members-state"><text>暂无成员数据</text></view>
-    <scroll-view v-else scroll-x scroll-y :scroll-top="tableScrollTop" class="clan-members-table-scroll">
+    <scroll-view
+      v-else scroll-x scroll-y :scroll-top="tableScrollTop" class="clan-members-table-scroll"
+      refresher-enabled :refresher-triggered="pullRefreshing"
+      refresher-background="#0f0f23" @refresherrefresh="handlePullRefresh"
+    >
       <view class="clan-members-table-wrap">
         <view class="clan-members-tr clan-members-head">
           <view class="clan-members-td cm-name" @tap="onSort('account_name')">昵称{{ sortMark('account_name') }}</view><view class="clan-members-td cm-tag">玩家标签</view><view class="clan-members-td cm-clan" @tap="onSort('clan_tag')">部落{{ sortMark('clan_tag') }}</view><view class="clan-members-td cm-role">职位</view><view class="clan-members-td cm-th" @tap="onSort('town_hall_level')">本{{ sortMark('town_hall_level') }}</view><view class="clan-members-td cm-league">联赛</view><view class="clan-members-td cm-trophy" @tap="onSort('trophies')">奖杯{{ sortMark('trophies') }}</view><view class="clan-members-td cm-attacks" @tap="onSort('season_attack_wins')">赛季进攻{{ sortMark('season_attack_wins') }}</view><view class="clan-members-td cm-donation" @tap="onSort('donations')">赛季捐兵{{ sortMark('donations') }}</view><view class="clan-members-td cm-donation" @tap="onSort('donations_received')">赛季收兵{{ sortMark('donations_received') }}</view><view class="clan-members-td cm-war" @tap="onSort('war_recent_15')">部落战近15场{{ sortMark('war_recent_15') }}</view><view class="clan-members-td cm-cwl" @tap="onSort('cwl_recent_3m')">联赛近3月{{ sortMark('cwl_recent_3m') }}</view><view class="clan-members-td cm-cwl-risk" @tap="onSort('cwl_one_star_rate')">一星率近3月{{ sortMark('cwl_one_star_rate') }}</view><view class="clan-members-td cm-cwl-risk" @tap="onSort('cwl_missed_attack_rate')">漏刀近3月{{ sortMark('cwl_missed_attack_rate') }}</view><view class="clan-members-td cm-capital" @tap="onSort('capital_recent_4w')">都城近4周{{ sortMark('capital_recent_4w') }}</view><view class="clan-members-td cm-games" @tap="onSort('clan_games')">竞赛贡献{{ sortMark('clan_games') }}</view><view class="clan-members-td cm-activity" @tap="onSort('last_activity_at')">最近活动{{ sortMark('last_activity_at') }}</view>
@@ -92,7 +97,7 @@ export default {
       memberFilter: 'member', clanFilters: [], filterPanelVisible: false,
       draftMemberFilter: 'member', draftClanFilters: [],
       pageSize: MEMBER_PAGE_SIZE, currentPage: 1, tableScrollTop: 0, requestSerial: 0,
-      refreshState: { allowed: false, resources: [] }
+      refreshState: { allowed: false, resources: [] }, pullRefreshing: false
     }
   },
   computed: {
@@ -131,6 +136,20 @@ export default {
     this.fetchMembers()
   },
   methods: {
+    requestPageEntryRefresh() {
+      this.$nextTick(() => {
+        if (this.$refs.refreshButton) this.$refs.refreshButton.requestOnEntry()
+      })
+    },
+    async handlePullRefresh() {
+      this.pullRefreshing = true
+      try {
+        if (this.$refs.refreshButton) await this.$refs.refreshButton.triggerRefresh('pull_down')
+        await this.fetchMembers(true)
+      } finally {
+        this.pullRefreshing = false
+      }
+    },
     applyResponse(res) {
       this.members = res.members || []
       this.allowedClans = res.clans || []

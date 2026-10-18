@@ -5,7 +5,11 @@
       <text class="clan-detail-error">{{ error }}</text>
       <text class="clan-detail-retry" @tap="fetchData">点击重试</text>
     </view>
-    <scroll-view v-else scroll-y class="clan-detail-scroll">
+    <scroll-view
+      v-else scroll-y class="clan-detail-scroll"
+      refresher-enabled :refresher-triggered="pullRefreshing"
+      refresher-background="#0f0f23" @refresherrefresh="handlePullRefresh"
+    >
       <view class="clan-detail-inner">
         <view class="clan-detail-back" @tap="$emit('back-overview')">‹ 返回部落概览</view>
 
@@ -39,6 +43,7 @@
           <view class="clan-detail-update-row">
             <text class="clan-detail-updated">{{ detail.profile_updated_at ? '官方资料更新于 ' + formatTime(detail.profile_updated_at) : (detail.updated_at ? '成员更新于 ' + formatTime(detail.updated_at) : '等待首次同步') }}</text>
             <PageRefreshButton
+              ref="refreshButton"
               :clan-tag="detail.clan_tag"
               :resource-types="['clan_profile', 'clan_members']"
               :refresh="detail.refresh"
@@ -135,7 +140,7 @@ export default {
   name: 'ClanDetail',
   components: { PageRefreshButton },
   props: { clanTag: { type: String, required: true } },
-  data() { return { loading: true, error: '', detail: {}, badgeLoadError: false } },
+  data() { return { loading: true, pullRefreshing: false, error: '', detail: {}, badgeLoadError: false } },
   computed: {
     profile() { return this.detail.profile || {} },
     hasProfile() { return !!this.detail.profile },
@@ -162,6 +167,20 @@ export default {
   watch: { clanTag() { this.load() } },
   created() { this.load() },
   methods: {
+    requestPageEntryRefresh() {
+      this.$nextTick(() => {
+        if (this.$refs.refreshButton) this.$refs.refreshButton.requestOnEntry()
+      })
+    },
+    async handlePullRefresh() {
+      this.pullRefreshing = true
+      try {
+        if (this.$refs.refreshButton) await this.$refs.refreshButton.triggerRefresh('pull_down')
+        await this.fetchData()
+      } finally {
+        this.pullRefreshing = false
+      }
+    },
     load() {
       this.badgeLoadError = false
       const cacheKey = `${getCurrentAllianceId() || 'public'}:${this.clanTag}`

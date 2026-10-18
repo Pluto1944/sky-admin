@@ -15,10 +15,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Iterable, Mapping
 from zoneinfo import ZoneInfo
 
-from modules.coc_sync.cwl_live import group_war_tags
 from modules.coc_sync.official.mapper import normalize_tag
 from modules.sync_queue.config import active_live_resource_types
 from modules.sync_queue.planner import SyncPlanner
+from modules.sync_queue.refresh_policy import (
+    PROFILE_INTERVAL_SECONDS,
+    cwl_page_interval_seconds,
+    paid_current_war_interval_seconds,
+)
 from modules.sync_queue.repository import SyncQueueError, SyncQueueRepository
 
 from .operations import free_registration_policy
@@ -33,6 +37,7 @@ FREE_CATEGORY_LABELS = {
 }
 INITIAL_RESOURCE_TYPES = ("clan_profile", "clan_members", "current_war")
 PAGE_REFRESH_RESOURCE_TYPES = (*INITIAL_RESOURCE_TYPES, "cwl_live")
+PAGE_REFRESH_TRIGGERS = ("manual", "page_open", "pull_down")
 _TAG_RE = re.compile(r"^#[0289PYLQGRJCUV]{3,14}$")
 
 
@@ -526,27 +531,7 @@ def _page_refresh_resource_key(
 
 
 def _cwl_cooldown(conn: sqlite3.Connection, period: str, clan_tag: str) -> int:
-    row = conn.execute(
-        """SELECT data_json FROM cwl_live_group_cache
-           WHERE period=? AND clan_tag=?""",
-        (period, clan_tag),
-    ).fetchone()
-    if row is None or not row["data_json"]:
-        return 30 * 60
-    try:
-        group = json.loads(row["data_json"])
-    except (TypeError, json.JSONDecodeError):
-        return 30 * 60
-    war_tags = group_war_tags(group if isinstance(group, dict) else None)
-    if not war_tags:
-        return 30 * 60
-    placeholders = ",".join("?" for _ in war_tags)
-    active = conn.execute(
-        f"""SELECT 1 FROM cwl_live_war_cache
-            WHERE war_tag IN ({placeholders}) AND state='inWar' LIMIT 1""",
-        war_tags,
-    ).fetchone()
-    return 10 * 60 if active is not None else 30 * 60
+    return cwl_page_interval_seconds(conn, period, clan_tag)
 
 
 def _page_refresh_cooldown(
@@ -560,7 +545,7 @@ def _page_refresh_cooldown(
         return _war_cooldown(conn, clan_tag, current)
     if resource_type == "cwl_live" and period:
         return _cwl_cooldown(conn, period, clan_tag)
-    return 2 * 60 * 60
+    return PROFILE_INTERVAL_SECONDS
 
 
 def _validate_page_refresh_scope(
@@ -622,6 +607,7 @@ def request_page_refresh(
     period: str | None = None,
     actor_user_id: int | None = None,
     access_kind: str = "visitor",
+    trigger: str = "manual",
     now: datetime | None = None,
 ) -> list[dict]:
     """Queue refreshes authorized by an already-resolved read context.
@@ -633,6 +619,9 @@ def request_page_refresh(
     tag, selected, selected_period = _validate_page_refresh_scope(
         conn, alliance_id, clan_tag, resource_types, period,
     )
+    selected_trigger = str(trigger or "manual")
+    if selected_trigger not in PAGE_REFRESH_TRIGGERS:
+        raise FreeAllianceError("不支持的页面刷新触发方式", status_code=422)
     current = _now(now)
     reconcile_sync_targets(conn, now=current)
     queue = SyncQueueRepository(conn)
@@ -654,7 +643,7 @@ def request_page_refresh(
                     "alliance_id": int(alliance_id),
                     "actor_user_id": actor_user_id,
                     "access_kind": access_kind,
-                    "trigger": "page_manual",
+                    "trigger": selected_trigger,
                 },
             )
         except SyncQueueError as exc:
@@ -684,6 +673,7 @@ def request_page_refresh(
             entity_id=tag,
             details={
                 "access_kind": access_kind,
+                "trigger": selected_trigger,
                 "period": selected_period,
                 "resource_types": list(selected),
                 "results": [
@@ -796,18 +786,10 @@ def enqueue_initialization(
 
 def _war_cooldown(conn: sqlite3.Connection, clan_tag: str, current: datetime) -> int:
     row = conn.execute(
-        "SELECT status, expected_end_at FROM current_war_cache WHERE clan_tag=?",
+        "SELECT * FROM current_war_cache WHERE clan_tag=?",
         (clan_tag,),
     ).fetchone()
-    if row is None:
-        return 2 * 60 * 60
-    status = row["status"]
-    if status == "preparation":
-        return 30 * 60
-    if status == "in_war":
-        end = _parse_time(row["expected_end_at"])
-        return 5 * 60 if end and end - current <= timedelta(hours=1) else 10 * 60
-    return 2 * 60 * 60
+    return paid_current_war_interval_seconds(row, current)
 
 
 def request_manual_refresh(
@@ -838,7 +820,7 @@ def request_manual_refresh(
     for resource_type in selected:
         cooldown = (
             _war_cooldown(conn, tag, current)
-            if resource_type == "current_war" else 2 * 60 * 60
+            if resource_type == "current_war" else PROFILE_INTERVAL_SECONDS
         )
         try:
             queued = queue.enqueue_interactive_task(

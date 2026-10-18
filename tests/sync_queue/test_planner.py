@@ -124,7 +124,7 @@ def test_current_war_shadow_policy_matches_near_start_and_error_backoff():
     assert _current_war_policy(
         "internal", {"status": "error", "failure_count": 3}, NOW
     ) == ("scheduled", 1200)
-    assert _current_war_policy("low", near_start, NOW) == ("scheduled", 21600)
+    assert _current_war_policy("low", near_start, NOW) == ("scheduled", 17 * 60)
 
 
 def test_live_cutover_only_creates_live_tasks_for_selected_types(db):

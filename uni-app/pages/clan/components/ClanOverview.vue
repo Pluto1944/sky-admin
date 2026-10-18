@@ -5,7 +5,11 @@
       <text class="clan-overview-error">{{ error }}</text>
       <text class="clan-overview-retry" @tap="fetchData">点击重试</text>
     </view>
-    <scroll-view v-else scroll-y class="clan-overview-scroll">
+    <scroll-view
+      v-else scroll-y class="clan-overview-scroll"
+      refresher-enabled :refresher-triggered="pullRefreshing"
+      refresher-background="#0f0f23" @refresherrefresh="handlePullRefresh"
+    >
       <view class="clan-overview-inner">
         <view class="clan-overview-summary">
           <text>自有部落 · {{ clans.length }} 个</text>
@@ -54,6 +58,7 @@
               <text v-if="clan.verification_status && clan.verification_status !== 'verified'" class="clan-overview-verification">{{ verificationLabel(clan.verification_status) }}</text>
             </view>
             <PageRefreshButton
+              ref="refreshButtons"
               :clan-tag="clan.clan_tag"
               :resource-types="['clan_profile', 'clan_members']"
               :refresh="clan.refresh"
@@ -82,7 +87,7 @@ export default {
     allianceId: { type: [Number, String], default: 0 }
   },
   data() {
-    return { loading: true, refreshing: false, error: '', clans: [], updatedAt: '', requestSerial: 0 }
+    return { loading: true, refreshing: false, pullRefreshing: false, error: '', clans: [], updatedAt: '', requestSerial: 0 }
   },
   created() {
     this.loadAlliance()
@@ -131,6 +136,24 @@ export default {
     },
     refresh() {
       this.fetchData(false)
+    },
+    requestPageEntryRefresh() {
+      this.$nextTick(() => {
+        const refs = this.$refs.refreshButtons
+        const button = Array.isArray(refs) ? refs[0] : refs
+        if (button) button.requestOnEntry()
+      })
+    },
+    async handlePullRefresh() {
+      this.pullRefreshing = true
+      try {
+        const refs = this.$refs.refreshButtons
+        const button = Array.isArray(refs) ? refs[0] : refs
+        if (button) await button.triggerRefresh('pull_down')
+        await this.fetchData(false)
+      } finally {
+        this.pullRefreshing = false
+      }
     },
     reloadClanOverview() {
       delete overviewCache[this.resolvedAllianceId() || 'public']

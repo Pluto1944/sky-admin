@@ -316,6 +316,50 @@ def test_page_refresh_accepts_only_current_configured_cwl_team(m5):
         )
 
 
+def test_page_refresh_uses_paid_cadence_and_records_trigger(m5):
+    alliance_id = create_free_alliance(m5.conn, "owner-a", now=NOW)
+    subscribe_free_clan(
+        m5.conn, "owner-a", alliance_id,
+        clan_tag="#2QQ", category="combat", now=NOW,
+    )
+    reconcile_sync_targets(m5.conn, now=NOW)
+    m5.conn.execute(
+        """INSERT INTO current_war_cache
+           (clan_tag, clan_name, category, status, data_json, updated_at,
+            attempted_at, failure_count)
+           VALUES ('#2QQ', '测试部落', 'combat', 'in_war', '{}', ?, ?, 0)""",
+        (NOW_TEXT, NOW_TEXT),
+    )
+    m5.conn.commit()
+
+    results = request_page_refresh(
+        m5.conn,
+        alliance_id,
+        "#2QQ",
+        resource_types=["clan_profile", "current_war"],
+        access_kind="visitor",
+        trigger="page_open",
+        now=NOW,
+    )
+
+    by_type = {item["resource_type"]: item for item in results}
+    assert by_type["clan_profile"]["cooldown_seconds"] == 6 * 60 * 60
+    assert by_type["current_war"]["cooldown_seconds"] == 2 * 60
+    rows = m5.conn.execute(
+        """SELECT payload_json FROM sync_tasks
+           WHERE resource_key='#2QQ' AND status='pending' ORDER BY id"""
+    ).fetchall()
+    assert rows
+    assert all('"trigger": "page_open"' in row["payload_json"] for row in rows)
+    audit = m5.conn.execute(
+        """SELECT details_json FROM alliance_audit_events
+           WHERE alliance_id=? AND action='free_page_refresh_requested'
+           ORDER BY id DESC LIMIT 1""",
+        (alliance_id,),
+    ).fetchone()
+    assert '"trigger": "page_open"' in audit["details_json"]
+
+
 def test_archive_is_audited_and_never_deletes_shared_facts(m5):
     alliance_a = create_free_alliance(m5.conn, "owner-a", now=NOW)
     alliance_b = create_free_alliance(m5.conn, "owner-b", now=NOW)

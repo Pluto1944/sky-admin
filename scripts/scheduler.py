@@ -161,25 +161,9 @@ def _parse_coc_time(value: str | None) -> datetime | None:
 
 def _current_war_refresh_minutes(cache: dict, now: datetime) -> int:
     """根据缓存状态返回单部落的下次官方 API 重试间隔。"""
-    failures = int(cache.get("failure_count") or 0)
-    if cache.get("status") == "error" or failures > 0:
-        failures = max(1, failures)
-        index = min(failures - 1, len(CURRENT_WAR_ERROR_BACKOFF_MINUTES) - 1)
-        return CURRENT_WAR_ERROR_BACKOFF_MINUTES[index]
-    if cache.get("status") == "preparation":
-        try:
-            payload = json.loads(cache.get("data_json") or "{}")
-        except (TypeError, json.JSONDecodeError):
-            payload = {}
-        start_time = _parse_coc_time(payload.get("start_time"))
-        if start_time is not None:
-            minutes_until_start = (
-                start_time - now.astimezone(timezone.utc)
-            ).total_seconds() / 60
-            if minutes_until_start <= CURRENT_WAR_PREPARATION_NEAR_START_WINDOW_MINUTES:
-                return CURRENT_WAR_PREPARATION_NEAR_START_MINUTES
-        return CURRENT_WAR_PREPARATION_MINUTES
-    return CURRENT_WAR_REFRESH_MINUTES.get(cache.get("status"), 30)
+    from modules.sync_queue.refresh_policy import paid_current_war_interval_seconds
+
+    return paid_current_war_interval_seconds(cache, now) // 60
 
 
 def _cwl_previous_round_just_ended(

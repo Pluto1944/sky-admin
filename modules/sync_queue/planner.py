@@ -15,6 +15,11 @@ import config
 from modules.coc_sync.official.mapper import normalize_tag
 
 from .config import RESOURCE_TYPES, parse_resource_types
+from .refresh_policy import (
+    low_current_war_interval_seconds,
+    low_cwl_interval_seconds,
+    paid_current_war_interval_seconds,
+)
 from .repository import SyncQueueRepository
 
 
@@ -29,51 +34,19 @@ def _as_utc(value: datetime | None = None) -> datetime:
     return result.astimezone(timezone.utc)
 
 
-def _parse_time(value: object) -> datetime | None:
-    if not value:
-        return None
-    text = str(value)
-    for fmt in ("%Y%m%dT%H%M%S.%fZ", "%Y%m%dT%H%M%SZ"):
-        try:
-            return datetime.strptime(text, fmt).replace(tzinfo=timezone.utc)
-        except ValueError:
-            pass
-    try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
-
-
 def _current_war_policy(
     sync_tier: str,
     cache: dict | None,
     current: datetime,
 ) -> tuple[str, int]:
-    """Mirror today's broad refresh classes without executing a request."""
+    """Return the shared paid cadence or low-tier lifecycle safety net."""
     if sync_tier == "low":
-        return "scheduled", 6 * 60 * 60
-    status = (cache or {}).get("status")
-    failures = int((cache or {}).get("failure_count") or 0)
-    if status == "error" or failures > 0:
-        backoff = (5, 10, 20, 30)
-        return "scheduled", backoff[min(max(1, failures) - 1, len(backoff) - 1)] * 60
-    if status == "in_war":
-        return "realtime", 2 * 60
-    if status == "preparation":
-        try:
-            payload = json.loads((cache or {}).get("data_json") or "{}")
-        except (TypeError, json.JSONDecodeError):
-            payload = {}
-        start_time = _parse_time(payload.get("start_time"))
-        if start_time is not None and (start_time - current).total_seconds() <= 30 * 60:
-            return "realtime", 2 * 60
-        return "realtime", 30 * 60
-    if status == "cwl":
-        return "scheduled", 30 * 60
-    return "scheduled", 5 * 60
+        return "scheduled", low_current_war_interval_seconds(cache, current)
+    interval = paid_current_war_interval_seconds(cache, current)
+    priority = "realtime" if interval in {2 * 60, 30 * 60} and (cache or {}).get("status") in {
+        "in_war", "preparation",
+    } else "scheduled"
+    return priority, interval
 
 
 class SyncPlanner:
@@ -183,6 +156,11 @@ class SyncPlanner:
             if not tag:
                 continue
             high_quality = row["sync_tier"] in {"high", "internal"}
+            interval = (
+                2 * 60
+                if high_quality
+                else low_cwl_interval_seconds(self.conn, period, tag, current)
+            )
             interests.append({
                 "source_type": "alliance_cwl_team",
                 "source_key": str(row["id"]),
@@ -190,7 +168,7 @@ class SyncPlanner:
                 "resource_type": "cwl_live",
                 "resource_key": f"{period}:{tag}",
                 "priority": "realtime" if high_quality else "scheduled",
-                "desired_interval_seconds": 2 * 60 if high_quality else 30 * 60,
+                "desired_interval_seconds": interval,
                 "metadata": {
                     "period": period,
                     "clan_tag": tag,

@@ -3,6 +3,7 @@
     <TopBar title="返回参赛部落" :showBack="true" :backFallback="listFallback" />
     <view v-if="detail && detail.refresh && isCurrentPeriod" class="detail-refresh-row">
       <PageRefreshButton
+        ref="refreshButton"
         :clan-tag="clanTag"
         :resource-types="['cwl_live']"
         :period="period"
@@ -238,6 +239,9 @@ export default {
     if (this.isCurrentPeriod) {
       if (this.detail) this.fetchDetail(this.activeView)
       this.refreshTimer = setInterval(() => { this.fetchDetail(this.activeView) }, CACHE_REFRESH_INTERVAL_MS)
+      this.$nextTick(() => {
+        if (this.$refs.refreshButton) this.$refs.refreshButton.requestOnEntry()
+      })
     }
   },
   onHide() { this.stopTimer() },
@@ -246,7 +250,16 @@ export default {
     if (this.allianceChangeHandler) uni.$off(ALLIANCE_CHANGED_EVENT, this.allianceChangeHandler)
     if (this.shareReadyHandler) uni.$off(ALLIANCE_SHARE_READY_EVENT, this.shareReadyHandler)
   },
-  async onPullDownRefresh() { await this.fetchDetail(this.activeView); uni.stopPullDownRefresh() },
+  async onPullDownRefresh() {
+    try {
+      if (this.isCurrentPeriod && this.$refs.refreshButton) {
+        await this.$refs.refreshButton.triggerRefresh('pull_down')
+      }
+      await this.fetchDetail(this.activeView)
+    } finally {
+      uni.stopPullDownRefresh()
+    }
+  },
   onShareAppMessage() {
     const round = this.selectedRoundNumber ? `&round=${this.selectedRoundNumber}` : ''
     const alliance = allianceQuery()

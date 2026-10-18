@@ -3,6 +3,7 @@
     <TopBar :title="isHistory ? '历史部落战' : '当前部落战'" :showBack="true" :backFallback="historyListFallback" />
     <view v-if="!isHistory && war && war.refresh" class="detail-refresh-row">
       <PageRefreshButton
+        ref="refreshButton"
         :clan-tag="clanTag"
         :resource-types="['current_war']"
         :refresh="war.refresh"
@@ -123,7 +124,14 @@ export default {
     uni.$on(ALLIANCE_CHANGED_EVENT, this.allianceChangeHandler)
     this.fetchDetail()
   },
-  onShow() { if (!this.isHistory) this.startTimers() },
+  onShow() {
+    if (!this.isHistory) {
+      this.startTimers()
+      this.$nextTick(() => {
+        if (this.$refs.refreshButton) this.$refs.refreshButton.requestOnEntry()
+      })
+    }
+  },
   onHide() { this.stopTimers() },
   onUnload() {
     this.stopTimers()
@@ -131,8 +139,14 @@ export default {
     if (this.shareReadyHandler) uni.$off(ALLIANCE_SHARE_READY_EVENT, this.shareReadyHandler)
   },
   async onPullDownRefresh() {
-    await this.fetchDetail()
-    uni.stopPullDownRefresh()
+    try {
+      if (!this.isHistory && this.$refs.refreshButton) {
+        await this.$refs.refreshButton.triggerRefresh('pull_down')
+      }
+      await this.fetchDetail()
+    } finally {
+      uni.stopPullDownRefresh()
+    }
   },
   onShareAppMessage() {
     const history = this.isHistory ? `&war_key=${encodeURIComponent(this.warKey)}` : ''
