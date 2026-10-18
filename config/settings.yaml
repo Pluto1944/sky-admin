@@ -57,6 +57,9 @@ player:
 # 部落同步 - coc_sync（原 modules/coc_sync/config.py）
 # ============================================================================
 coc_sync:
+  # 互刷去速本算法：position（双方对位阶段推算）| fixed_reference（固定 50 人标准）
+  farm_despeed_algorithm: position
+
   clans:
     - tag: "#2QQ"
       name: "云深不知处 战营"

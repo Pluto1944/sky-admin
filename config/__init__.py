@@ -50,6 +50,9 @@ for _clan in CLANS:
 ALLIANCE_CLAN_TAGS: list[str] = [c["tag"] for c in CLANS]
 DUP_ACROSS_CLANS: str = _cfg["coc_sync"]["dup_across_clans"]
 FAIL_FAST: bool = _cfg["coc_sync"]["fail_fast"]
+FARM_DESPEED_ALGORITHM: str = _cfg["coc_sync"].get(
+    "farm_despeed_algorithm", "position"
+)
 
 
 def get_farm_clans() -> list[dict]:

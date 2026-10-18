@@ -2,9 +2,9 @@
 
 核心算法：
 - 部落实时配置：通过 COC 官方 API 拉取全部部落成员，统计各 TH 数量
-- 去速本配置：只读取本方成员排名，按固定 50 人标准判断速本
+- 去速本配置：后台可切换双方对位阶段推算或固定 50 人标准
 
-历史对位推算算法仍保留为独立纯函数，但不再接入在线统计。
+当前默认使用双方对位阶段推算；两种算法均保持为独立纯函数。
 """
 
 from __future__ import annotations
@@ -13,9 +13,16 @@ import time
 from collections import defaultdict
 from typing import Optional
 
+from config import FARM_DESPEED_ALGORITHM
 from modules.coc_sync.official.api_client import CocApiClient
 
 TH_KEYS = ["18", "17", "16", "15", "14", "13", "12", "11", "10", "below_10"]
+DESPEED_ALGORITHM_POSITION = "position"
+DESPEED_ALGORITHM_FIXED_REFERENCE = "fixed_reference"
+DESPEED_ALGORITHMS = {
+    DESPEED_ALGORITHM_POSITION,
+    DESPEED_ALGORITHM_FIXED_REFERENCE,
+}
 REFERENCE_COMPOSITION_50: tuple[tuple[int, int], ...] = (
     (18, 26),
     (17, 9),
@@ -120,7 +127,7 @@ def _fixed_reference_members(war_data: dict) -> list[tuple[dict, int, int, int]]
     return result
 
 
-def calc_despeed_config(war_data: dict) -> dict:
+def calc_fixed_reference_despeed_config(war_data: dict) -> dict:
     """按固定 50 人标准统计本方去速本后的 TH 分布。
 
     实际大本高于排名标准时降到标准本；实际大本不高于标准时保留实际等级，
@@ -136,7 +143,7 @@ def calc_despeed_config(war_data: dict) -> dict:
     return {"avg_th": avg_th, "distribution": distribution}
 
 
-def calc_member_rushed(war_data: dict) -> list[dict]:
+def calc_fixed_reference_member_rushed(war_data: dict) -> list[dict]:
     """按固定 50 人标准返回本方成员的标准本和速本度。"""
     return [
         {
@@ -225,11 +232,33 @@ def calc_position_member_rushed(war_data: dict) -> list[dict]:
     return result
 
 
+def calc_despeed_config(war_data: dict, algorithm: str) -> dict:
+    """按指定后台算法计算去速本后的 TH 分布。"""
+    if algorithm == DESPEED_ALGORITHM_POSITION:
+        return calc_position_despeed_config(war_data)
+    if algorithm == DESPEED_ALGORITHM_FIXED_REFERENCE:
+        return calc_fixed_reference_despeed_config(war_data)
+    raise ValueError(f"不支持的去速本算法: {algorithm}")
+
+
+def calc_member_rushed(war_data: dict, algorithm: str) -> list[dict]:
+    """按指定后台算法计算本方成员速本度。"""
+    if algorithm == DESPEED_ALGORITHM_POSITION:
+        return calc_position_member_rushed(war_data)
+    if algorithm == DESPEED_ALGORITHM_FIXED_REFERENCE:
+        return calc_fixed_reference_member_rushed(war_data)
+    raise ValueError(f"不支持的去速本算法: {algorithm}")
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # 组合 API
 # ═══════════════════════════════════════════════════════════════════════
 
-def get_farm_clan_stats(clan_tag: str, clan_name: str) -> dict:
+def get_farm_clan_stats(
+    clan_tag: str,
+    clan_name: str,
+    despeed_algorithm: str | None = None,
+) -> dict:
     """获取单个互刷部落的完整统计。
 
     Returns:
@@ -275,11 +304,16 @@ def get_farm_clan_stats(clan_tag: str, clan_name: str) -> dict:
             result["despeed"]["error"] = war_error
         return result
 
+    selected_algorithm = despeed_algorithm or FARM_DESPEED_ALGORITHM
     result["despeed"] = {
         "has_war": True,
-        **calc_despeed_config(war_data),
+        **calc_despeed_config(war_data, selected_algorithm),
     }
-    result["replace_candidates"] = [{**x, "clan_tag": clan_tag} for x in calc_member_rushed(war_data) if x["rushed_degree"] > 0]
+    result["replace_candidates"] = [
+        {**item, "clan_tag": clan_tag}
+        for item in calc_member_rushed(war_data, selected_algorithm)
+        if item["rushed_degree"] > 0
+    ]
 
     return result
 

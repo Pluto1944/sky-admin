@@ -60,3 +60,13 @@ def _validate(cfg: dict) -> None:
                 f"部落 {clan.get('name', clan.get('tag'))} 的 category 值非法: {cat}"
                 f"（合法值: {', '.join(sorted(VALID_CLAN_CATEGORIES))}）"
             )
+
+    farm_despeed_algorithm = cfg.get("coc_sync", {}).get(
+        "farm_despeed_algorithm", "position"
+    )
+    valid_farm_despeed_algorithms = {"position", "fixed_reference"}
+    if farm_despeed_algorithm not in valid_farm_despeed_algorithms:
+        raise ConfigLoadError(
+            "coc_sync.farm_despeed_algorithm 值非法: "
+            f"{farm_despeed_algorithm}（合法值: position, fixed_reference）"
+        )

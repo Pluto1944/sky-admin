@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from modules.coc_sync.clashking import farm_stats
 
 
@@ -37,9 +39,9 @@ def test_fixed_reference_calculates_distribution_and_candidates():
         "opponent": {"members": [_member(27, 10)]},
     }
 
-    result = farm_stats.calc_despeed_config(war)
+    result = farm_stats.calc_fixed_reference_despeed_config(war)
     candidates = [
-        item for item in farm_stats.calc_member_rushed(war)
+        item for item in farm_stats.calc_fixed_reference_member_rushed(war)
         if item["rushed_degree"] > 0
     ]
 
@@ -49,18 +51,18 @@ def test_fixed_reference_calculates_distribution_and_candidates():
 
 
 def test_fixed_reference_does_not_raise_lower_town_hall():
-    result = farm_stats.calc_despeed_config({
+    result = farm_stats.calc_fixed_reference_despeed_config({
         "clan": {"members": [_member(1, 16)]},
     })
 
     assert result["avg_th"] == 16.0
     assert result["distribution"]["16"] == 1
-    assert farm_stats.calc_member_rushed({
+    assert farm_stats.calc_fixed_reference_member_rushed({
         "clan": {"members": [_member(1, 16)]},
     })[0]["rushed_degree"] == 0
 
 
-def test_farm_stats_keeps_existing_api_fields_with_fixed_algorithm(monkeypatch):
+def test_farm_stats_can_select_fixed_algorithm_without_changing_api(monkeypatch):
     monkeypatch.setattr(farm_stats, "fetch_clan_members", lambda _tag: [
         {"townHallLevel": 18},
     ])
@@ -69,7 +71,9 @@ def test_farm_stats_keeps_existing_api_fields_with_fixed_algorithm(monkeypatch):
         "opponent": {"members": []},
     })
 
-    result = farm_stats.get_farm_clan_stats("#FARM", "互刷一营")
+    result = farm_stats.get_farm_clan_stats(
+        "#FARM", "互刷一营", despeed_algorithm="fixed_reference"
+    )
 
     assert result["member_count"] == 1
     assert result["despeed"]["has_war"] is True
@@ -95,3 +99,39 @@ def test_historical_position_algorithm_remains_available():
     assert candidates[-1]["map_position"] == 3
     assert candidates[-1]["despeed_town_hall"] == 16
     assert candidates[-1]["rushed_degree"] == 2
+
+
+def test_dispatcher_switches_between_position_and_fixed_algorithms():
+    war = {
+        "clan": {"members": [_member(1, 18), _member(2, 18), _member(27, 18)]},
+        "opponent": {"members": [_member(1, 18), _member(2, 16), _member(27, 16)]},
+    }
+
+    position = farm_stats.calc_member_rushed(war, "position")
+    fixed = farm_stats.calc_member_rushed(war, "fixed_reference")
+
+    assert position[-1]["despeed_town_hall"] == 16
+    assert position[-1]["rushed_degree"] == 2
+    assert fixed[-1]["despeed_town_hall"] == 17
+    assert fixed[-1]["rushed_degree"] == 1
+
+
+def test_farm_stats_defaults_to_configured_position_algorithm(monkeypatch):
+    monkeypatch.setattr(farm_stats, "FARM_DESPEED_ALGORITHM", "position")
+    monkeypatch.setattr(farm_stats, "fetch_clan_members", lambda _tag: [
+        {"townHallLevel": 18},
+    ])
+    monkeypatch.setattr(farm_stats, "fetch_current_war", lambda _tag: {
+        "clan": {"members": [_member(1, 18), _member(2, 18), _member(27, 18)]},
+        "opponent": {"members": [_member(1, 18), _member(2, 16), _member(27, 16)]},
+    })
+
+    result = farm_stats.get_farm_clan_stats("#FARM", "互刷一营")
+
+    assert result["replace_candidates"][-1]["despeed_town_hall"] == 16
+    assert result["replace_candidates"][-1]["rushed_degree"] == 2
+
+
+def test_dispatcher_rejects_unknown_algorithm():
+    with pytest.raises(ValueError, match="不支持的去速本算法"):
+        farm_stats.calc_despeed_config({}, "unknown")
