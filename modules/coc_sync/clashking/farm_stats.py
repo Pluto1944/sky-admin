@@ -2,12 +2,9 @@
 
 核心算法：
 - 部落实时配置：通过 COC 官方 API 拉取全部部落成员，统计各 TH 数量
-- 去速本配置：通过 COC 官方 API 拉取部落战双方成员（按排名排序），用阶段归类法消除速本影响
+- 去速本配置：只读取本方成员排名，按固定 50 人标准判断速本
 
-去速本算法：
-  遍历部落战双方成员（按 mapPosition 排序），从最高排名开始。
-  第一个出现的 TH 作为"阶段1"，后续遇到更低 TH 才进入下一阶段。
-  速本玩家（TH 比所在阶段高）会被归类到当前阶段的高 TH。
+历史对位推算算法仍保留为独立纯函数，但不再接入在线统计。
 """
 
 from __future__ import annotations
@@ -19,6 +16,14 @@ from typing import Optional
 from modules.coc_sync.official.api_client import CocApiClient
 
 TH_KEYS = ["18", "17", "16", "15", "14", "13", "12", "11", "10", "below_10"]
+REFERENCE_COMPOSITION_50: tuple[tuple[int, int], ...] = (
+    (18, 26),
+    (17, 9),
+    (16, 6),
+    (15, 6),
+    (14, 2),
+    (13, 1),
+)
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -90,8 +95,65 @@ def calc_realtime_config(members: list[dict]) -> dict:
 # 去速本配置
 # ═══════════════════════════════════════════════════════════════════════
 
+def reference_slots() -> list[int]:
+    """返回固定 50 人标准中每个排名对应的大本等级。"""
+    return [
+        town_hall
+        for town_hall, count in REFERENCE_COMPOSITION_50
+        for _ in range(count)
+    ]
+
+
+def _fixed_reference_members(war_data: dict) -> list[tuple[dict, int, int, int]]:
+    """返回本方有效成员及其排名、实际大本、固定标准本。"""
+    standards = reference_slots()
+    result: list[tuple[dict, int, int, int]] = []
+    for member in war_data.get("clan", {}).get("members", []):
+        position = member.get("mapPosition")
+        town_hall = member.get("townhallLevel")
+        if not isinstance(position, int) or not 1 <= position <= len(standards):
+            continue
+        if not isinstance(town_hall, int) or town_hall <= 0:
+            continue
+        result.append((member, position, town_hall, standards[position - 1]))
+    result.sort(key=lambda item: item[1])
+    return result
+
+
 def calc_despeed_config(war_data: dict) -> dict:
-    """从部落战数据用阶段归类法统计去速本后的 TH 分布。
+    """按固定 50 人标准统计本方去速本后的 TH 分布。
+
+    实际大本高于排名标准时降到标准本；实际大本不高于标准时保留实际等级，
+    不会为了凑标准答案而把低本向上提升。
+    """
+    classified = [
+        min(town_hall, standard)
+        for _member, _position, town_hall, standard
+        in _fixed_reference_members(war_data)
+    ]
+    distribution = _build_distribution(classified)
+    avg_th = round(sum(classified) / len(classified), 1) if classified else 0.0
+    return {"avg_th": avg_th, "distribution": distribution}
+
+
+def calc_member_rushed(war_data: dict) -> list[dict]:
+    """按固定 50 人标准返回本方成员的标准本和速本度。"""
+    return [
+        {
+            "player_tag": member.get("tag"),
+            "account_name": member.get("name"),
+            "town_hall_level": town_hall,
+            "despeed_town_hall": standard,
+            "rushed_degree": max(0, town_hall - standard),
+            "map_position": position,
+        }
+        for member, position, town_hall, standard
+        in _fixed_reference_members(war_data)
+    ]
+
+
+def calc_position_despeed_config(war_data: dict) -> dict:
+    """历史对位推算：从双方成员阶段统计去速本后的 TH 分布。
 
     算法（部落战排名从上到下大本等级递减）：
     1. 收集双方所有成员，按 mapPosition 升序排列（从高排名到低排名）
@@ -145,8 +207,8 @@ def calc_despeed_config(war_data: dict) -> dict:
     return {"avg_th": avg_th, "distribution": distribution}
 
 
-def calc_member_rushed(war_data: dict) -> list[dict]:
-    """返回本方参战成员的个人去速本等级和速本度。"""
+def calc_position_member_rushed(war_data: dict) -> list[dict]:
+    """历史对位推算：返回本方成员的去速本等级和速本度。"""
     all_members = []
     for side_key in ("clan", "opponent"):
         side = war_data.get(side_key, {})
