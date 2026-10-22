@@ -172,6 +172,16 @@ export function createFarmClan(payload) {
   return farmRequest('/api/farm-system/admin/clans', 'POST', payload)
 }
 
+export function requestFarmClanSync(payload) {
+  return farmRequest('/api/farm-system/admin/clan-sync-requests', 'POST', payload)
+}
+
+export function getFarmClanSyncStatus(clanTag, accountId) {
+  return farmRequest(
+    `/api/farm-system/admin/clan-sync-requests/${encodeURIComponent(clanTag)}?account_id=${encodeURIComponent(accountId)}`
+  )
+}
+
 export function updateFarmClan(clanTag, payload) {
   return farmRequest(`/api/farm-system/admin/clans/${encodeURIComponent(clanTag)}`, 'PATCH', payload)
 }
@@ -212,6 +222,13 @@ export function revokeFarmMatch(matchId, reason) {
     `/api/farm-system/creator/matches/${encodeURIComponent(matchId)}/revoke`,
     'POST',
     { reason }
+  )
+}
+
+export function reopenFarmMatch(matchId) {
+  return farmRequest(
+    `/api/farm-system/creator/matches/${encodeURIComponent(matchId)}/reopen`,
+    'POST'
   )
 }
 

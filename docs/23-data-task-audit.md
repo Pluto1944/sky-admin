@@ -75,3 +75,6 @@ M4 的 `sync_interests`、`sync_targets`、`sync_tasks` 和 `sync_attempts` 同�
 尝试用于租约内的一次执行审计。它们不保存 COC 响应，也不是页面数据源。影子任务默认只保留
 7 天；需求和目标可从联盟订阅与月度联赛配置重建。live 任务只能由独立 M4 Worker 执行，
 切换和回滚均以资源类型为边界，不允许新旧路径同时写同一类业务事实。
+
+`farm_clan_request` 是互刷新部落验证产生的短期 `sync_interests` 来源，默认 24 小时过期。它只用于
+建立 `clan_profile` 官方资料目标，不是互刷部落绑定事实；即使任务成功，也必须由管理端另行确认绑定。

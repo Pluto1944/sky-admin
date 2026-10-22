@@ -47,6 +47,9 @@ def parse_args() -> argparse.Namespace:
     transfer.add_argument("--from-username", required=True)
     transfer.add_argument("--to-username", required=True)
     transfer.add_argument("--yes", action="store_true", help="确认执行角色转移")
+    initialize = subparsers.add_parser("initialize-creator", help="无创建者时初始化唯一创建者")
+    initialize.add_argument("--username", required=True)
+    initialize.add_argument("--yes", action="store_true", help="确认执行创建者初始化")
     return parser.parse_args()
 
 
@@ -72,6 +75,13 @@ def main() -> int:
             if source is None or target is None:
                 raise LookupError("创建者转移账号不存在")
             _, account = repository.transfer_creator(source["id"], target["id"])
+        elif args.command == "initialize-creator":
+            if not args.yes:
+                raise ValueError("初始化创建者必须显式指定 --yes")
+            target = repository.get_by_username(args.username)
+            if target is None:
+                raise LookupError("创建者账号不存在")
+            account = repository.initialize_creator(target["id"])
         else:
             account = repository.get_by_username(args.username)
             if account is None:

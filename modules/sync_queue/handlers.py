@@ -1,6 +1,9 @@
 """Live queue handlers that reuse the established business write paths."""
 from __future__ import annotations
 
+import json
+from datetime import datetime, timezone
+
 import config
 from modules.coc_sync.official.mapper import normalize_tag
 from shared.db.connection import Database
@@ -44,6 +47,24 @@ def _clan_context(resource_key: str) -> dict:
             "name": configured.get("name"),
             "category": configured.get("category", "normal"),
         }
+    pending = None
+    db = Database(config.DB_PATH)
+    db.init_schema()
+    try:
+        pending = db.conn.execute(
+            """SELECT metadata_json FROM sync_interests
+               WHERE source_type='farm_clan_request'
+                 AND resource_type='clan_profile' AND resource_key=?
+                 AND status='active'
+                 AND (expires_at IS NULL OR expires_at > ?)
+               ORDER BY id DESC LIMIT 1""",
+            (tag, datetime.now(timezone.utc).isoformat(timespec="seconds")),
+        ).fetchone()
+    finally:
+        db.close()
+    if pending:
+        metadata = json.loads(pending["metadata_json"] or "{}")
+        return {"tag": tag, "name": tag, "category": metadata.get("category", "farm")}
     raise SyncTaskExecutionError("同步目标已不在有效联盟订阅中", retryable=False)
 
 

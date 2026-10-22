@@ -26,6 +26,11 @@
         <text class="logout" @tap="logout">退出登录</text>
       </view>
 
+      <view v-if="!dashboard.registration_enabled" class="registration-notice">
+        <text class="registration-notice-title">登记功能暂未开放</text>
+        <text class="registration-notice-desc">目前可以查看场次、部落和积分，开放后才能执行登记。</text>
+      </view>
+
       <view v-if="dashboard.round" class="round-card">
         <view class="round-top">
           <view>
@@ -94,7 +99,7 @@ export default {
       loading: true,
       error: '',
       me: {},
-      dashboard: { round: null, registered_count: 0, total_count: 0, clans: [] },
+      dashboard: { round: null, registered_count: 0, total_count: 0, clans: [], registration_enabled: false },
       now: Date.now(),
       timer: null,
       registeringClanId: null,
@@ -110,10 +115,11 @@ export default {
       return total ? `${Math.round(this.dashboard.registered_count * 100 / total)}%` : '0%'
     },
     canRegisterAll() {
-      return !this.registerAllRunning && this.dashboard.clans.some(this.canRegister)
+      return this.dashboard.registration_enabled && !this.registerAllRunning && this.dashboard.clans.some(this.canRegister)
     },
     registerAllLabel() {
       if (this.registerAllRunning) return `正在登记 ${this.batchDone}/${this.batchTotal}`
+      if (!this.dashboard.registration_enabled) return '登记功能暂未开放'
       const count = this.dashboard.clans.filter(this.canRegister).length
       if (!count) return '暂无可登记部落'
       return `一键登记 ${count} 个部落`
@@ -144,12 +150,15 @@ export default {
       return ({ not_registered: '未登记', registering: '登记中', not_in_war: '尚未搜到对手', war_mismatch: '场次不匹配', fetch_failed: '获取失败', internal_matched: '内部匹配成功', match_failed: '匹配失败', revoked: '已撤销' })[status] || status
     },
     canRegister(clan) {
+      if (!this.dashboard.registration_enabled) return false
       if (!this.dashboard.round || this.dashboard.round.business_time_kind !== 'preparation_start') return false
       if (!['open', 'partially_registered'].includes(this.dashboard.round.status)) return false
-      return !['internal_matched', 'match_failed'].includes(clan.registration_status)
+      return !['internal_matched', 'match_failed', 'revoked'].includes(clan.registration_status)
     },
     registerLabel(clan) {
       if (['internal_matched', 'match_failed'].includes(clan.registration_status)) return '已登记'
+      if (clan.registration_status === 'revoked') return '已撤销，等待重新开放'
+      if (!this.dashboard.registration_enabled) return '登记功能暂未开放'
       if (!this.dashboard.round) return '暂无可登记场次'
       if (this.dashboard.round.business_time_kind !== 'preparation_start') return '本轮时间配置异常'
       return '登记本场'
@@ -245,6 +254,7 @@ export default {
 .state { display: flex; min-height: 70vh; flex-direction: column; align-items: center; justify-content: center; gap: 22rpx; color: #778198; font-size: 26rpx; }.error { color: #d47d80; }.retry { color: #70a9e0; }
 .admin-entry { display: flex; align-items: center; justify-content: space-between; padding: 26rpx; border: 1rpx solid #31527b; border-radius: 18rpx; background: linear-gradient(145deg, #19243d, #171a32); }.admin-entry-copy, .admin-entry-title, .admin-entry-desc { display: block; }.admin-entry-title { font-size: 30rpx; font-weight: 700; }.admin-entry-desc { margin-top: 8rpx; color: #8391aa; font-size: 22rpx; }.admin-entry-action { display: flex; flex-shrink: 0; align-items: center; margin-left: 24rpx; color: #7cb6eb; font-size: 23rpx; }.admin-entry-arrow { margin-left: 8rpx; font-size: 34rpx; line-height: 1; }
 .account-strip { display: flex; align-items: center; justify-content: space-between; padding: 24rpx 4rpx 4rpx; }.account-copy, .account-label, .account-name, .account-meta { display: block; }.account-label { color: #69748b; font-size: 20rpx; }.account-name { margin-top: 6rpx; font-size: 25rpx; font-weight: 600; }.account-meta { margin-top: 5rpx; color: #69748b; font-size: 20rpx; }.logout { flex-shrink: 0; margin-left: 24rpx; color: #b87478; font-size: 22rpx; }
+.registration-notice { margin-top: 22rpx; padding: 22rpx 24rpx; border: 1rpx solid #4b3f55; border-radius: 16rpx; background: #1d1a2d; }.registration-notice-title, .registration-notice-desc { display: block; }.registration-notice-title { color: #d7ad72; font-size: 24rpx; font-weight: 600; }.registration-notice-desc { margin-top: 7rpx; color: #827c91; font-size: 21rpx; line-height: 1.5; }
 .round-card { margin-top: 24rpx; padding: 28rpx; border: 1rpx solid #31527b; border-radius: 20rpx; background: linear-gradient(145deg, #19243d, #171a32); }.round-top { display: flex; justify-content: space-between; }.eyebrow { display: block; color: #7988a5; font-size: 21rpx; }.round-time { display: block; margin-top: 8rpx; font-size: 37rpx; font-weight: 700; }.time-kind { display: block; margin-top: 7rpx; color: #6f819e; font-size: 20rpx; }.round-status { height: 40rpx; padding: 0 14rpx; border-radius: 20rpx; background: rgba(68,137,204,.16); color: #7cb6eb; font-size: 21rpx; line-height: 40rpx; }.countdown { margin: 22rpx 0 26rpx; color: #93bfe9; font-size: 25rpx; }.progress-row { display: flex; justify-content: space-between; color: #7d879d; font-size: 22rpx; }.progress-track { height: 10rpx; margin-top: 12rpx; overflow: hidden; border-radius: 8rpx; background: #292e49; }.progress-fill { height: 100%; border-radius: 8rpx; background: #3f87c8; }.register-all, .register-one { display: flex; align-items: center; justify-content: center; border: 0; color: #768197 !important; }.register-all { height: 76rpx; margin-top: 26rpx; border-radius: 12rpx; background: #242941 !important; font-size: 25rpx; }.register-all.active { background: #397fc0 !important; color: #fff !important; }.register-all::after, .register-one::after { border: 0; }
 .empty-round, .empty-clans { margin-top: 24rpx; padding: 58rpx 24rpx; border: 1rpx dashed #2c3354; border-radius: 18rpx; text-align: center; }.empty-title, .empty-desc { display: block; }.empty-title { font-size: 28rpx; }.empty-desc { margin-top: 10rpx; color: #687289; font-size: 22rpx; }.section-head { display: flex; justify-content: space-between; padding: 34rpx 4rpx 18rpx; color: #dbe0ec; font-size: 27rpx; font-weight: 600; }.section-head text:last-child { color: #687289; font-size: 22rpx; font-weight: 400; }.empty-clans { margin-top: 0; color: #6c758c; font-size: 24rpx; }
 .clan-card { margin-bottom: 20rpx; overflow: hidden; border: 1rpx solid #2a3151; border-radius: 18rpx; background: #191a31; }.clan-row { display: flex; align-items: center; justify-content: space-between; padding: 26rpx; }.clan-copy { min-width: 0; }.clan-name, .clan-tag, .score-label, .score-value { display: block; }.clan-name { overflow: hidden; font-size: 29rpx; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }.clan-tag { margin-top: 7rpx; color: #707b93; font-size: 21rpx; }.score-copy { flex-shrink: 0; margin-left: 20rpx; text-align: right; }.score-label { color: #707b93; font-size: 20rpx; }.score-value { margin-top: 2rpx; color: #8cbbea; font-size: 32rpx; font-weight: 700; }.clan-status { padding: 18rpx 26rpx; border-top: 1rpx solid #282e4c; color: #8893aa; font-size: 22rpx; }.register-one { height: 68rpx; border-radius: 0; background: #20243b !important; font-size: 23rpx; }.register-one.active { background: #397fc0 !important; color: #fff !important; }.bottom-space { height: 40rpx; }

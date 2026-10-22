@@ -117,3 +117,22 @@ def test_creator_transfer_is_atomic_and_invalidates_both_tokens(db):
     assert db.conn.execute(
         "SELECT COUNT(*) FROM farm_auth_accounts WHERE role = 'creator' AND status = 'active'"
     ).fetchone()[0] == 1
+
+
+def test_initialize_creator_requires_empty_creator_slot_and_invalidates_token(db):
+    service = _service(db)
+    target = service.create_account(
+        username="admin.one@example.com", display_name="管理员一",
+        password="strong-password", role="admin",
+    )
+    repository = FarmAccountRepository(db.conn)
+
+    creator = repository.initialize_creator(target["id"])
+    repeated = repository.initialize_creator(target["id"])
+
+    assert creator["role"] == "creator"
+    assert creator["token_version"] == target["token_version"] + 1
+    assert repeated["token_version"] == creator["token_version"]
+    assert db.conn.execute(
+        "SELECT COUNT(*) FROM farm_audit_logs WHERE action='creator.initialized'"
+    ).fetchone()[0] == 1

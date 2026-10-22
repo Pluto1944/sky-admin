@@ -14,7 +14,7 @@ from modules.coc_sync.current_war import normalize_current_war
 from modules.coc_sync.official.api_client import CocApiError
 from shared.db.connection import now_iso
 
-from .rounds import FINAL_REGISTRATION_STATUSES
+from .rounds import FINAL_REGISTRATION_STATUSES, NON_REGISTERABLE_STATUSES
 from .scoring import decide_match
 from .tags import coc_tag_key
 
@@ -72,7 +72,7 @@ class FarmRegistrationService:
         source = self._round_clan(round_id, clan_tag)
         if int(source["account_id_snapshot"]) != int(actor["id"]):
             raise RegistrationError("clan_not_owned", "该部落不属于当前账号", status_code=404)
-        if source["registration_status"] in FINAL_REGISTRATION_STATUSES:
+        if source["registration_status"] in NON_REGISTERABLE_STATUSES:
             return self._result_payload(round_id, int(source["clan_id"]), reused=True)
         if round_row["status"] not in {"open", "partially_registered"}:
             raise RegistrationError("round_not_open", "当前场次尚未开放登记", status_code=409)
@@ -174,13 +174,13 @@ class FarmRegistrationService:
             try:
                 self.conn.execute("BEGIN IMMEDIATE")
                 fresh_source = self._round_clan_by_id(int(round_row["id"]), int(source["clan_id"]))
-                if fresh_source["registration_status"] in FINAL_REGISTRATION_STATUSES:
+                if fresh_source["registration_status"] in NON_REGISTERABLE_STATUSES:
                     self.conn.rollback()
                     return self._result_payload(
                         int(round_row["id"]), int(source["clan_id"]), reused=True
                     )
                 fresh_target = self._round_clan_by_id(int(round_row["id"]), int(target["clan_id"]))
-                if fresh_target["registration_status"] in FINAL_REGISTRATION_STATUSES:
+                if fresh_target["registration_status"] in NON_REGISTERABLE_STATUSES:
                     raise RegistrationError(
                         "opponent_already_final", "对手已经存在不一致的最终登记结果", status_code=409
                     )
@@ -264,7 +264,7 @@ class FarmRegistrationService:
             try:
                 self.conn.execute("BEGIN IMMEDIATE")
                 fresh = self._round_clan_by_id(int(round_row["id"]), int(source["clan_id"]))
-                if fresh["registration_status"] in FINAL_REGISTRATION_STATUSES:
+                if fresh["registration_status"] in NON_REGISTERABLE_STATUSES:
                     self.conn.rollback()
                     return self._result_payload(
                         int(round_row["id"]), int(source["clan_id"]), reused=True
@@ -317,7 +317,7 @@ class FarmRegistrationService:
                 """UPDATE farm_round_clans
                    SET registration_status = ?, last_attempt_at = ?, last_error = ?, updated_at = ?
                    WHERE round_id = ? AND clan_id = ?
-                     AND registration_status NOT IN ('internal_matched', 'match_failed')""",
+                     AND registration_status NOT IN ('internal_matched', 'match_failed', 'revoked')""",
                 (
                     status, now, clean_message, now, int(source["round_id"]),
                     int(source["clan_id"]),
@@ -364,7 +364,7 @@ class FarmRegistrationService:
                 """UPDATE farm_round_clans
                    SET registration_status = ?, last_attempt_at = ?, last_error = ?, updated_at = ?
                    WHERE round_id = ? AND clan_id = ?
-                     AND registration_status NOT IN ('internal_matched', 'match_failed')""",
+                     AND registration_status NOT IN ('internal_matched', 'match_failed', 'revoked')""",
                 (status, now, error, now, int(source["round_id"]), int(source["clan_id"])),
             )
         return cursor.rowcount > 0

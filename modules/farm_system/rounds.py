@@ -15,6 +15,7 @@ BEIJING = ZoneInfo("Asia/Shanghai")
 BUSINESS_TIME_KIND = "preparation_start"
 ACTIVE_ROUND_STATUSES = ("scheduled", "open", "partially_registered")
 FINAL_REGISTRATION_STATUSES = ("internal_matched", "match_failed")
+NON_REGISTERABLE_STATUSES = FINAL_REGISTRATION_STATUSES + ("revoked",)
 
 
 def normalize_scheduled_at(value: str) -> str:

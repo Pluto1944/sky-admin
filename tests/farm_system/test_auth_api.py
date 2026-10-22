@@ -8,6 +8,7 @@ from api_server.auth import create_token, decode_token
 from api_server.farm_system_auth import create_farm_token, require_farm_account
 from api_server.farm_system_routes import (
     change_password,
+    dashboard,
     login,
     me,
     require_farm_registration_enabled,
@@ -53,6 +54,15 @@ def test_registration_has_a_separate_feature_flag(monkeypatch):
 
     monkeypatch.setenv("FARM_SYSTEM_REGISTRATION_ENABLED", "true")
     require_farm_registration_enabled()
+
+
+def test_dashboard_exposes_registration_capability(db, monkeypatch):
+    account = dict(_create_account(db))
+    monkeypatch.delenv("FARM_SYSTEM_REGISTRATION_ENABLED", raising=False)
+    assert dashboard(account, db)["registration_enabled"] is False
+
+    monkeypatch.setenv("FARM_SYSTEM_REGISTRATION_ENABLED", "true")
+    assert dashboard(account, db)["registration_enabled"] is True
 
 
 def test_login_and_me_use_independent_token(db, monkeypatch):

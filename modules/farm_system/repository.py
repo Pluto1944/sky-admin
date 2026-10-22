@@ -285,6 +285,43 @@ class FarmAccountRepository:
             raise RuntimeError("创建者转移后无法读取账号")
         return old_creator, new_creator
 
+    def initialize_creator(self, account_id: int) -> sqlite3.Row:
+        """Promote one active account when no active creator exists."""
+        target = self.get_by_id(account_id)
+        if target is None:
+            raise LookupError("创建者账号不存在")
+        if target["status"] != "active":
+            raise ValueError("创建者账号必须处于启用状态")
+        current = self.conn.execute(
+            """SELECT id FROM farm_auth_accounts
+               WHERE role='creator' AND status='active' LIMIT 1"""
+        ).fetchone()
+        if current is not None:
+            if int(current["id"]) == int(target["id"]):
+                return target
+            raise ValueError("已经存在有效创建者，请使用创建者转移命令")
+        now = now_iso()
+        next_version = int(target["token_version"]) + 1
+        with self.conn:
+            self.conn.execute(
+                """UPDATE farm_auth_accounts
+                   SET role='creator', token_version=?, updated_at=? WHERE id=?""",
+                (next_version, now, int(target["id"])),
+            )
+            self._audit(
+                actor_account_id=int(target["id"]),
+                action="creator.initialized",
+                entity_type="farm_account",
+                entity_id=str(target["id"]),
+                before={"role": target["role"], "token_version": int(target["token_version"])},
+                after={"role": "creator", "token_version": next_version},
+                created_at=now,
+            )
+        result = self.get_by_id(int(target["id"]))
+        if result is None:  # pragma: no cover
+            raise RuntimeError("创建者初始化后无法读取账号")
+        return result
+
     def _audit(
         self,
         *,

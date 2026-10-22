@@ -391,6 +391,8 @@ POST /api/farm-system/admin/accounts
 PATCH /api/farm-system/admin/accounts/{account_id}
 GET  /api/farm-system/admin/clans
 POST /api/farm-system/admin/clans
+POST /api/farm-system/admin/clan-sync-requests
+GET  /api/farm-system/admin/clan-sync-requests/{clan_tag}
 PATCH /api/farm-system/admin/clans/{clan_tag}
 POST /api/farm-system/admin/clans/{clan_tag}/transfer
 GET  /api/farm-system/dashboard
@@ -399,6 +401,7 @@ PATCH /api/farm-system/admin/rounds/{round_id}
 GET  /api/farm-system/admin/rounds/{round_id}/results
 POST /api/farm-system/rounds/{round_id}/clans/{clan_tag}/register
 POST /api/farm-system/creator/matches/{match_id}/revoke
+POST /api/farm-system/creator/matches/{match_id}/reopen
 POST /api/farm-system/creator/rounds/{round_id}/cancel
 POST /api/farm-system/creator/accounts/{account_id}/reset-password
 ```
@@ -415,11 +418,13 @@ POST /api/farm-system/creator/accounts/{account_id}/reset-password
 `GET /clans` 始终按当前互刷账号 ID 过滤。`/admin/*` 需要 `admin` 或 `creator`；管理员不能
 修改创建者，也不能提升账号角色，创建者可以在 `member / admin` 间调整角色。唯一创建者的初始化、
 停用或转移不在页面 API 中完成。新增部落只接受 `clan_profile_cache` 中已由受控任务同步成功或保留
-为 stale 的官方资料，HTTP 请求路径不会为了添加部落直接调用 COC API。转移部落仅改变当前归属，
-原积分不清零。
+为 stale 的官方资料，HTTP 请求路径不会为了添加部落直接调用 COC API。新增部落前，管理接口先写入
+临时 `farm_clan_request` 同步需求和 `clan_profile` 互动任务，页面轮询任务/缓存状态；Worker 成功写入
+官方资料后才可调用绑定接口。转移部落仅改变当前归属，原积分不清零。
 
-`dashboard` 在无当前场次时返回当前账号已绑定的启用部落；创建场次后只返回当前账号在本轮快照
-中的部落。管理员结果接口返回全联盟快照。创建场次时把带时区的北京时间转换为 UTC，并复制全部
+`dashboard` 同时返回布尔值 `registration_enabled`。无当前场次时返回当前账号已绑定的启用部落；
+创建场次后只返回当前账号在本轮快照中的部落。管理员结果接口返回全联盟快照。创建场次时把带时区
+的北京时间转换为 UTC，并复制全部
 启用参与部落。统一时间固定为“开始搜战时间”，
 `business_time_kind` 只允许 `preparation_start`，登记时与官方 `preparationStartTime` 比较。
 
@@ -432,7 +437,8 @@ POST /api/farm-system/creator/accounts/{account_id}/reset-password
 单个失败不会终止后续部落。后端幂等和权限规则与单个登记完全一致。
 
 `/creator/*` 只接受数据库实时角色为 `creator` 的互刷令牌。撤销匹配和整场取消必须填写原因，
-通过反向积分流水恢复余额，不覆盖或删除原始流水；整场取消在单一事务中完成。密码重置递增
+通过反向积分流水恢复余额，不覆盖或删除原始流水；整场取消在单一事务中完成。撤销后的匹配默认不可
+重新登记，只有创建者调用 `reopen` 后双方才恢复为未登记；旧匹配及正反积分流水继续保留。密码重置递增
 `token_version`，目标账号全部旧令牌立即失效。
 
 灰度期间设置 `FARM_SYSTEM_ALLOWED_ACCOUNT_IDS` 后，登录和每次令牌复核都会检查当前账号 ID；移除账号

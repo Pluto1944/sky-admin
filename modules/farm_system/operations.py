@@ -95,6 +95,93 @@ class FarmCreatorOperations:
                 raise
         return {"round_id": int(round_id), "status": "cancelled", "reused": False}
 
+    def reopen_match(self, actor: dict, match_id: int) -> dict:
+        """Explicitly make both sides of a revoked match registerable again."""
+        _assert_creator(actor)
+        with _SETTLEMENT_LOCK:
+            try:
+                self.conn.execute("BEGIN IMMEDIATE")
+                match = self._match(match_id)
+                if match["status"] != "revoked":
+                    raise ValueError("只有已撤销的匹配可以重新开放")
+                round_row = self.conn.execute(
+                    "SELECT * FROM farm_rounds WHERE id = ?", (int(match["round_id"]),)
+                ).fetchone()
+                if round_row is None:
+                    raise LookupError("互刷场次不存在")
+                if round_row["status"] == "cancelled":
+                    raise ValueError("已撤销整场不能重新开放单个匹配")
+                affected = self.conn.execute(
+                    """SELECT clan_id FROM farm_round_clans
+                       WHERE round_id = ? AND match_id = ?
+                         AND registration_status = 'revoked'
+                       ORDER BY clan_id""",
+                    (int(match["round_id"]), int(match_id)),
+                ).fetchall()
+                if not affected:
+                    reopened = self.conn.execute(
+                        """SELECT 1 FROM farm_audit_logs
+                           WHERE action='match.reopened' AND entity_type='farm_match'
+                             AND entity_id=? LIMIT 1""",
+                        (str(match_id),),
+                    ).fetchone()
+                    if reopened:
+                        self.conn.rollback()
+                        return {
+                            "match_id": int(match_id),
+                            "round_id": int(match["round_id"]),
+                            "status": "reopened",
+                            "round_status": round_row["status"],
+                            "clan_ids": [],
+                            "reused": True,
+                        }
+                    raise ValueError("已撤销匹配没有可重新开放的部落")
+                now = now_iso()
+                clan_ids = [int(row["clan_id"]) for row in affected]
+                self.conn.execute(
+                    """UPDATE farm_round_clans
+                       SET registration_status='not_registered', match_id=NULL,
+                           opponent_tag=NULL, opponent_name=NULL, result=NULL,
+                           score_after=NULL, registered_at=NULL, registered_by=NULL,
+                           last_error='已由创建者重新开放', updated_at=?
+                       WHERE round_id=? AND match_id=?
+                         AND registration_status='revoked'""",
+                    (now, int(match["round_id"]), int(match_id)),
+                )
+                total, settled = self.conn.execute(
+                    """SELECT COUNT(*), SUM(CASE WHEN registration_status IN
+                           ('internal_matched', 'match_failed') THEN 1 ELSE 0 END)
+                       FROM farm_round_clans WHERE round_id=?""",
+                    (int(match["round_id"]),),
+                ).fetchone()
+                next_status = (
+                    "completed" if total and int(settled or 0) == int(total)
+                    else "partially_registered" if int(settled or 0) > 0
+                    else "open"
+                )
+                self.conn.execute(
+                    "UPDATE farm_rounds SET status=?, updated_at=? WHERE id=?",
+                    (next_status, now, int(match["round_id"])),
+                )
+                self._audit(
+                    actor, "match.reopened", "farm_match", str(match_id),
+                    {"status": "revoked"},
+                    {"status": "reopened", "clan_ids": clan_ids,
+                     "round_status": next_status}, now,
+                )
+                self.conn.commit()
+            except Exception:
+                self.conn.rollback()
+                raise
+        return {
+            "match_id": int(match_id),
+            "round_id": int(match["round_id"]),
+            "status": "reopened",
+            "round_status": next_status,
+            "clan_ids": clan_ids,
+            "reused": False,
+        }
+
     def _revoke_match_sql(self, match, actor, reason: str, now: str) -> None:
         base_entries = self.conn.execute(
             """SELECT * FROM farm_score_ledger

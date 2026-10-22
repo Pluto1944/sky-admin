@@ -16,12 +16,19 @@
 
       <view class="form-card">
         <text class="form-title">添加互刷部落</text>
-        <input v-model="newClan.clan_tag" class="input" placeholder="部落标签，例如 #ABC123" maxlength="16" />
+        <input v-model="newClan.clan_tag" class="input" placeholder="部落标签，例如 #ABC123" maxlength="16" @input="onClanTagInput" />
         <picker :range="activeAccountNames" :value="newClanAccountIndex" @change="onNewClanAccount">
           <view class="picker-field">{{ selectedNewClanAccountName || '选择归属账号' }}<text>⌄</text></view>
         </picker>
-        <button class="primary-button" :loading="saving" :disabled="saving" @tap="createClan">添加并验证</button>
-        <text class="form-tip">部落名称来自服务器已同步的官方资料，不接受手工伪造。</text>
+        <button v-if="!clanSync || clanSync.status !== 'ready'" class="primary-button" :loading="syncing" :disabled="saving || syncing" @tap="requestClanSync">{{ clanSync && clanSync.status === 'failed' ? '重新验证' : '验证官方资料' }}</button>
+        <view v-if="clanSync" class="sync-status" :class="clanSync.status">
+          <text class="sync-title">{{ syncStatusTitle }}</text>
+          <text v-if="clanSync.clan_name" class="sync-detail">{{ clanSync.clan_name }} · {{ clanSync.clan_tag }}</text>
+          <text v-else-if="clanSync.error" class="sync-detail">{{ clanSync.error }}</text>
+          <text v-else class="sync-detail">正在通过后台同步任务读取 COC 官方资料</text>
+        </view>
+        <button v-if="clanSync && clanSync.status === 'ready'" class="primary-button" :loading="saving" :disabled="saving" @tap="createClan">确认绑定到{{ clanSync.account_name }}</button>
+        <text class="form-tip">先通过后台任务验证 COC 官方标签和名称，验证成功后才能绑定账号。</text>
       </view>
 
       <view v-if="!clans.length" class="empty-card">暂未添加互刷部落</view>
@@ -50,7 +57,9 @@ import {
   createFarmClan,
   getFarmAdminAccounts,
   getFarmAdminClans,
+  getFarmClanSyncStatus,
   getFarmMe,
+  requestFarmClanSync,
   transferFarmClan,
   updateFarmClan
 } from '@/utils/api.js'
@@ -63,7 +72,10 @@ export default {
       error: '',
       accounts: [],
       clans: [],
-      newClan: { clan_tag: '', account_id: null }
+      newClan: { clan_tag: '', account_id: null },
+      clanSync: null,
+      syncing: false,
+      syncTimer: null
     }
   },
   computed: {
@@ -75,9 +87,14 @@ export default {
     selectedNewClanAccountName() {
       const item = this.activeAccounts[this.newClanAccountIndex]
       return item ? item.display_name : ''
+    },
+    syncStatusTitle() {
+      return ({ syncing: '正在验证官方资料', ready: '官方资料验证成功', failed: '官方资料验证失败' })[(this.clanSync || {}).status] || '等待验证'
     }
   },
   onShow() { this.load() },
+  onHide() { this.stopSyncPolling() },
+  onUnload() { this.stopSyncPolling() },
   methods: {
     accountName(id) {
       const item = this.accounts.find(account => Number(account.id) === Number(id))
@@ -100,27 +117,72 @@ export default {
         this.loading = false
       }
     },
-    async createClan() {
-      if (this.saving) return
+    async requestClanSync() {
+      if (this.saving || this.syncing) return
       const clanTag = this.newClan.clan_tag.trim()
       const account = this.activeAccounts[this.newClanAccountIndex]
       if (!clanTag || !account) {
         uni.showToast({ title: '请填写标签并选择归属账号', icon: 'none' })
         return
       }
+      this.syncing = true
+      try {
+        const result = await requestFarmClanSync({ clan_tag: clanTag, account_id: account.id })
+        this.clanSync = result.sync
+        if (this.clanSync.status === 'syncing') this.scheduleSyncPoll()
+      } catch (e) {
+        this.clanSync = { status: 'failed', error: e.message || '无法建立同步任务' }
+      } finally { this.syncing = false }
+    },
+    async pollClanSync() {
+      if (!this.clanSync || this.clanSync.status !== 'syncing') return
+      const account = this.activeAccounts[this.newClanAccountIndex]
+      if (!account) return
+      try {
+        const result = await getFarmClanSyncStatus(this.newClan.clan_tag.trim(), account.id)
+        this.clanSync = result.sync
+      } catch (e) {
+        this.clanSync = { status: 'failed', error: e.message || '读取同步状态失败' }
+      }
+      if (this.clanSync.status === 'syncing') this.scheduleSyncPoll()
+    },
+    scheduleSyncPoll() {
+      this.stopSyncPolling()
+      this.syncTimer = setTimeout(() => this.pollClanSync(), 2000)
+    },
+    stopSyncPolling() {
+      if (this.syncTimer) clearTimeout(this.syncTimer)
+      this.syncTimer = null
+    },
+    clearSync() {
+      this.stopSyncPolling()
+      this.clanSync = null
+    },
+    onClanTagInput(event) {
+      this.newClan.clan_tag = event.detail.value
+      this.clearSync()
+    },
+    async createClan() {
+      if (this.saving || !this.clanSync || this.clanSync.status !== 'ready') return
+      const account = this.activeAccounts[this.newClanAccountIndex]
+      if (!account) return
       this.saving = true
       try {
-        await createFarmClan({ clan_tag: clanTag, account_id: account.id })
+        await createFarmClan({ clan_tag: this.clanSync.clan_tag, account_id: account.id })
         this.newClan.clan_tag = ''
+        this.clearSync()
         await this.load()
-        uni.showToast({ title: '部落已添加', icon: 'success' })
+        uni.showToast({ title: '部落已绑定', icon: 'success' })
       } catch (e) {
-        uni.showModal({ title: '添加失败', content: e.message, showCancel: false })
+        uni.showModal({ title: '绑定失败', content: e.message, showCancel: false })
       } finally { this.saving = false }
     },
     onNewClanAccount(event) {
       const account = this.activeAccounts[Number(event.detail.value)]
-      if (account) this.newClan.account_id = account.id
+      if (account) {
+        this.newClan.account_id = account.id
+        this.clearSync()
+      }
     },
     async toggleClan(clan) {
       await this.runUpdate(() => updateFarmClan(clan.clan_tag, { status: clan.status === 'active' ? 'disabled' : 'active' }))
@@ -149,6 +211,7 @@ export default {
 .section-head { display: flex; align-items: flex-start; justify-content: space-between; padding: 30rpx 4rpx 18rpx; }.first-head { padding-top: 4rpx; }.section-title, .section-desc { display: block; }.section-title { font-size: 29rpx; font-weight: 650; }.section-desc { margin-top: 7rpx; color: #717c93; font-size: 21rpx; }.section-count { flex-shrink: 0; margin-left: 18rpx; color: #687188; font-size: 22rpx; }
 .form-card, .data-card, .empty-card { margin-bottom: 20rpx; border: 1rpx solid #2a3152; border-radius: 18rpx; background: #191a31; }.form-card { padding: 26rpx; }.form-title { display: block; margin-bottom: 20rpx; font-size: 27rpx; font-weight: 600; }.input, .picker-field { height: 76rpx; margin-bottom: 16rpx; padding: 0 20rpx; border: 1rpx solid #30375b; border-radius: 12rpx; box-sizing: border-box; background: #121326; color: #e9edf6; font-size: 25rpx; }.picker-field { display: flex; align-items: center; justify-content: space-between; color: #aeb7ca; }
 .primary-button { display: flex; height: 78rpx; align-items: center; justify-content: center; border-radius: 12rpx; background: #397fc0; color: #fff; font-size: 26rpx; font-weight: 600; }.primary-button::after { border: 0; }.form-tip { display: block; margin-top: 16rpx; color: #626c84; font-size: 21rpx; line-height: 1.55; }
+.sync-status { margin: 16rpx 0; padding: 18rpx 20rpx; border: 1rpx solid #31405f; border-radius: 12rpx; background: #15182b; }.sync-status.ready { border-color: #345e4b; }.sync-status.failed { border-color: #623d49; }.sync-title, .sync-detail { display: block; }.sync-title { color: #8ebbe5; font-size: 23rpx; font-weight: 600; }.sync-status.ready .sync-title { color: #72c497; }.sync-status.failed .sync-title { color: #cf7e82; }.sync-detail { margin-top: 6rpx; color: #778298; font-size: 21rpx; line-height: 1.5; }
 .empty-card { padding: 70rpx 20rpx; color: #677087; font-size: 25rpx; text-align: center; }.data-card { overflow: hidden; }.card-main { display: flex; align-items: center; justify-content: space-between; padding: 25rpx; }.card-copy { min-width: 0; }.card-title, .card-meta { display: block; }.card-title { overflow: hidden; font-size: 28rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.card-meta { margin-top: 8rpx; color: #747e96; font-size: 21rpx; }.status-badge { flex-shrink: 0; margin-left: 18rpx; padding: 6rpx 14rpx; border-radius: 18rpx; background: rgba(67,170,115,.14); color: #6fc595; font-size: 21rpx; }.status-badge.disabled { background: rgba(193,107,110,.12); color: #be777b; }
 .card-actions { display: flex; min-height: 70rpx; align-items: center; justify-content: space-between; padding: 0 25rpx; border-top: 1rpx solid #282e4d; color: #8190ab; font-size: 23rpx; }.action-field { display: flex; align-items: center; gap: 12rpx; padding: 16rpx 0; }.action-link { padding: 18rpx 0 18rpx 30rpx; color: #77aee3; }.bottom-space { height: 50rpx; }
 </style>

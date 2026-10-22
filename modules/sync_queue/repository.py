@@ -80,6 +80,59 @@ class SyncQueueRepository:
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
 
+    def upsert_interest(
+        self,
+        *,
+        source_type: str,
+        source_key: str,
+        resource_type: str,
+        resource_key: str,
+        priority: str,
+        desired_interval_seconds: int,
+        alliance_id: int | None = None,
+        expires_at: str | None = None,
+        metadata: Mapping[str, object] | None = None,
+        now: datetime | None = None,
+    ) -> dict:
+        """Create or refresh one independently managed synchronization interest."""
+        selected_priority = _validate_priority(str(priority))
+        interval = int(desired_interval_seconds)
+        if interval <= 0:
+            raise ValueError("desired_interval_seconds must be positive")
+        keys = tuple(str(value or "").strip() for value in (
+            source_type, source_key, resource_type, resource_key,
+        ))
+        if any(not value for value in keys):
+            raise ValueError("sync interest keys must not be empty")
+        timestamp = _iso(now)
+        with self.conn:
+            self.conn.execute(
+                """INSERT INTO sync_interests
+                   (source_type, source_key, alliance_id, resource_type, resource_key,
+                    priority, desired_interval_seconds, status, expires_at,
+                    metadata_json, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)
+                   ON CONFLICT(source_type, source_key, resource_type, resource_key)
+                   DO UPDATE SET alliance_id=excluded.alliance_id,
+                       priority=excluded.priority,
+                       desired_interval_seconds=excluded.desired_interval_seconds,
+                       status='active', expires_at=excluded.expires_at,
+                       metadata_json=excluded.metadata_json,
+                       updated_at=excluded.updated_at""",
+                (
+                    keys[0], keys[1], alliance_id, keys[2], keys[3],
+                    selected_priority, interval, expires_at, _json(metadata),
+                    timestamp, timestamp,
+                ),
+            )
+        row = self.conn.execute(
+            """SELECT * FROM sync_interests
+               WHERE source_type=? AND source_key=?
+                 AND resource_type=? AND resource_key=?""",
+            keys,
+        ).fetchone()
+        return dict(row)
+
     def reconcile_interests(
         self,
         interests: Iterable[Mapping[str, object]],

@@ -11,6 +11,7 @@ from modules.farm_system.management import (
     FarmManagementService,
     FarmPermissionError,
 )
+from modules.farm_system.clan_sync import FarmClanSyncService
 from modules.farm_system.operations import (
     CreatorPermissionError,
     FarmCreatorOperations,
@@ -63,10 +64,14 @@ def require_farm_system_enabled() -> None:
 
 
 def require_farm_registration_enabled() -> None:
-    if os.environ.get("FARM_SYSTEM_REGISTRATION_ENABLED", "false").strip().lower() not in {
-        "1", "true", "yes", "on",
-    }:
+    if not _registration_enabled():
         raise HTTPException(status_code=404, detail="互刷登记功能暂未开放")
+
+
+def _registration_enabled() -> bool:
+    return os.environ.get("FARM_SYSTEM_REGISTRATION_ENABLED", "false").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
 
 
 def get_farm_coc_client() -> CocApiClient:
@@ -247,6 +252,42 @@ def admin_create_clan(
     return {"clan": _public_clan(created)}
 
 
+@router.post(
+    "/admin/clan-sync-requests",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_farm_system_enabled)],
+)
+def admin_request_clan_sync(
+    payload: dict,
+    account: dict = Depends(require_farm_manager),
+    db: Database = Depends(get_db),
+):
+    try:
+        result = FarmClanSyncService(db.conn).request(
+            account, payload.get("clan_tag", ""), payload.get("account_id")
+        )
+    except (ValueError, LookupError, FarmPermissionError, sqlite3.IntegrityError) as exc:
+        raise _management_error(exc) from exc
+    return {"sync": result}
+
+
+@router.get(
+    "/admin/clan-sync-requests/{clan_tag}",
+    dependencies=[Depends(require_farm_system_enabled)],
+)
+def admin_clan_sync_status(
+    clan_tag: str,
+    account_id: int,
+    account: dict = Depends(require_farm_manager),
+    db: Database = Depends(get_db),
+):
+    try:
+        result = FarmClanSyncService(db.conn).status(account, clan_tag, account_id)
+    except (ValueError, LookupError, FarmPermissionError) as exc:
+        raise _management_error(exc) from exc
+    return {"sync": result}
+
+
 @router.patch("/admin/clans/{clan_tag}", dependencies=[Depends(require_farm_system_enabled)])
 def admin_update_clan(
     clan_tag: str,
@@ -282,7 +323,9 @@ def dashboard(
     account: dict = Depends(require_farm_account),
     db: Database = Depends(get_db),
 ):
-    return FarmRoundService(db.conn).dashboard(account)
+    result = FarmRoundService(db.conn).dashboard(account)
+    result["registration_enabled"] = _registration_enabled()
+    return result
 
 
 @router.post("/admin/rounds", dependencies=[Depends(require_farm_system_enabled)])
@@ -365,6 +408,22 @@ def creator_revoke_match(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/creator/matches/{match_id}/reopen", dependencies=[Depends(require_farm_system_enabled)])
+def creator_reopen_match(
+    match_id: int,
+    account: dict = Depends(require_farm_creator),
+    db: Database = Depends(get_db),
+):
+    try:
+        return FarmCreatorOperations(db.conn).reopen_match(account, match_id)
+    except CreatorPermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (ValueError, sqlite3.IntegrityError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/creator/rounds/{round_id}/cancel", dependencies=[Depends(require_farm_system_enabled)])

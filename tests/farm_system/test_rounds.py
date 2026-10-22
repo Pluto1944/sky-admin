@@ -153,3 +153,20 @@ def test_locked_round_time_cannot_be_changed(db):
         service.update_round(
             creator, row["id"], {"scheduled_at": "2026-10-12T11:20:00+08:00"}
         )
+
+
+def test_open_round_time_can_be_changed_before_first_final_registration(db):
+    creator = dict(_account(db, "creator.one", "creator"))
+    member = dict(_account(db, "member.one", "member"))
+    _clan(db, creator, member, "#AAA", "一部落")
+    service = FarmRoundService(db.conn)
+    row = service.create_round(creator, {"scheduled_at": "2026-10-12T11:15:00+08:00"})
+    service.update_round(creator, row["id"], {"status": "open"})
+
+    updated = service.update_round(
+        creator, row["id"], {"scheduled_at": "2026-10-12T11:20:00+08:00"}
+    )
+
+    assert updated["status"] == "open"
+    assert updated["scheduled_at"] == "2026-10-12T03:20:00+00:00"
+    assert updated["time_locked_at"] is None
