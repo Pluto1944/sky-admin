@@ -6,15 +6,24 @@
       <text class="retry" @tap="load">点击重试</text>
     </view>
     <view v-else>
-      <view class="account-card">
-        <view>
-          <text class="account-name">{{ me.display_name }}</text>
-          <text class="account-meta">{{ roleLabel(me.role) }} · {{ me.username }}</text>
+      <view v-if="isManager" class="admin-entry" @tap="openAdmin">
+        <view class="admin-entry-copy">
+          <text class="admin-entry-title">互刷联盟管理</text>
+          <text class="admin-entry-desc">账号、部落与场次设置</text>
         </view>
-        <view class="account-actions">
-          <text v-if="isManager" @tap="openAdmin">管理</text>
-          <text class="logout" @tap="logout">退出</text>
+        <view class="admin-entry-action">
+          <text>进入管理</text>
+          <text class="admin-entry-arrow">›</text>
         </view>
+      </view>
+
+      <view class="account-strip">
+        <view class="account-copy">
+          <text class="account-label">当前登录账号</text>
+          <text class="account-name">{{ me.display_name }} · {{ roleLabel(me.role) }}</text>
+          <text class="account-meta">{{ me.username }}</text>
+        </view>
+        <text class="logout" @tap="logout">退出登录</text>
       </view>
 
       <view v-if="dashboard.round" class="round-card">
@@ -234,7 +243,8 @@ export default {
 <style>
 .farm-home { min-height: 100vh; padding: 26rpx; box-sizing: border-box; background: #0f0f23; color: #eef2fa; }
 .state { display: flex; min-height: 70vh; flex-direction: column; align-items: center; justify-content: center; gap: 22rpx; color: #778198; font-size: 26rpx; }.error { color: #d47d80; }.retry { color: #70a9e0; }
-.account-card { display: flex; align-items: center; justify-content: space-between; padding: 26rpx; border: 1rpx solid #2b3153; border-radius: 18rpx; background: #191a31; }.account-name, .account-meta { display: block; }.account-name { font-size: 31rpx; font-weight: 700; }.account-meta { margin-top: 7rpx; color: #7a849b; font-size: 22rpx; }.account-actions { display: flex; gap: 26rpx; color: #72abe2; font-size: 24rpx; }.account-actions .logout { color: #c87a7e; }
+.admin-entry { display: flex; align-items: center; justify-content: space-between; padding: 26rpx; border: 1rpx solid #31527b; border-radius: 18rpx; background: linear-gradient(145deg, #19243d, #171a32); }.admin-entry-copy, .admin-entry-title, .admin-entry-desc { display: block; }.admin-entry-title { font-size: 30rpx; font-weight: 700; }.admin-entry-desc { margin-top: 8rpx; color: #8391aa; font-size: 22rpx; }.admin-entry-action { display: flex; flex-shrink: 0; align-items: center; margin-left: 24rpx; color: #7cb6eb; font-size: 23rpx; }.admin-entry-arrow { margin-left: 8rpx; font-size: 34rpx; line-height: 1; }
+.account-strip { display: flex; align-items: center; justify-content: space-between; padding: 24rpx 4rpx 4rpx; }.account-copy, .account-label, .account-name, .account-meta { display: block; }.account-label { color: #69748b; font-size: 20rpx; }.account-name { margin-top: 6rpx; font-size: 25rpx; font-weight: 600; }.account-meta { margin-top: 5rpx; color: #69748b; font-size: 20rpx; }.logout { flex-shrink: 0; margin-left: 24rpx; color: #b87478; font-size: 22rpx; }
 .round-card { margin-top: 24rpx; padding: 28rpx; border: 1rpx solid #31527b; border-radius: 20rpx; background: linear-gradient(145deg, #19243d, #171a32); }.round-top { display: flex; justify-content: space-between; }.eyebrow { display: block; color: #7988a5; font-size: 21rpx; }.round-time { display: block; margin-top: 8rpx; font-size: 37rpx; font-weight: 700; }.time-kind { display: block; margin-top: 7rpx; color: #6f819e; font-size: 20rpx; }.round-status { height: 40rpx; padding: 0 14rpx; border-radius: 20rpx; background: rgba(68,137,204,.16); color: #7cb6eb; font-size: 21rpx; line-height: 40rpx; }.countdown { margin: 22rpx 0 26rpx; color: #93bfe9; font-size: 25rpx; }.progress-row { display: flex; justify-content: space-between; color: #7d879d; font-size: 22rpx; }.progress-track { height: 10rpx; margin-top: 12rpx; overflow: hidden; border-radius: 8rpx; background: #292e49; }.progress-fill { height: 100%; border-radius: 8rpx; background: #3f87c8; }.register-all, .register-one { display: flex; align-items: center; justify-content: center; border: 0; color: #768197 !important; }.register-all { height: 76rpx; margin-top: 26rpx; border-radius: 12rpx; background: #242941 !important; font-size: 25rpx; }.register-all.active { background: #397fc0 !important; color: #fff !important; }.register-all::after, .register-one::after { border: 0; }
 .empty-round, .empty-clans { margin-top: 24rpx; padding: 58rpx 24rpx; border: 1rpx dashed #2c3354; border-radius: 18rpx; text-align: center; }.empty-title, .empty-desc { display: block; }.empty-title { font-size: 28rpx; }.empty-desc { margin-top: 10rpx; color: #687289; font-size: 22rpx; }.section-head { display: flex; justify-content: space-between; padding: 34rpx 4rpx 18rpx; color: #dbe0ec; font-size: 27rpx; font-weight: 600; }.section-head text:last-child { color: #687289; font-size: 22rpx; font-weight: 400; }.empty-clans { margin-top: 0; color: #6c758c; font-size: 24rpx; }
 .clan-card { margin-bottom: 20rpx; overflow: hidden; border: 1rpx solid #2a3151; border-radius: 18rpx; background: #191a31; }.clan-row { display: flex; align-items: center; justify-content: space-between; padding: 26rpx; }.clan-copy { min-width: 0; }.clan-name, .clan-tag, .score-label, .score-value { display: block; }.clan-name { overflow: hidden; font-size: 29rpx; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }.clan-tag { margin-top: 7rpx; color: #707b93; font-size: 21rpx; }.score-copy { flex-shrink: 0; margin-left: 20rpx; text-align: right; }.score-label { color: #707b93; font-size: 20rpx; }.score-value { margin-top: 2rpx; color: #8cbbea; font-size: 32rpx; font-weight: 700; }.clan-status { padding: 18rpx 26rpx; border-top: 1rpx solid #282e4c; color: #8893aa; font-size: 22rpx; }.register-one { height: 68rpx; border-radius: 0; background: #20243b !important; font-size: 23rpx; }.register-one.active { background: #397fc0 !important; color: #fff !important; }.bottom-space { height: 40rpx; }

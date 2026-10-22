@@ -193,7 +193,34 @@
     {
       "path": "pages/farm/admin",
       "style": {
-        "navigationBarTitleText": "互刷联盟系统",
+        "navigationBarTitleText": "互刷联盟管理",
+        "navigationBarBackgroundColor": "#1a1a2e",
+        "navigationBarTextStyle": "white",
+        "backgroundColor": "#0f0f23"
+      }
+    },
+    {
+      "path": "pages/farm/admin-rounds",
+      "style": {
+        "navigationBarTitleText": "场次管理",
+        "navigationBarBackgroundColor": "#1a1a2e",
+        "navigationBarTextStyle": "white",
+        "backgroundColor": "#0f0f23"
+      }
+    },
+    {
+      "path": "pages/farm/admin-clans",
+      "style": {
+        "navigationBarTitleText": "部落管理",
+        "navigationBarBackgroundColor": "#1a1a2e",
+        "navigationBarTextStyle": "white",
+        "backgroundColor": "#0f0f23"
+      }
+    },
+    {
+      "path": "pages/farm/admin-accounts",
+      "style": {
+        "navigationBarTitleText": "账号管理",
         "navigationBarBackgroundColor": "#1a1a2e",
         "navigationBarTextStyle": "white",
         "backgroundColor": "#0f0f23"
