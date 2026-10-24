@@ -41,20 +41,26 @@ import { getFarmMe } from '@/utils/api.js'
 
 export default {
   data() {
-    return { loading: true, error: '' }
+    return { loading: true, hasLoaded: false, error: '' }
   },
   onShow() { this.load() },
   methods: {
     async load() {
-      this.loading = true
-      this.error = ''
+      const initialLoad = !this.hasLoaded
+      if (initialLoad) {
+        this.loading = true
+        this.error = ''
+      }
       try {
         const me = await getFarmMe()
         if (!['creator', 'admin'].includes(me.role)) throw new Error('当前账号没有互刷联盟管理权限')
+        this.error = ''
+        this.hasLoaded = true
       } catch (e) {
-        this.error = e.message || '加载失败'
+        if (initialLoad) this.error = e.message || '加载失败'
+        else uni.showToast({ title: e.message || '刷新失败', icon: 'none' })
       } finally {
-        this.loading = false
+        if (initialLoad) this.loading = false
       }
     },
     openSection(url) { uni.navigateTo({ url }) }

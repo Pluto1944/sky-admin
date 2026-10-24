@@ -34,15 +34,17 @@
 
       <view v-if="!filteredAccounts.length" class="empty-card">{{ searchQuery ? '没有匹配的账号' : '暂未创建独立账号' }}</view>
       <view v-for="account in filteredAccounts" :key="account.id" class="data-card">
-        <view class="card-main">
+        <view class="card-main" @tap="openAccountClans(account)">
           <view class="card-copy">
             <text class="card-title">{{ account.display_name }}</text>
             <text class="card-meta">{{ account.username }} · {{ roleLabel(account.role) }}</text>
           </view>
-          <text class="status-badge" :class="{ disabled: account.status !== 'active' }">{{ account.status === 'active' ? '启用' : '停用' }}</text>
+          <view class="card-side">
+            <text class="status-badge" :class="{ disabled: account.status !== 'active' }">{{ account.status === 'active' ? '启用' : '停用' }}</text>
+            <text class="detail-arrow">›</text>
+          </view>
         </view>
-        <view class="card-actions">
-          <text class="action-link edit-link" @tap="openAccountClans(account)">编辑</text>
+        <view v-if="canEditAccount(account)" class="card-actions">
           <picker v-if="canEditAccount(account) && isCreator" :range="roleNames" :value="roleIndex(account.role)" @change="changeRole(account, $event)">
             <view class="action-field">调整角色<text>⌄</text></view>
           </picker>
@@ -70,6 +72,7 @@ export default {
   data() {
     return {
       loading: true,
+      hasLoaded: false,
       saving: false,
       error: '',
       me: {},
@@ -103,17 +106,23 @@ export default {
       return account.role !== 'creator'
     },
     async load() {
-      this.loading = true
-      this.error = ''
+      const initialLoad = !this.hasLoaded
+      if (initialLoad) {
+        this.loading = true
+        this.error = ''
+      }
       try {
         this.me = await getFarmMe()
         if (!['creator', 'admin'].includes(this.me.role)) throw new Error('当前账号没有账号管理权限')
         const result = await getFarmAdminAccounts()
         this.accounts = result.accounts || []
+        this.error = ''
+        this.hasLoaded = true
       } catch (e) {
-        this.error = e.message || '加载失败'
+        if (initialLoad) this.error = e.message || '加载失败'
+        else uni.showToast({ title: e.message || '刷新失败', icon: 'none' })
       } finally {
-        this.loading = false
+        if (initialLoad) this.loading = false
       }
     },
     async createAccount() {
@@ -179,6 +188,6 @@ export default {
 .section-head { display: flex; align-items: flex-start; justify-content: space-between; padding: 30rpx 4rpx 18rpx; }.first-head { padding-top: 4rpx; }.section-title, .section-desc { display: block; }.section-title { font-size: 29rpx; font-weight: 650; }.section-desc { margin-top: 7rpx; color: #717c93; font-size: 21rpx; }.section-count { flex-shrink: 0; margin-left: 18rpx; color: #687188; font-size: 22rpx; }
 .form-card, .data-card, .empty-card { margin-bottom: 20rpx; border: 1rpx solid #2a3152; border-radius: 18rpx; background: #191a31; }.form-card { padding: 26rpx; }.form-title { display: block; margin-bottom: 20rpx; font-size: 27rpx; font-weight: 600; }.input, .picker-field { height: 76rpx; margin-bottom: 16rpx; padding: 0 20rpx; border: 1rpx solid #30375b; border-radius: 12rpx; box-sizing: border-box; background: #121326; color: #e9edf6; font-size: 25rpx; }.picker-field { display: flex; align-items: center; justify-content: space-between; color: #aeb7ca; }
 .search-box { display: flex; height: 82rpx; align-items: center; margin-bottom: 20rpx; padding: 0 18rpx; border: 1rpx solid #2a3152; border-radius: 14rpx; box-sizing: border-box; background: #15162b; }.search-icon { flex-shrink: 0; margin-right: 12rpx; color: #71809a; font-size: 30rpx; }.search-input { flex: 1; min-width: 0; color: #e6eaf3; font-size: 23rpx; }.search-clear { flex-shrink: 0; margin-left: 14rpx; color: #74a9df; font-size: 21rpx; }.result-count { display: block; margin: -8rpx 8rpx 18rpx; color: #657087; font-size: 20rpx; }.empty-card { padding: 60rpx 20rpx; color: #677087; font-size: 24rpx; text-align: center; }
-.primary-button { display: flex; height: 78rpx; align-items: center; justify-content: center; border-radius: 12rpx; background: #397fc0; color: #fff; font-size: 26rpx; font-weight: 600; }.primary-button::after { border: 0; }.data-card { overflow: hidden; }.card-main { display: flex; align-items: center; justify-content: space-between; padding: 25rpx; }.card-copy { min-width: 0; }.card-title, .card-meta { display: block; }.card-title { overflow: hidden; font-size: 28rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.card-meta { margin-top: 8rpx; color: #747e96; font-size: 21rpx; }.status-badge { flex-shrink: 0; margin-left: 18rpx; padding: 6rpx 14rpx; border-radius: 18rpx; background: rgba(67,170,115,.14); color: #6fc595; font-size: 21rpx; }.status-badge.disabled { background: rgba(193,107,110,.12); color: #be777b; }
-.card-actions { display: flex; min-height: 70rpx; align-items: center; justify-content: flex-end; gap: 24rpx; padding: 0 25rpx; border-top: 1rpx solid #282e4d; color: #8190ab; font-size: 23rpx; }.action-field { display: flex; align-items: center; gap: 12rpx; padding: 16rpx 0; }.action-link { padding: 18rpx 0; color: #77aee3; }.edit-link { margin-right: auto; }.bottom-space { height: 50rpx; }
+.primary-button { display: flex; height: 78rpx; align-items: center; justify-content: center; border-radius: 12rpx; background: #397fc0; color: #fff; font-size: 26rpx; font-weight: 600; }.primary-button::after { border: 0; }.data-card { overflow: hidden; }.card-main { display: flex; align-items: center; justify-content: space-between; padding: 25rpx; }.card-copy { min-width: 0; }.card-title, .card-meta { display: block; }.card-title { overflow: hidden; font-size: 28rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.card-meta { margin-top: 8rpx; color: #747e96; font-size: 21rpx; }.card-side { display: flex; flex-shrink: 0; align-items: center; margin-left: 18rpx; }.status-badge { flex-shrink: 0; padding: 6rpx 14rpx; border-radius: 18rpx; background: rgba(67,170,115,.14); color: #6fc595; font-size: 21rpx; }.status-badge.disabled { background: rgba(193,107,110,.12); color: #be777b; }.detail-arrow { margin-left: 14rpx; color: #606b83; font-size: 34rpx; line-height: 1; }
+.card-actions { display: flex; min-height: 70rpx; align-items: center; justify-content: flex-end; gap: 24rpx; padding: 0 25rpx; border-top: 1rpx solid #282e4d; color: #8190ab; font-size: 23rpx; }.action-field { display: flex; align-items: center; gap: 12rpx; padding: 16rpx 0; }.action-link { padding: 18rpx 0; color: #77aee3; }.bottom-space { height: 50rpx; }
 </style>

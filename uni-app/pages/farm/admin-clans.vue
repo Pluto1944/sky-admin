@@ -107,6 +107,7 @@ export default {
   data() {
     return {
       loading: true,
+      hasLoaded: false,
       saving: false,
       error: '',
       accounts: [],
@@ -211,8 +212,11 @@ export default {
       await this.runUpdate(() => transferFarmClan(clan.clan_tag, account.id))
     },
     async load() {
-      this.loading = true
-      this.error = ''
+      const initialLoad = !this.hasLoaded
+      if (initialLoad) {
+        this.loading = true
+        this.error = ''
+      }
       try {
         const me = await getFarmMe()
         if (!['creator', 'admin'].includes(me.role)) throw new Error('当前账号没有部落管理权限')
@@ -220,10 +224,13 @@ export default {
         this.accounts = result[0].accounts || []
         this.clans = result[1].clans || []
         if (!this.newClan.account_id && this.activeAccounts.length) this.newClan.account_id = this.activeAccounts[0].id
+        this.error = ''
+        this.hasLoaded = true
       } catch (e) {
-        this.error = e.message || '加载失败'
+        if (initialLoad) this.error = e.message || '加载失败'
+        else uni.showToast({ title: e.message || '刷新失败', icon: 'none' })
       } finally {
-        this.loading = false
+        if (initialLoad) this.loading = false
       }
     },
     async requestClanSync() {

@@ -163,6 +163,16 @@ def test_account_reads_cached_clan_detail_without_live_api(db):
         official_member_count=47,
         clan_level=20,
     )
+    _cache_profile(
+        db,
+        tag="#2QQ",
+        official_tag="#2QQ",
+        name="互刷对手",
+        description="对手部落公告",
+        location={"id": 32000006, "name": "China", "country_code": "CN"},
+        official_member_count=45,
+        clan_level=18,
+    )
     service = FarmManagementService(db.conn)
     clan = service.create_clan(
         creator, {"clan_tag": "#YCOC", "account_id": member["id"]}
@@ -205,10 +215,14 @@ def test_account_reads_cached_clan_detail_without_live_api(db):
     assert result["farm_round"]["id"] == round_row["id"]
     assert result["farm_registration"]["opponent_name"] == "互刷对手"
     assert result["farm_registration"]["result"] == "win"
+    assert result["opponent"]["source"] == "farm_registration"
+    assert result["opponent"]["clan_tag"] == "#2QQ"
+    assert result["opponent"]["profile"]["description"] == "对手部落公告"
     payload = clan_detail("#YC0C", member, db)
     assert payload["clan"]["enabled_at"]
     assert payload["profile"]["clan_level"] == 20
     assert payload["current_war_source"] == "current_war_cache"
+    assert payload["opponent"]["profile"]["official_member_count"] == 45
     with pytest.raises(FarmPermissionError):
         service.get_clan_detail(outsider, "#YC0C")
 
@@ -245,3 +259,6 @@ def test_clan_detail_falls_back_to_current_round_registration_summary(db):
     assert result["current_war_source"] == "registration_attempt"
     assert result["current_war"]["opponent"]["name"] == "登记战争对手"
     assert result["current_war_updated_at"] == "2026-10-24T12:10:00+00:00"
+    assert result["opponent"]["source"] == "current_war"
+    assert result["opponent"]["clan_tag"] == "#WAR"
+    assert result["opponent"]["profile"] is None

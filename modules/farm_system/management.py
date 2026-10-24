@@ -154,6 +154,45 @@ class FarmManagementService:
                 current_war_updated_at = attempt["created_at"]
                 current_war_error = attempt["error_message"]
 
+        farm_registration = public_round_clan(round_clan) if round_clan else None
+        opponent_tag = None
+        opponent_name = None
+        opponent_source = None
+        if farm_registration and farm_registration.get("opponent_tag"):
+            opponent_tag = farm_registration["opponent_tag"]
+            opponent_name = farm_registration.get("opponent_name")
+            opponent_source = "farm_registration"
+        elif current_war and isinstance(current_war.get("opponent"), dict):
+            opponent_tag = current_war["opponent"].get("tag")
+            opponent_name = current_war["opponent"].get("name")
+            opponent_source = "current_war"
+
+        opponent = None
+        if opponent_tag:
+            opponent_key = coc_tag_key(opponent_tag)
+            opponent_profile_row = next(
+                (row for row in rows if coc_tag_key(row["clan_tag"]) == opponent_key),
+                None,
+            )
+            opponent_profile = self._json_object(
+                opponent_profile_row["data_json"] if opponent_profile_row else None
+            )
+            opponent = {
+                "clan_tag": opponent_tag,
+                "clan_name": opponent_name,
+                "source": opponent_source,
+                "profile": opponent_profile,
+                "profile_status": (
+                    opponent_profile_row["status"] if opponent_profile_row else "pending"
+                ),
+                "profile_error": (
+                    opponent_profile_row["error"] if opponent_profile_row else None
+                ),
+                "profile_updated_at": (
+                    opponent_profile_row["updated_at"] if opponent_profile_row else None
+                ),
+            }
+
         return {
             "clan": clan,
             "profile": profile,
@@ -166,7 +205,8 @@ class FarmManagementService:
             "current_war_updated_at": current_war_updated_at,
             "current_war_error": current_war_error,
             "farm_round": public_round(round_row),
-            "farm_registration": public_round_clan(round_clan) if round_clan else None,
+            "farm_registration": farm_registration,
+            "opponent": opponent,
         }
 
     @staticmethod

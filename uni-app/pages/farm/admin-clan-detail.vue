@@ -70,6 +70,37 @@
         <text v-if="farmRegistration && farmRegistration.last_error" class="farm-error">{{ farmRegistration.last_error }}</text>
       </view>
 
+      <view class="section-heading opponent-heading">
+        <text class="section-index opponent">03</text>
+        <view><text class="section-name">对手部落</text><text class="section-desc">当前互刷对手的官方基本资料</text></view>
+      </view>
+
+      <view v-if="!opponent" class="empty-card">
+        <text class="empty-title">尚未确定对手部落</text>
+        <text class="empty-desc">完成本轮登记后会显示对手公告和基本信息</text>
+      </view>
+      <block v-else>
+        <view class="opponent-profile-card">
+          <view class="opponent-profile-head">
+            <view class="opponent-profile-copy">
+              <text class="opponent-profile-name">{{ opponentName }}</text>
+              <text class="opponent-profile-tag">{{ opponentTag }}</text>
+            </view>
+            <text class="opponent-source">{{ opponentSourceLabel }}</text>
+          </view>
+          <view class="opponent-announcement">
+            <text class="card-title">部落公告</text>
+            <text class="description">{{ opponentAnnouncement }}</text>
+          </view>
+          <view v-if="hasOpponentProfile" class="opponent-metrics">
+            <view><text class="opponent-metric-value">{{ opponentMemberCount }}</text><text class="opponent-metric-label">成员人数</text></view>
+            <view><text class="opponent-metric-value">{{ opponentProfile.clan_level || '-' }}</text><text class="opponent-metric-label">部落等级</text></view>
+            <view><text class="opponent-metric-value compact">{{ opponentLocation }}</text><text class="opponent-metric-label">位置</text></view>
+          </view>
+          <text class="cache-time">对手资料更新：{{ formatTime(opponent.profile_updated_at) }}</text>
+        </view>
+      </block>
+
       <view class="cache-note">
         <text>基本资料来源：COC 官方缓存</text>
         <text>更新时间：{{ formatTime(profileUpdatedAt) }}</text>
@@ -95,6 +126,7 @@ export default {
       currentWarUpdatedAt: '',
       farmRound: null,
       farmRegistration: null,
+      opponent: null,
       loading: true,
       error: ''
     }
@@ -144,6 +176,22 @@ export default {
     farmResultLabel() {
       if (!this.farmRegistration) return '-'
       return ({ win: '胜', loss: '负', match_failed: '匹配失败' })[this.farmRegistration.result] || '待定'
+    },
+    opponentProfile() { return (this.opponent && this.opponent.profile) || {} },
+    hasOpponentProfile() { return Boolean(Object.keys(this.opponentProfile).length) },
+    opponentName() { return this.opponentProfile.name || (this.opponent && this.opponent.clan_name) || '未知名称' },
+    opponentTag() { return this.opponentProfile.clan_tag || this.opponentProfile.tag || (this.opponent && this.opponent.clan_tag) || '标签未知' },
+    opponentAnnouncement() {
+      if (this.hasOpponentProfile) return this.opponentProfile.description || '该部落暂未设置公告'
+      return '暂未同步到该对手部落的官方公告'
+    },
+    opponentMemberCount() {
+      const value = Number(this.opponentProfile.official_member_count)
+      return Number.isFinite(value) ? `${value}/50` : '-'
+    },
+    opponentLocation() { return this.namedValue(this.opponentProfile.location) },
+    opponentSourceLabel() {
+      return this.opponent && this.opponent.source === 'farm_registration' ? '互刷对手' : '当前战争对手'
     }
   },
   onLoad(options) {
@@ -175,6 +223,7 @@ export default {
         this.currentWarUpdatedAt = result.current_war_updated_at || ''
         this.farmRound = result.farm_round || null
         this.farmRegistration = result.farm_registration || null
+        this.opponent = result.opponent || null
       } catch (e) {
         this.error = e.message || '加载部落详情失败'
       } finally {
@@ -188,10 +237,11 @@ export default {
 <style>
 .detail-page { min-height: 100vh; padding: 28rpx 26rpx; box-sizing: border-box; background: #0f0f23; color: #eef1f8; }.page-state { display: flex; min-height: 70vh; flex-direction: column; align-items: center; justify-content: center; gap: 24rpx; color: #7f899f; font-size: 26rpx; }.state-error, .empty-error, .farm-error { color: #cf7e82; }.small-button { padding: 0 32rpx; border: 1rpx solid #31537d; border-radius: 12rpx; background: transparent; color: #76aee6; font-size: 24rpx; }
 .hero-card { display: flex; align-items: center; justify-content: space-between; padding: 28rpx; border: 1rpx solid #2a3152; border-radius: 18rpx; background: linear-gradient(135deg, #1d203b, #17182e); }.hero-copy { min-width: 0; }.clan-name, .clan-tag { display: block; }.clan-name { overflow: hidden; font-size: 34rpx; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }.clan-tag { margin-top: 8rpx; color: #78849d; font-size: 22rpx; }.status-badge { flex-shrink: 0; margin-left: 20rpx; padding: 7rpx 15rpx; border-radius: 18rpx; background: rgba(67,170,115,.14); color: #6fc595; font-size: 21rpx; }.status-badge.disabled { background: rgba(193,107,110,.12); color: #be777b; }
-.section-heading { display: flex; align-items: center; margin: 34rpx 4rpx 18rpx; }.section-index { display: flex; width: 58rpx; height: 58rpx; align-items: center; justify-content: center; margin-right: 16rpx; border-radius: 16rpx; background: #203c5d; color: #83b9ea; font-size: 20rpx; font-weight: 700; }.section-index.farm { background: #3a2f55; color: #b7a2e8; }.section-name, .section-desc { display: block; }.section-name { font-size: 28rpx; font-weight: 650; }.section-desc { margin-top: 4rpx; color: #68748b; font-size: 19rpx; }
+.section-heading { display: flex; align-items: center; margin: 34rpx 4rpx 18rpx; }.section-index { display: flex; width: 58rpx; height: 58rpx; align-items: center; justify-content: center; margin-right: 16rpx; border-radius: 16rpx; background: #203c5d; color: #83b9ea; font-size: 20rpx; font-weight: 700; }.section-index.farm { background: #3a2f55; color: #b7a2e8; }.section-index.opponent { background: #4a3927; color: #dbb47c; }.section-name, .section-desc { display: block; }.section-name { font-size: 28rpx; font-weight: 650; }.section-desc { margin-top: 4rpx; color: #68748b; font-size: 19rpx; }
 .section-card, .empty-card, .metric-grid, .score-card { margin-bottom: 18rpx; border: 1rpx solid #2a3152; border-radius: 18rpx; background: #191a31; }.section-card { padding: 26rpx; }.card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18rpx; }.card-title { display: block; font-size: 26rpx; font-weight: 650; }.announcement-card .card-title { margin-bottom: 16rpx; }.description { display: block; color: #b4bdce; font-size: 23rpx; line-height: 1.7; white-space: pre-wrap; }
 .metric-grid { display: flex; flex-wrap: wrap; overflow: hidden; }.metric-item { width: 50%; padding: 24rpx 12rpx; border-bottom: 1rpx solid #282e4d; box-sizing: border-box; text-align: center; }.metric-item:nth-child(odd) { border-right: 1rpx solid #282e4d; }.metric-item:nth-last-child(-n+2) { border-bottom: 0; }.metric-value, .metric-label { display: block; }.metric-value { overflow: hidden; color: #e7ebf4; font-size: 29rpx; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }.metric-value.small { padding: 4rpx 12rpx 0; font-size: 23rpx; }.metric-label { margin-top: 7rpx; color: #707b93; font-size: 19rpx; }
 .subtle-badge { padding: 6rpx 13rpx; border-radius: 16rpx; background: #202944; color: #7faedd; font-size: 19rpx; }.opponent-block { display: flex; align-items: center; justify-content: space-between; padding: 20rpx; border-radius: 14rpx; background: #14162a; }.opponent-label, .opponent-name, .opponent-tag, .war-size, .war-result { display: block; }.opponent-label { color: #647089; font-size: 19rpx; }.opponent-name { margin-top: 8rpx; font-size: 27rpx; font-weight: 600; }.opponent-tag { margin-top: 5rpx; color: #747f97; font-size: 21rpx; }.war-side { flex-shrink: 0; margin-left: 20rpx; text-align: right; }.war-size { color: #8490a6; font-size: 20rpx; }.war-result { margin-top: 7rpx; color: #83b9ea; font-size: 22rpx; }.empty-line { padding: 24rpx 12rpx; border-radius: 14rpx; background: #14162a; color: #737e95; font-size: 22rpx; text-align: center; }.cache-time { display: block; margin-top: 14rpx; color: #59647a; font-size: 18rpx; }
 .farm-heading { margin-top: 38rpx; }.score-card { display: flex; align-items: center; justify-content: space-between; padding: 26rpx; background: linear-gradient(135deg, #1e2542, #201b39); }.score-label, .score-value, .score-meta text { display: block; }.score-label { color: #8b96ab; font-size: 20rpx; }.score-value { margin-top: 4rpx; color: #8fc3f0; font-size: 44rpx; font-weight: 750; }.score-meta { color: #707b93; font-size: 19rpx; line-height: 1.8; text-align: right; }.farm-status { background: #2b2541; color: #b5a2e3; }.info-row { display: flex; min-height: 70rpx; align-items: center; justify-content: space-between; border-bottom: 1rpx solid #282e4d; }.info-row:last-of-type { border-bottom: 0; }.info-label { flex-shrink: 0; color: #748098; font-size: 22rpx; }.info-value { min-width: 0; margin-left: 24rpx; color: #dce1ec; font-size: 23rpx; text-align: right; }.info-value.muted { color: #6c778e; }.right-copy { min-width: 0; margin-left: 24rpx; text-align: right; }.right-copy .info-value { display: block; margin-left: 0; }.info-subvalue { display: block; margin-top: 5rpx; color: #727d95; font-size: 20rpx; }.result-value { color: #77839a; font-size: 25rpx; font-weight: 650; }.result-value.win { color: #70c395; }.result-value.loss { color: #cf7e82; }.result-value.match_failed { color: #c3a270; }.farm-error { display: block; margin-top: 18rpx; padding: 16rpx; border-radius: 10rpx; background: rgba(193,107,110,.08); font-size: 20rpx; line-height: 1.5; }
+.opponent-heading { margin-top: 38rpx; }.opponent-profile-card { margin-bottom: 18rpx; overflow: hidden; border: 1rpx solid #3b3442; border-radius: 18rpx; background: #191a31; }.opponent-profile-head { display: flex; align-items: center; justify-content: space-between; padding: 26rpx; background: linear-gradient(135deg, #242037, #211c2b); }.opponent-profile-copy { min-width: 0; }.opponent-profile-name, .opponent-profile-tag { display: block; }.opponent-profile-name { overflow: hidden; font-size: 29rpx; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }.opponent-profile-tag { margin-top: 7rpx; color: #82778e; font-size: 21rpx; }.opponent-source { flex-shrink: 0; margin-left: 20rpx; padding: 6rpx 13rpx; border-radius: 16rpx; background: rgba(197,150,92,.12); color: #d0a66f; font-size: 19rpx; }.opponent-announcement { padding: 24rpx 26rpx; border-top: 1rpx solid #302b40; }.opponent-announcement .card-title { margin-bottom: 15rpx; }.opponent-metrics { display: flex; border-top: 1rpx solid #302b40; }.opponent-metrics > view { flex: 1; min-width: 0; padding: 20rpx 8rpx; text-align: center; }.opponent-metrics > view + view { border-left: 1rpx solid #302b40; }.opponent-metric-value, .opponent-metric-label { display: block; }.opponent-metric-value { overflow: hidden; font-size: 25rpx; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }.opponent-metric-value.compact { padding-top: 3rpx; font-size: 21rpx; }.opponent-metric-label { margin-top: 6rpx; color: #736c82; font-size: 18rpx; }.opponent-profile-card .cache-time { padding: 0 26rpx 20rpx; }
 .empty-card { padding: 56rpx 24rpx; text-align: center; }.empty-title, .empty-desc, .empty-error { display: block; }.empty-title { font-size: 27rpx; }.empty-desc, .empty-error { margin-top: 10rpx; font-size: 21rpx; line-height: 1.5; }.empty-desc { color: #707b93; }.cache-note { display: flex; justify-content: space-between; padding: 6rpx 6rpx 20rpx; color: #5f6980; font-size: 18rpx; }.bottom-space { height: 40rpx; }
 </style>

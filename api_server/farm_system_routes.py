@@ -266,6 +266,7 @@ def clan_detail(
         "current_war_error": result["current_war_error"],
         "farm_round": result["farm_round"],
         "farm_registration": result["farm_registration"],
+        "opponent": result["opponent"],
     }
 
 

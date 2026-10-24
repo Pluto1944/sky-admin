@@ -60,6 +60,7 @@ export default {
       account: {},
       clans: [],
       loading: true,
+      hasLoaded: false,
       error: '',
       savingClanId: null
     }
@@ -72,8 +73,11 @@ export default {
     },
     roleLabel(role) { return ({ creator: '创建者', admin: '管理员', member: '成员' })[role] || '成员' },
     async load() {
-      this.loading = true
-      this.error = ''
+      const initialLoad = !this.hasLoaded
+      if (initialLoad) {
+        this.loading = true
+        this.error = ''
+      }
       try {
         if (!this.accountId) throw new Error('账号参数无效')
         const result = await Promise.all([getFarmMe(), getFarmAdminAccounts(), getFarmAdminClans()])
@@ -83,10 +87,13 @@ export default {
         if (!account) throw new Error('互刷账号不存在')
         this.account = account
         this.clans = (result[2].clans || []).filter(item => Number(item.account_id) === this.accountId)
+        this.error = ''
+        this.hasLoaded = true
       } catch (e) {
-        this.error = e.message || '加载失败'
+        if (initialLoad) this.error = e.message || '加载失败'
+        else uni.showToast({ title: e.message || '刷新失败', icon: 'none' })
       } finally {
-        this.loading = false
+        if (initialLoad) this.loading = false
       }
     },
     confirmToggleClan(clan) {

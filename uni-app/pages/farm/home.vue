@@ -117,6 +117,7 @@ export default {
   data() {
     return {
       loading: true,
+      hasLoaded: false,
       error: '',
       me: {},
       dashboard: { round: null, registered_count: 0, total_count: 0, clans: [], registration_enabled: false },
@@ -193,17 +194,23 @@ export default {
       return `${date.getMonth() + 1}月${date.getDate()}日 ${pad(date.getHours())}:${pad(date.getMinutes())}`
     },
     async load() {
-      this.loading = true
-      this.error = ''
+      const initialLoad = !this.hasLoaded
+      if (initialLoad) {
+        this.loading = true
+        this.error = ''
+      }
       try {
         const result = await Promise.all([getFarmMe(), getFarmDashboard()])
         this.me = result[0]
         this.dashboard = result[1]
         uni.setStorageSync('farm_account', this.me)
+        this.error = ''
+        this.hasLoaded = true
       } catch (e) {
-        this.error = e.message || '加载失败'
+        if (initialLoad) this.error = e.message || '加载失败'
+        else uni.showToast({ title: e.message || '刷新失败', icon: 'none' })
       } finally {
-        this.loading = false
+        if (initialLoad) this.loading = false
       }
     },
     startClock() {
