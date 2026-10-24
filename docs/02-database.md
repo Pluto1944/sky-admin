@@ -133,7 +133,8 @@ M5 手动刷新复用同一 `sync_targets` 和 `sync_tasks`：按 `resource_type
 `token_version`，使全部旧互刷令牌失效。
 
 `farm_clans` 从 F1 起预留账号与部落归属，使用 `clan_tag_key` 比较规范化标签并兼容 COC 标签中的
-`O / 0` 易混写法；F1 不开放部落管理接口，也不迁移现有 `farm_stats`。`farm_audit_logs` 不保存密码、
+`O / 0` 易混写法；`enabled_at` 独立记录最近一次启用时间，新建时写入、停用后重新启用时刷新，
+账号转移、积分结算和名称修改不得改变该字段。F1 不开放部落管理接口，也不迁移现有 `farm_stats`。`farm_audit_logs` 不保存密码、
 哈希或令牌。三张表由 `shared/db/connection.py` 幂等创建，功能开关关闭时不会改变现有微信登录和页面。
 
 F3 新增 `farm_rounds` 与 `farm_round_clans`。部分唯一索引保证最多一个

@@ -66,7 +66,8 @@
       </view>
       <view v-if="!dashboard.clans.length" class="empty-clans">当前账号暂未绑定本轮互刷部落</view>
       <view v-for="clan in dashboard.clans" :key="clan.clan_id" class="clan-card">
-        <view class="clan-row">
+        <view class="clan-detail-entry" @tap="openClanDetail(clan)">
+          <view class="clan-row">
           <view class="clan-copy">
             <text class="clan-name">{{ clan.clan_name }}</text>
             <text class="clan-tag">{{ clan.clan_tag }}</text>
@@ -75,9 +76,9 @@
             <text class="score-label">当前积分</text>
             <text class="score-value">{{ clan.current_score }}</text>
           </view>
-        </view>
-        <view class="clan-status">本轮状态：{{ registrationStatus(clan.registration_status) }}</view>
-        <view class="match-info">
+          </view>
+          <view class="clan-status">本轮状态：{{ registrationStatus(clan.registration_status) }} <text class="detail-arrow">›</text></view>
+          <view class="match-info">
           <view class="match-row">
             <text class="match-label">对手部落</text>
             <view v-if="clan.opponent_name || clan.opponent_tag" class="opponent-copy">
@@ -94,6 +95,7 @@
             <text class="match-label">积分</text>
             <text class="score-change">{{ clan.score_before }} → {{ clan.score_after }}</text>
           </view>
+        </view>
         </view>
         <button
           class="register-one"
@@ -162,6 +164,9 @@ export default {
   onUnload() { this.stopClock() },
   onPullDownRefresh() { this.load().finally(() => uni.stopPullDownRefresh()) },
   methods: {
+    openClanDetail(clan) {
+      uni.navigateTo({ url: `/pages/farm/admin-clan-detail?clan_tag=${encodeURIComponent(clan.clan_tag)}` })
+    },
     roleLabel(role) { return ({ creator: '创建者', admin: '管理员', member: '成员' })[role] || '成员' },
     roundStatus(status) { return ({ scheduled: '待开放', open: '可登记', partially_registered: '登记中', completed: '已完成' })[status] || status },
     registrationStatus(status) {
@@ -275,5 +280,5 @@ export default {
 .registration-notice { margin-top: 22rpx; padding: 22rpx 24rpx; border: 1rpx solid #4b3f55; border-radius: 16rpx; background: #1d1a2d; }.registration-notice-title, .registration-notice-desc { display: block; }.registration-notice-title { color: #d7ad72; font-size: 24rpx; font-weight: 600; }.registration-notice-desc { margin-top: 7rpx; color: #827c91; font-size: 21rpx; line-height: 1.5; }
 .round-card { margin-top: 24rpx; padding: 28rpx; border: 1rpx solid #31527b; border-radius: 20rpx; background: linear-gradient(145deg, #19243d, #171a32); }.round-top { display: flex; justify-content: space-between; }.eyebrow { display: block; color: #7988a5; font-size: 21rpx; }.round-time { display: block; margin-top: 8rpx; font-size: 37rpx; font-weight: 700; }.time-kind { display: block; margin-top: 7rpx; color: #6f819e; font-size: 20rpx; }.round-status { height: 40rpx; padding: 0 14rpx; border-radius: 20rpx; background: rgba(68,137,204,.16); color: #7cb6eb; font-size: 21rpx; line-height: 40rpx; }.countdown { margin: 22rpx 0 26rpx; color: #93bfe9; font-size: 25rpx; }.progress-row { display: flex; justify-content: space-between; color: #7d879d; font-size: 22rpx; }.progress-track { height: 10rpx; margin-top: 12rpx; overflow: hidden; border-radius: 8rpx; background: #292e49; }.progress-fill { height: 100%; border-radius: 8rpx; background: #3f87c8; }.register-all, .register-one { display: flex; align-items: center; justify-content: center; border: 0; color: #768197 !important; }.register-all { height: 76rpx; margin-top: 26rpx; border-radius: 12rpx; background: #242941 !important; font-size: 25rpx; }.register-all.active { background: #397fc0 !important; color: #fff !important; }.register-all::after, .register-one::after { border: 0; }
 .empty-round, .empty-clans { margin-top: 24rpx; padding: 58rpx 24rpx; border: 1rpx dashed #2c3354; border-radius: 18rpx; text-align: center; }.empty-title, .empty-desc { display: block; }.empty-title { font-size: 28rpx; }.empty-desc { margin-top: 10rpx; color: #687289; font-size: 22rpx; }.section-head { display: flex; justify-content: space-between; padding: 34rpx 4rpx 18rpx; color: #dbe0ec; font-size: 27rpx; font-weight: 600; }.section-head text:last-child { color: #687289; font-size: 22rpx; font-weight: 400; }.empty-clans { margin-top: 0; color: #6c758c; font-size: 24rpx; }
-.clan-card { margin-bottom: 20rpx; overflow: hidden; border: 1rpx solid #2a3151; border-radius: 18rpx; background: #191a31; }.clan-row { display: flex; align-items: center; justify-content: space-between; padding: 26rpx; }.clan-copy { min-width: 0; }.clan-name, .clan-tag, .score-label, .score-value { display: block; }.clan-name { overflow: hidden; font-size: 29rpx; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }.clan-tag { margin-top: 7rpx; color: #707b93; font-size: 21rpx; }.score-copy { flex-shrink: 0; margin-left: 20rpx; text-align: right; }.score-label { color: #707b93; font-size: 20rpx; }.score-value { margin-top: 2rpx; color: #8cbbea; font-size: 32rpx; font-weight: 700; }.clan-status { padding: 18rpx 26rpx; border-top: 1rpx solid #282e4c; color: #8893aa; font-size: 22rpx; }.match-info { padding: 17rpx 26rpx; border-top: 1rpx solid #282e4c; }.match-row { display: flex; min-height: 48rpx; align-items: center; justify-content: space-between; }.result-row { margin-top: 8rpx; }.score-change-row { margin-top: 4rpx; }.match-label { flex-shrink: 0; color: #78849b; font-size: 21rpx; }.opponent-copy { min-width: 0; margin-left: 20rpx; text-align: right; }.opponent-name, .opponent-tag { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.opponent-name { color: #dce1ec; font-size: 23rpx; }.opponent-tag { margin-top: 4rpx; color: #707b93; font-size: 20rpx; }.match-empty { color: #616c84; font-size: 21rpx; }.match-result { font-size: 22rpx; font-weight: 600; }.match-result.win { color: #72c497; }.match-result.loss { color: #c98286; }.score-change { color: #9aa7bd; font-size: 22rpx; font-weight: 600; }.register-one { height: 68rpx; border-radius: 0; background: #20243b !important; font-size: 23rpx; }.register-one.active { background: #397fc0 !important; color: #fff !important; }.bottom-space { height: 40rpx; }
+.clan-card { margin-bottom: 20rpx; overflow: hidden; border: 1rpx solid #2a3151; border-radius: 18rpx; background: #191a31; }.clan-row { display: flex; align-items: center; justify-content: space-between; padding: 26rpx; }.clan-copy { min-width: 0; }.clan-name, .clan-tag, .score-label, .score-value { display: block; }.clan-name { overflow: hidden; font-size: 29rpx; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }.clan-tag { margin-top: 7rpx; color: #707b93; font-size: 21rpx; }.score-copy { flex-shrink: 0; margin-left: 20rpx; text-align: right; }.score-label { color: #707b93; font-size: 20rpx; }.score-value { margin-top: 2rpx; color: #8cbbea; font-size: 32rpx; font-weight: 700; }.clan-status { display: flex; align-items: center; justify-content: space-between; padding: 18rpx 26rpx; border-top: 1rpx solid #282e4c; color: #8893aa; font-size: 22rpx; }.detail-arrow { color: #66728a; font-size: 32rpx; }.match-info { padding: 17rpx 26rpx; border-top: 1rpx solid #282e4c; }.match-row { display: flex; min-height: 48rpx; align-items: center; justify-content: space-between; }.result-row { margin-top: 8rpx; }.score-change-row { margin-top: 4rpx; }.match-label { flex-shrink: 0; color: #78849b; font-size: 21rpx; }.opponent-copy { min-width: 0; margin-left: 20rpx; text-align: right; }.opponent-name, .opponent-tag { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.opponent-name { color: #dce1ec; font-size: 23rpx; }.opponent-tag { margin-top: 4rpx; color: #707b93; font-size: 20rpx; }.match-empty { color: #616c84; font-size: 21rpx; }.match-result { font-size: 22rpx; font-weight: 600; }.match-result.win { color: #72c497; }.match-result.loss { color: #c98286; }.score-change { color: #9aa7bd; font-size: 22rpx; font-weight: 600; }.register-one { height: 68rpx; border-radius: 0; background: #20243b !important; font-size: 23rpx; }.register-one.active { background: #397fc0 !important; color: #fff !important; }.bottom-space { height: 40rpx; }
 </style>

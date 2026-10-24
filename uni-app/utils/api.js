@@ -168,6 +168,10 @@ export function getFarmAdminClans() {
   return farmRequest('/api/farm-system/admin/clans')
 }
 
+export function getFarmClanDetail(clanTag) {
+  return farmRequest(`/api/farm-system/clans/${encodeURIComponent(clanTag)}/detail`)
+}
+
 export function createFarmClan(payload) {
   return farmRequest('/api/farm-system/admin/clans', 'POST', payload)
 }

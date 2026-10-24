@@ -386,6 +386,7 @@ POST /api/farm-system/auth/logout
 POST /api/farm-system/auth/change-password
 GET  /api/farm-system/me
 GET  /api/farm-system/clans
+GET  /api/farm-system/clans/{clan_tag}/detail
 GET  /api/farm-system/admin/accounts
 POST /api/farm-system/admin/accounts
 PATCH /api/farm-system/admin/accounts/{account_id}
@@ -405,6 +406,11 @@ POST /api/farm-system/creator/matches/{match_id}/reopen
 POST /api/farm-system/creator/rounds/{round_id}/cancel
 POST /api/farm-system/creator/accounts/{account_id}/reset-password
 ```
+
+部落详情接口不在 HTTP 请求路径直连 COC API。基本资料读取 `clan_profile_cache`；当前普通部落战
+优先读取 `current_war_cache`，动态添加且尚未进入常规战争同步的部落回退到本轮最近一次登记保存的
+官方战争摘要；互刷部分读取当前场次快照，返回积分、登记状态、互刷对手和预定胜负。创建者和管理员
+可以查看全部互刷部落，成员只能查看当前账号绑定的部落。
 
 互刷账号不复用微信 `openid`。令牌受众固定为 `farm-system`，载荷包含账号 ID（`sub`）、
 `role` 和 `token_version`；每次访问均回查账号状态和当前令牌版本。微信 JWT 不能访问这些接口，

@@ -370,10 +370,12 @@ class FarmClanRepository:
     def list_clans(self, account_id: int | None = None) -> list[sqlite3.Row]:
         if account_id is None:
             return self.conn.execute(
-                "SELECT * FROM farm_clans ORDER BY account_id, id"
+                """SELECT * FROM farm_clans
+                   ORDER BY COALESCE(enabled_at, created_at) DESC, id DESC"""
             ).fetchall()
         return self.conn.execute(
-            "SELECT * FROM farm_clans WHERE account_id = ? ORDER BY id",
+            """SELECT * FROM farm_clans WHERE account_id = ?
+               ORDER BY COALESCE(enabled_at, created_at) DESC, id DESC""",
             (int(account_id),),
         ).fetchall()
 
@@ -394,9 +396,9 @@ class FarmClanRepository:
             cursor = self.conn.execute(
                 """INSERT INTO farm_clans
                    (clan_tag, clan_tag_key, clan_name, account_id, status, score,
-                    created_at, updated_at)
-                   VALUES (?, ?, ?, ?, 'active', 0, ?, ?)""",
-                (key, key, name, int(account_id), now, now),
+                    enabled_at, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, 'active', 0, ?, ?, ?)""",
+                (key, key, name, int(account_id), now, now, now),
             )
             clan_id = int(cursor.lastrowid)
             self._audit(
@@ -429,15 +431,24 @@ class FarmClanRepository:
         if next_name == row["clan_name"] and next_status == row["status"]:
             return row
         now = now_iso()
+        next_enabled_at = (
+            now
+            if row["status"] != "active" and next_status == "active"
+            else row["enabled_at"]
+        )
         with self.conn:
             self.conn.execute(
-                "UPDATE farm_clans SET clan_name = ?, status = ?, updated_at = ? WHERE id = ?",
-                (next_name, next_status, now, int(row["id"])),
+                """UPDATE farm_clans
+                   SET clan_name = ?, status = ?, enabled_at = ?, updated_at = ?
+                   WHERE id = ?""",
+                (next_name, next_status, next_enabled_at, now, int(row["id"])),
             )
             self._audit(
                 actor_account_id, "clan.updated", int(row["id"]),
-                {"clan_name": row["clan_name"], "status": row["status"]},
-                {"clan_name": next_name, "status": next_status}, now,
+                {"clan_name": row["clan_name"], "status": row["status"],
+                 "enabled_at": row["enabled_at"]},
+                {"clan_name": next_name, "status": next_status,
+                 "enabled_at": next_enabled_at}, now,
             )
         return self.get_by_id(int(row["id"]))
 

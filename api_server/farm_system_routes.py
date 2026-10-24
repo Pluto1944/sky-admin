@@ -97,6 +97,7 @@ def _public_clan(clan) -> dict:
         "account_id": int(clan["account_id"]),
         "status": clan["status"],
         "score": int(clan["score"]),
+        "enabled_at": clan["enabled_at"],
         "created_at": clan["created_at"],
         "updated_at": clan["updated_at"],
     }
@@ -237,6 +238,35 @@ def admin_clans(
 ):
     rows = FarmManagementService(db.conn).list_clans(account)
     return {"clans": [_public_clan(row) for row in rows]}
+
+
+@router.get(
+    "/clans/{clan_tag}/detail",
+    dependencies=[Depends(require_farm_system_enabled)],
+)
+def clan_detail(
+    clan_tag: str,
+    account: dict = Depends(require_farm_account),
+    db: Database = Depends(get_db),
+):
+    try:
+        result = FarmManagementService(db.conn).get_clan_detail(account, clan_tag)
+    except (ValueError, LookupError, FarmPermissionError) as exc:
+        raise _management_error(exc) from exc
+    return {
+        "clan": _public_clan(result["clan"]),
+        "profile": result["profile"],
+        "profile_status": result["profile_status"],
+        "profile_error": result["profile_error"],
+        "profile_updated_at": result["profile_updated_at"],
+        "profile_attempted_at": result["profile_attempted_at"],
+        "current_war": result["current_war"],
+        "current_war_source": result["current_war_source"],
+        "current_war_updated_at": result["current_war_updated_at"],
+        "current_war_error": result["current_war_error"],
+        "farm_round": result["farm_round"],
+        "farm_registration": result["farm_registration"],
+    }
 
 
 @router.post("/admin/clans", dependencies=[Depends(require_farm_system_enabled)])

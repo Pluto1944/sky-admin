@@ -29,6 +29,14 @@
         <text class="form-tip">系统会自动读取 COC 部落名称并检查标签，确认无误后添加到所选账号。</text>
       </view>
 
+      <view class="sort-bar">
+        <view>
+          <text class="sort-title">最近启用时间</text>
+          <text class="sort-desc">停用后重新启用会刷新时间</text>
+        </view>
+        <text class="sort-toggle" @tap="sortDescending = !sortDescending">{{ sortDescending ? '最新在前 ↓' : '最早在前 ↑' }}</text>
+      </view>
+
       <view class="search-box">
         <text class="search-icon">⌕</text>
         <input v-model="searchQuery" class="search-input" placeholder="搜索部落名称、标签或所属账号" placeholder-style="color:#59637a" />
@@ -38,12 +46,16 @@
 
       <view v-if="!filteredClans.length" class="empty-card">{{ searchQuery ? '没有匹配的互刷部落' : '暂未添加互刷部落' }}</view>
       <view v-for="clan in filteredClans" :key="clan.id" class="data-card">
-        <view class="card-main">
+        <view class="card-main" @tap="openClanDetail(clan)">
           <view class="card-copy">
             <text class="card-title">{{ clan.clan_name }}</text>
             <text class="card-meta">{{ clan.clan_tag }} · 当前积分 {{ clan.score }}</text>
+            <text class="enabled-time">最近启用 {{ formatEnabledAt(clan.enabled_at) }}</text>
           </view>
-          <text class="status-badge" :class="{ disabled: clan.status !== 'active' }">{{ clan.status === 'active' ? '启用' : '停用' }}</text>
+          <view class="card-side">
+            <text class="status-badge" :class="{ disabled: clan.status !== 'active' }">{{ clan.status === 'active' ? '启用' : '停用' }}</text>
+            <text class="detail-arrow">›</text>
+          </view>
         </view>
         <view class="card-actions">
           <view class="action-field" @tap="openAccountSelector('transfer', clan)">归属：{{ accountName(clan.account_id) }}<text>⌄</text></view>
@@ -100,6 +112,7 @@ export default {
       accounts: [],
       clans: [],
       searchQuery: '',
+      sortDescending: true,
       newClan: { clan_tag: '', account_id: null },
       accountSelectorOpen: false,
       accountSearchQuery: '',
@@ -120,8 +133,7 @@ export default {
     },
     filteredClans() {
       const query = this.searchQuery.trim().toLowerCase()
-      if (!query) return this.clans
-      return this.clans.filter(clan => {
+      const filtered = query ? this.clans.filter(clan => {
         const account = this.accounts.find(item => Number(item.id) === Number(clan.account_id)) || {}
         return [
           clan.clan_name,
@@ -130,6 +142,13 @@ export default {
           account.username,
           clan.status === 'active' ? '启用' : '停用'
         ].some(value => String(value || '').toLowerCase().includes(query))
+      }) : this.clans
+      const direction = this.sortDescending ? -1 : 1
+      return filtered.slice().sort((left, right) => {
+        const leftTime = Date.parse(left.enabled_at || left.created_at || '') || 0
+        const rightTime = Date.parse(right.enabled_at || right.created_at || '') || 0
+        if (leftTime !== rightTime) return (leftTime - rightTime) * direction
+        return (Number(left.id) - Number(right.id)) * direction
       })
     },
     newClanAccountIndex() {
@@ -147,6 +166,15 @@ export default {
   onHide() { this.stopSyncPolling() },
   onUnload() { this.stopSyncPolling() },
   methods: {
+    formatEnabledAt(value) {
+      if (!value) return '-'
+      const date = new Date(value)
+      const pad = number => String(number).padStart(2, '0')
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+    },
+    openClanDetail(clan) {
+      uni.navigateTo({ url: `/pages/farm/admin-clan-detail?clan_tag=${encodeURIComponent(clan.clan_tag)}` })
+    },
     accountName(id) {
       const item = this.accounts.find(account => Number(account.id) === Number(id))
       return item ? item.display_name : '未知账号'
@@ -281,8 +309,9 @@ export default {
 .form-card, .data-card, .empty-card { margin-bottom: 20rpx; border: 1rpx solid #2a3152; border-radius: 18rpx; background: #191a31; }.form-card { padding: 26rpx; }.form-title { display: block; margin-bottom: 20rpx; font-size: 27rpx; font-weight: 600; }.input, .picker-field { height: 76rpx; margin-bottom: 16rpx; padding: 0 20rpx; border: 1rpx solid #30375b; border-radius: 12rpx; box-sizing: border-box; background: #121326; color: #e9edf6; font-size: 25rpx; }.picker-field { display: flex; align-items: center; justify-content: space-between; color: #aeb7ca; }
 .primary-button { display: flex; height: 78rpx; align-items: center; justify-content: center; border-radius: 12rpx; background: #397fc0; color: #fff; font-size: 26rpx; font-weight: 600; }.primary-button::after { border: 0; }.form-tip { display: block; margin-top: 16rpx; color: #626c84; font-size: 21rpx; line-height: 1.55; }
 .sync-status { margin: 16rpx 0; padding: 18rpx 20rpx; border: 1rpx solid #31405f; border-radius: 12rpx; background: #15182b; }.sync-status.ready { border-color: #345e4b; }.sync-status.failed { border-color: #623d49; }.sync-title, .sync-detail { display: block; }.sync-title { color: #8ebbe5; font-size: 23rpx; font-weight: 600; }.sync-status.ready .sync-title { color: #72c497; }.sync-status.failed .sync-title { color: #cf7e82; }.sync-detail { margin-top: 6rpx; color: #778298; font-size: 21rpx; line-height: 1.5; }
+.sort-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16rpx; padding: 18rpx 20rpx; border: 1rpx solid #2a3152; border-radius: 14rpx; background: #17182e; }.sort-title, .sort-desc { display: block; }.sort-title { color: #dce1ed; font-size: 23rpx; font-weight: 600; }.sort-desc { margin-top: 5rpx; color: #69748b; font-size: 19rpx; }.sort-toggle { flex-shrink: 0; margin-left: 20rpx; padding: 12rpx 0 12rpx 20rpx; color: #78afe3; font-size: 22rpx; }
 .search-box { display: flex; height: 82rpx; align-items: center; margin-bottom: 20rpx; padding: 0 18rpx; border: 1rpx solid #2a3152; border-radius: 14rpx; box-sizing: border-box; background: #15162b; }.search-icon { flex-shrink: 0; margin-right: 12rpx; color: #71809a; font-size: 30rpx; }.search-input { flex: 1; min-width: 0; color: #e6eaf3; font-size: 23rpx; }.search-clear { flex-shrink: 0; margin-left: 14rpx; color: #74a9df; font-size: 21rpx; }.result-count { display: block; margin: -8rpx 8rpx 18rpx; color: #657087; font-size: 20rpx; }
-.empty-card { padding: 70rpx 20rpx; color: #677087; font-size: 25rpx; text-align: center; }.data-card { overflow: hidden; }.card-main { display: flex; align-items: center; justify-content: space-between; padding: 25rpx; }.card-copy { min-width: 0; }.card-title, .card-meta { display: block; }.card-title { overflow: hidden; font-size: 28rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.card-meta { margin-top: 8rpx; color: #747e96; font-size: 21rpx; }.status-badge { flex-shrink: 0; margin-left: 18rpx; padding: 6rpx 14rpx; border-radius: 18rpx; background: rgba(67,170,115,.14); color: #6fc595; font-size: 21rpx; }.status-badge.disabled { background: rgba(193,107,110,.12); color: #be777b; }
+.empty-card { padding: 70rpx 20rpx; color: #677087; font-size: 25rpx; text-align: center; }.data-card { overflow: hidden; }.card-main { display: flex; align-items: center; justify-content: space-between; padding: 25rpx; }.card-copy { min-width: 0; }.card-title, .card-meta, .enabled-time { display: block; }.card-title { overflow: hidden; font-size: 28rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.card-meta { margin-top: 8rpx; color: #747e96; font-size: 21rpx; }.enabled-time { margin-top: 7rpx; color: #5f6b83; font-size: 19rpx; }.card-side { display: flex; flex-shrink: 0; align-items: center; margin-left: 18rpx; }.status-badge { flex-shrink: 0; padding: 6rpx 14rpx; border-radius: 18rpx; background: rgba(67,170,115,.14); color: #6fc595; font-size: 21rpx; }.status-badge.disabled { background: rgba(193,107,110,.12); color: #be777b; }.detail-arrow { margin-left: 14rpx; color: #606b83; font-size: 36rpx; }
 .card-actions { display: flex; min-height: 70rpx; align-items: center; justify-content: space-between; padding: 0 25rpx; border-top: 1rpx solid #282e4d; color: #8190ab; font-size: 23rpx; }.action-field { display: flex; align-items: center; gap: 12rpx; padding: 16rpx 0; }.action-link { padding: 18rpx 0 18rpx 30rpx; color: #77aee3; }.bottom-space { height: 50rpx; }
 .selector-mask { position: fixed; z-index: 100; top: 0; right: 0; bottom: 0; left: 0; display: flex; align-items: flex-end; background: rgba(4, 5, 15, .72); }.selector-panel { width: 100%; max-height: 72vh; padding: 28rpx 26rpx calc(28rpx + env(safe-area-inset-bottom)); border-radius: 26rpx 26rpx 0 0; box-sizing: border-box; background: #191a31; }.selector-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 22rpx; }.selector-title { font-size: 29rpx; font-weight: 650; }.selector-close { padding: 10rpx 0 10rpx 20rpx; color: #77aee3; font-size: 23rpx; }.selector-search { display: flex; height: 78rpx; align-items: center; padding: 0 18rpx; border: 1rpx solid #30375b; border-radius: 12rpx; box-sizing: border-box; background: #121326; }.selector-list { height: 520rpx; margin-top: 18rpx; }.selector-item { display: flex; min-height: 94rpx; align-items: center; justify-content: space-between; padding: 16rpx 8rpx; border-bottom: 1rpx solid #292f4d; box-sizing: border-box; }.selector-copy { min-width: 0; }.selector-name, .selector-email { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.selector-name { color: #edf0f7; font-size: 26rpx; }.selector-email { margin-top: 7rpx; color: #707b93; font-size: 21rpx; }.selector-selected { flex-shrink: 0; margin-left: 20rpx; color: #72b7ee; font-size: 21rpx; }.selector-empty { padding: 70rpx 20rpx; color: #677087; font-size: 24rpx; text-align: center; }
 </style>

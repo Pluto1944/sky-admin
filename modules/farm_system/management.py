@@ -80,6 +80,105 @@ class FarmManagementService:
     def list_own_clans(self, actor: dict) -> list[sqlite3.Row]:
         return self.clans.list_clans(int(actor["id"]))
 
+    def get_clan_detail(self, actor: dict, clan_tag: str) -> dict:
+        clan = self.clans.get_by_tag(clan_tag)
+        if clan is None:
+            raise LookupError("互刷部落不存在")
+        if (
+            actor.get("role") not in {"creator", "admin"}
+            and int(clan["account_id"]) != int(actor["id"])
+        ):
+            raise FarmPermissionError("只能查看当前账号绑定的互刷部落")
+        key = coc_tag_key(clan["clan_tag"])
+        rows = self.conn.execute(
+            """SELECT clan_tag, status, data_json, error, updated_at, attempted_at
+               FROM clan_profile_cache"""
+        ).fetchall()
+        profile_row = next(
+            (row for row in rows if coc_tag_key(row["clan_tag"]) == key),
+            None,
+        )
+        profile = None
+        if profile_row is not None and profile_row["data_json"]:
+            try:
+                loaded = json.loads(profile_row["data_json"])
+                profile = loaded if isinstance(loaded, dict) else None
+            except (TypeError, json.JSONDecodeError):
+                profile = None
+        current_war_row = next(
+            (
+                row for row in self.conn.execute(
+                    """SELECT clan_tag, status, data_json, error, updated_at, attempted_at
+                       FROM current_war_cache"""
+                ).fetchall()
+                if coc_tag_key(row["clan_tag"]) == key
+            ),
+            None,
+        )
+        current_war = self._json_object(
+            current_war_row["data_json"] if current_war_row else None
+        )
+        if current_war is not None:
+            current_war.pop("rows", None)
+
+        # 与首页保持相同的“当前场次”口径：优先未结束场次，否则显示最近完成场次。
+        from .rounds import FarmRoundService, public_round, public_round_clan
+
+        round_row = FarmRoundService(self.conn).current_round()
+        round_clan = None
+        if round_row is not None:
+            round_clan = self.conn.execute(
+                """SELECT rc.*, c.score AS current_score
+                   FROM farm_round_clans rc
+                   JOIN farm_clans c ON c.id = rc.clan_id
+                   WHERE rc.round_id = ? AND rc.clan_id = ?""",
+                (int(round_row["id"]), int(clan["id"])),
+            ).fetchone()
+
+        # 动态添加的互刷部落可能尚未进入常规 current_war_cache；此时用本轮
+        # 登记时保存的官方战争摘要补足“当前部落战”，仍然不在读接口调用 COC API。
+        current_war_source = "current_war_cache" if current_war is not None else None
+        current_war_updated_at = current_war_row["updated_at"] if current_war_row else None
+        current_war_error = current_war_row["error"] if current_war_row else None
+        if current_war is None and round_row is not None:
+            attempt = self.conn.execute(
+                """SELECT summary_json, error_message, created_at
+                   FROM farm_registration_attempts
+                   WHERE round_id = ? AND clan_id = ?
+                   ORDER BY id DESC LIMIT 1""",
+                (int(round_row["id"]), int(clan["id"])),
+            ).fetchone()
+            current_war = self._json_object(attempt["summary_json"] if attempt else None)
+            if current_war is not None:
+                current_war_source = "registration_attempt"
+                current_war_updated_at = attempt["created_at"]
+                current_war_error = attempt["error_message"]
+
+        return {
+            "clan": clan,
+            "profile": profile,
+            "profile_status": profile_row["status"] if profile_row else "pending",
+            "profile_error": profile_row["error"] if profile_row else None,
+            "profile_updated_at": profile_row["updated_at"] if profile_row else None,
+            "profile_attempted_at": profile_row["attempted_at"] if profile_row else None,
+            "current_war": current_war,
+            "current_war_source": current_war_source,
+            "current_war_updated_at": current_war_updated_at,
+            "current_war_error": current_war_error,
+            "farm_round": public_round(round_row),
+            "farm_registration": public_round_clan(round_clan) if round_clan else None,
+        }
+
+    @staticmethod
+    def _json_object(value) -> dict | None:
+        if not value:
+            return None
+        try:
+            loaded = json.loads(value)
+        except (TypeError, json.JSONDecodeError):
+            return None
+        return loaded if isinstance(loaded, dict) else None
+
     def create_clan(self, actor: dict, payload: dict) -> sqlite3.Row:
         _assert_manager(actor)
         target = self._active_account(payload.get("account_id"))

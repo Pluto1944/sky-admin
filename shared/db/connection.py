@@ -513,6 +513,7 @@ CREATE TABLE IF NOT EXISTS farm_clans (
     status       TEXT NOT NULL DEFAULT 'active'
                  CHECK(status IN ('active', 'disabled')),
     score        INTEGER NOT NULL DEFAULT 0,
+    enabled_at   TEXT NOT NULL,
     created_at   TEXT NOT NULL,
     updated_at   TEXT NOT NULL,
     FOREIGN KEY(account_id) REFERENCES farm_auth_accounts(id) ON DELETE RESTRICT
@@ -1389,6 +1390,22 @@ class Database:
         }
         if not fill_cols:
             self.conn.executescript(_FARM_FILL_ACCOUNTS_DDL)
+
+        # 互刷部落独立记录最近启用时间；不能复用 updated_at，因为积分结算、
+        # 账号转移和名称修改都会更新后者，导致“最近启用”排序失真。
+        farm_clan_cols = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(farm_clans)")
+        }
+        if "enabled_at" not in farm_clan_cols:
+            self.conn.execute("ALTER TABLE farm_clans ADD COLUMN enabled_at TEXT")
+            self.conn.execute(
+                "UPDATE farm_clans SET enabled_at = COALESCE(created_at, updated_at) "
+                "WHERE enabled_at IS NULL"
+            )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_farm_clans_enabled_at "
+            "ON farm_clans(enabled_at DESC, id DESC)"
+        )
 
         # current_war_cache 表迁移（全部自有部落当前战争缓存）
         cw_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(current_war_cache)")}

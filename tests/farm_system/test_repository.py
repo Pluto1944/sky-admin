@@ -6,6 +6,7 @@ import pytest
 
 from modules.farm_system.repository import FarmAccountRepository
 from modules.farm_system.service import FarmAuthService
+from shared.db.connection import Database
 
 
 def _service(db):
@@ -24,6 +25,41 @@ def test_farm_core_schema_is_idempotent(db):
     db.init_schema()
     db.init_schema()
     assert db.conn.execute("SELECT COUNT(*) FROM farm_auth_accounts").fetchone()[0] == 0
+
+
+def test_legacy_farm_clans_backfills_enabled_at(tmp_path):
+    path = tmp_path / "legacy-farm.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """CREATE TABLE farm_clans (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               clan_tag TEXT NOT NULL,
+               clan_tag_key TEXT NOT NULL UNIQUE,
+               clan_name TEXT NOT NULL,
+               account_id INTEGER NOT NULL,
+               status TEXT NOT NULL DEFAULT 'active',
+               score INTEGER NOT NULL DEFAULT 0,
+               created_at TEXT NOT NULL,
+               updated_at TEXT NOT NULL
+           );
+           INSERT INTO farm_clans
+               (clan_tag, clan_tag_key, clan_name, account_id, status, score,
+                created_at, updated_at)
+           VALUES
+               ('#2QQ', '#2QQ', '旧部落', 1, 'active', 0,
+                '2026-10-01T00:00:00+00:00', '2026-10-20T00:00:00+00:00');"""
+    )
+    conn.close()
+
+    database = Database(str(path))
+    database.init_schema()
+    database.init_schema()
+    row = database.conn.execute(
+        "SELECT enabled_at FROM farm_clans WHERE clan_tag='#2QQ'"
+    ).fetchone()
+    database.close()
+
+    assert row["enabled_at"] == "2026-10-01T00:00:00+00:00"
 
 
 def test_create_account_normalizes_username_and_writes_audit(db):

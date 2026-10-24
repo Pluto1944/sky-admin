@@ -450,6 +450,8 @@ class FarmRegistrationService:
             "state": normalized.get("state"),
             "status": normalized.get("status"),
             "war_type": normalized.get("war_type"),
+            "team_size": normalized.get("team_size"),
+            "result": normalized.get("result"),
             "preparation_start_time": normalized.get("preparation_start_time"),
             "start_time": normalized.get("start_time"),
             "end_time": normalized.get("end_time"),
