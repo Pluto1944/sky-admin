@@ -227,6 +227,15 @@
       }
     },
     {
+      "path": "pages/farm/admin-account-clans",
+      "style": {
+        "navigationBarTitleText": "账号互刷部落",
+        "navigationBarBackgroundColor": "#1a1a2e",
+        "navigationBarTextStyle": "white",
+        "backgroundColor": "#0f0f23"
+      }
+    },
+    {
       "path": "pages/farm/home",
       "style": {
         "navigationBarTitleText": "互刷联盟系统",

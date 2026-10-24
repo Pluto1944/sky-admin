@@ -25,7 +25,15 @@
         <button class="primary-button" :loading="saving" :disabled="saving" @tap="createAccount">创建账号</button>
       </view>
 
-      <view v-for="account in accounts" :key="account.id" class="data-card">
+      <view class="search-box">
+        <text class="search-icon">⌕</text>
+        <input v-model="searchQuery" class="search-input" placeholder="搜索联盟名称、登录邮箱或角色" placeholder-style="color:#59637a" />
+        <text v-if="searchQuery" class="search-clear" @tap="searchQuery = ''">清除</text>
+      </view>
+      <text v-if="searchQuery" class="result-count">找到 {{ filteredAccounts.length }} 个账号</text>
+
+      <view v-if="!filteredAccounts.length" class="empty-card">{{ searchQuery ? '没有匹配的账号' : '暂未创建独立账号' }}</view>
+      <view v-for="account in filteredAccounts" :key="account.id" class="data-card">
         <view class="card-main">
           <view class="card-copy">
             <text class="card-title">{{ account.display_name }}</text>
@@ -33,12 +41,13 @@
           </view>
           <text class="status-badge" :class="{ disabled: account.status !== 'active' }">{{ account.status === 'active' ? '启用' : '停用' }}</text>
         </view>
-        <view v-if="canEditAccount(account)" class="card-actions">
-          <picker v-if="isCreator" :range="roleNames" :value="roleIndex(account.role)" @change="changeRole(account, $event)">
+        <view class="card-actions">
+          <text class="action-link edit-link" @tap="openAccountClans(account)">编辑</text>
+          <picker v-if="canEditAccount(account) && isCreator" :range="roleNames" :value="roleIndex(account.role)" @change="changeRole(account, $event)">
             <view class="action-field">调整角色<text>⌄</text></view>
           </picker>
-          <text class="action-link" @tap="toggleAccount(account)">{{ account.status === 'active' ? '停用' : '启用' }}</text>
-          <text v-if="isCreator" class="action-link" @tap="resetPassword(account)">重置密码</text>
+          <text v-if="canEditAccount(account)" class="action-link" @tap="toggleAccount(account)">{{ account.status === 'active' ? '停用' : '启用' }}</text>
+          <text v-if="canEditAccount(account) && isCreator" class="action-link" @tap="resetPassword(account)">重置密码</text>
         </view>
       </view>
     </view>
@@ -65,13 +74,24 @@ export default {
       error: '',
       me: {},
       accounts: [],
+      searchQuery: '',
       newAccount: { username: '', display_name: '', password: '', role: 'member' }
     }
   },
   computed: {
     isCreator() { return this.me.role === 'creator' },
     roleNames() { return ROLES.map(this.roleLabel) },
-    newAccountRoleIndex() { return this.roleIndex(this.newAccount.role) }
+    newAccountRoleIndex() { return this.roleIndex(this.newAccount.role) },
+    filteredAccounts() {
+      const query = this.searchQuery.trim().toLowerCase()
+      if (!query) return this.accounts
+      return this.accounts.filter(account => [
+        account.display_name,
+        account.username,
+        this.roleLabel(account.role),
+        account.status === 'active' ? '启用' : '停用'
+      ].some(value => String(value || '').toLowerCase().includes(query)))
+    }
   },
   onShow() { this.load() },
   methods: {
@@ -119,6 +139,9 @@ export default {
       } finally { this.saving = false }
     },
     onNewAccountRole(event) { this.newAccount.role = ROLES[Number(event.detail.value)] || 'member' },
+    openAccountClans(account) {
+      uni.navigateTo({ url: `/pages/farm/admin-account-clans?account_id=${encodeURIComponent(account.id)}` })
+    },
     async changeRole(account, event) {
       const role = ROLES[Number(event.detail.value)]
       if (!role || role === account.role) return
@@ -154,7 +177,8 @@ export default {
 <style>
 .farm-page { min-height: 100vh; padding: 28rpx 26rpx; box-sizing: border-box; background: #0f0f23; color: #eef1f8; }.page-state { display: flex; min-height: 70vh; flex-direction: column; align-items: center; justify-content: center; gap: 24rpx; color: #7f899f; font-size: 26rpx; }.state-error { color: #d78383; }.small-button { padding: 0 32rpx; border: 1rpx solid #31537d; border-radius: 12rpx; background: transparent; color: #76aee6; font-size: 24rpx; }
 .section-head { display: flex; align-items: flex-start; justify-content: space-between; padding: 30rpx 4rpx 18rpx; }.first-head { padding-top: 4rpx; }.section-title, .section-desc { display: block; }.section-title { font-size: 29rpx; font-weight: 650; }.section-desc { margin-top: 7rpx; color: #717c93; font-size: 21rpx; }.section-count { flex-shrink: 0; margin-left: 18rpx; color: #687188; font-size: 22rpx; }
-.form-card, .data-card { margin-bottom: 20rpx; border: 1rpx solid #2a3152; border-radius: 18rpx; background: #191a31; }.form-card { padding: 26rpx; }.form-title { display: block; margin-bottom: 20rpx; font-size: 27rpx; font-weight: 600; }.input, .picker-field { height: 76rpx; margin-bottom: 16rpx; padding: 0 20rpx; border: 1rpx solid #30375b; border-radius: 12rpx; box-sizing: border-box; background: #121326; color: #e9edf6; font-size: 25rpx; }.picker-field { display: flex; align-items: center; justify-content: space-between; color: #aeb7ca; }
+.form-card, .data-card, .empty-card { margin-bottom: 20rpx; border: 1rpx solid #2a3152; border-radius: 18rpx; background: #191a31; }.form-card { padding: 26rpx; }.form-title { display: block; margin-bottom: 20rpx; font-size: 27rpx; font-weight: 600; }.input, .picker-field { height: 76rpx; margin-bottom: 16rpx; padding: 0 20rpx; border: 1rpx solid #30375b; border-radius: 12rpx; box-sizing: border-box; background: #121326; color: #e9edf6; font-size: 25rpx; }.picker-field { display: flex; align-items: center; justify-content: space-between; color: #aeb7ca; }
+.search-box { display: flex; height: 82rpx; align-items: center; margin-bottom: 20rpx; padding: 0 18rpx; border: 1rpx solid #2a3152; border-radius: 14rpx; box-sizing: border-box; background: #15162b; }.search-icon { flex-shrink: 0; margin-right: 12rpx; color: #71809a; font-size: 30rpx; }.search-input { flex: 1; min-width: 0; color: #e6eaf3; font-size: 23rpx; }.search-clear { flex-shrink: 0; margin-left: 14rpx; color: #74a9df; font-size: 21rpx; }.result-count { display: block; margin: -8rpx 8rpx 18rpx; color: #657087; font-size: 20rpx; }.empty-card { padding: 60rpx 20rpx; color: #677087; font-size: 24rpx; text-align: center; }
 .primary-button { display: flex; height: 78rpx; align-items: center; justify-content: center; border-radius: 12rpx; background: #397fc0; color: #fff; font-size: 26rpx; font-weight: 600; }.primary-button::after { border: 0; }.data-card { overflow: hidden; }.card-main { display: flex; align-items: center; justify-content: space-between; padding: 25rpx; }.card-copy { min-width: 0; }.card-title, .card-meta { display: block; }.card-title { overflow: hidden; font-size: 28rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.card-meta { margin-top: 8rpx; color: #747e96; font-size: 21rpx; }.status-badge { flex-shrink: 0; margin-left: 18rpx; padding: 6rpx 14rpx; border-radius: 18rpx; background: rgba(67,170,115,.14); color: #6fc595; font-size: 21rpx; }.status-badge.disabled { background: rgba(193,107,110,.12); color: #be777b; }
-.card-actions { display: flex; min-height: 70rpx; align-items: center; justify-content: flex-end; gap: 26rpx; padding: 0 25rpx; border-top: 1rpx solid #282e4d; color: #8190ab; font-size: 23rpx; }.action-field { display: flex; align-items: center; gap: 12rpx; padding: 16rpx 0; }.action-link { padding: 18rpx 0; color: #77aee3; }.bottom-space { height: 50rpx; }
+.card-actions { display: flex; min-height: 70rpx; align-items: center; justify-content: flex-end; gap: 24rpx; padding: 0 25rpx; border-top: 1rpx solid #282e4d; color: #8190ab; font-size: 23rpx; }.action-field { display: flex; align-items: center; gap: 12rpx; padding: 16rpx 0; }.action-link { padding: 18rpx 0; color: #77aee3; }.edit-link { margin-right: auto; }.bottom-space { height: 50rpx; }
 </style>

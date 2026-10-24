@@ -17,22 +17,27 @@
       <view class="form-card">
         <text class="form-title">添加互刷部落</text>
         <input v-model="newClan.clan_tag" class="input" placeholder="部落标签，例如 #ABC123" maxlength="16" @input="onClanTagInput" />
-        <picker :range="activeAccountNames" :value="newClanAccountIndex" @change="onNewClanAccount">
-          <view class="picker-field">{{ selectedNewClanAccountName || '选择归属账号' }}<text>⌄</text></view>
-        </picker>
-        <button v-if="!clanSync || clanSync.status !== 'ready'" class="primary-button" :loading="syncing" :disabled="saving || syncing" @tap="requestClanSync">{{ clanSync && clanSync.status === 'failed' ? '重新验证' : '验证官方资料' }}</button>
+        <view class="picker-field" @tap="openAccountSelector('new')">{{ selectedNewClanAccountName || '选择归属账号' }}<text>⌄</text></view>
+        <button v-if="!clanSync || clanSync.status !== 'ready'" class="primary-button" :loading="syncing" :disabled="saving || syncing" @tap="requestClanSync">{{ clanSync && clanSync.status === 'failed' ? '重新查询' : '添加部落' }}</button>
         <view v-if="clanSync" class="sync-status" :class="clanSync.status">
           <text class="sync-title">{{ syncStatusTitle }}</text>
           <text v-if="clanSync.clan_name" class="sync-detail">{{ clanSync.clan_name }} · {{ clanSync.clan_tag }}</text>
           <text v-else-if="clanSync.error" class="sync-detail">{{ clanSync.error }}</text>
-          <text v-else class="sync-detail">正在通过后台同步任务读取 COC 官方资料</text>
+          <text v-else class="sync-detail">正在读取 COC 部落名称和标签</text>
         </view>
-        <button v-if="clanSync && clanSync.status === 'ready'" class="primary-button" :loading="saving" :disabled="saving" @tap="createClan">确认绑定到{{ clanSync.account_name }}</button>
-        <text class="form-tip">先通过后台任务验证 COC 官方标签和名称，验证成功后才能绑定账号。</text>
+        <button v-if="clanSync && clanSync.status === 'ready'" class="primary-button" :loading="saving" :disabled="saving" @tap="createClan">确认添加到{{ clanSync.account_name }}</button>
+        <text class="form-tip">系统会自动读取 COC 部落名称并检查标签，确认无误后添加到所选账号。</text>
       </view>
 
-      <view v-if="!clans.length" class="empty-card">暂未添加互刷部落</view>
-      <view v-for="clan in clans" :key="clan.id" class="data-card">
+      <view class="search-box">
+        <text class="search-icon">⌕</text>
+        <input v-model="searchQuery" class="search-input" placeholder="搜索部落名称、标签或所属账号" placeholder-style="color:#59637a" />
+        <text v-if="searchQuery" class="search-clear" @tap="searchQuery = ''">清除</text>
+      </view>
+      <text v-if="searchQuery" class="result-count">找到 {{ filteredClans.length }} 个部落</text>
+
+      <view v-if="!filteredClans.length" class="empty-card">{{ searchQuery ? '没有匹配的互刷部落' : '暂未添加互刷部落' }}</view>
+      <view v-for="clan in filteredClans" :key="clan.id" class="data-card">
         <view class="card-main">
           <view class="card-copy">
             <text class="card-title">{{ clan.clan_name }}</text>
@@ -41,11 +46,33 @@
           <text class="status-badge" :class="{ disabled: clan.status !== 'active' }">{{ clan.status === 'active' ? '启用' : '停用' }}</text>
         </view>
         <view class="card-actions">
-          <picker :range="activeAccountNames" :value="accountIndex(clan.account_id)" @change="transferClan(clan, $event)">
-            <view class="action-field">归属：{{ accountName(clan.account_id) }}<text>⌄</text></view>
-          </picker>
+          <view class="action-field" @tap="openAccountSelector('transfer', clan)">归属：{{ accountName(clan.account_id) }}<text>⌄</text></view>
           <text class="action-link" @tap="toggleClan(clan)">{{ clan.status === 'active' ? '停用' : '启用' }}</text>
         </view>
+      </view>
+    </view>
+
+    <view v-if="accountSelectorOpen" class="selector-mask" @tap="closeAccountSelector">
+      <view class="selector-panel" @tap.stop>
+        <view class="selector-head">
+          <text class="selector-title">选择部落归属账号</text>
+          <text class="selector-close" @tap="closeAccountSelector">关闭</text>
+        </view>
+        <view class="selector-search">
+          <text class="search-icon">⌕</text>
+          <input v-model="accountSearchQuery" class="search-input" placeholder="搜索联盟名称或登录邮箱" placeholder-style="color:#59637a" :focus="accountSelectorOpen" />
+          <text v-if="accountSearchQuery" class="search-clear" @tap="accountSearchQuery = ''">清除</text>
+        </view>
+        <scroll-view class="selector-list" scroll-y>
+          <view v-if="!filteredActiveAccounts.length" class="selector-empty">没有匹配的启用账号</view>
+          <view v-for="account in filteredActiveAccounts" :key="account.id" class="selector-item" @tap="selectAccount(account)">
+            <view class="selector-copy">
+              <text class="selector-name">{{ account.display_name }}</text>
+              <text class="selector-email">{{ account.username }}</text>
+            </view>
+            <text v-if="isSelectedAccount(account)" class="selector-selected">已选择</text>
+          </view>
+        </scroll-view>
       </view>
     </view>
     <view class="bottom-space"></view>
@@ -72,7 +99,12 @@ export default {
       error: '',
       accounts: [],
       clans: [],
+      searchQuery: '',
       newClan: { clan_tag: '', account_id: null },
+      accountSelectorOpen: false,
+      accountSearchQuery: '',
+      accountSelectorMode: 'new',
+      accountSelectorClan: null,
       clanSync: null,
       syncing: false,
       syncTimer: null
@@ -80,7 +112,26 @@ export default {
   },
   computed: {
     activeAccounts() { return this.accounts.filter(item => item.status === 'active') },
-    activeAccountNames() { return this.activeAccounts.map(item => item.display_name) },
+    filteredActiveAccounts() {
+      const query = this.accountSearchQuery.trim().toLowerCase()
+      if (!query) return this.activeAccounts
+      return this.activeAccounts.filter(account => [account.display_name, account.username]
+        .some(value => String(value || '').toLowerCase().includes(query)))
+    },
+    filteredClans() {
+      const query = this.searchQuery.trim().toLowerCase()
+      if (!query) return this.clans
+      return this.clans.filter(clan => {
+        const account = this.accounts.find(item => Number(item.id) === Number(clan.account_id)) || {}
+        return [
+          clan.clan_name,
+          clan.clan_tag,
+          account.display_name,
+          account.username,
+          clan.status === 'active' ? '启用' : '停用'
+        ].some(value => String(value || '').toLowerCase().includes(query))
+      })
+    },
     newClanAccountIndex() {
       return Math.max(0, this.activeAccounts.findIndex(item => Number(item.id) === Number(this.newClan.account_id)))
     },
@@ -100,7 +151,37 @@ export default {
       const item = this.accounts.find(account => Number(account.id) === Number(id))
       return item ? item.display_name : '未知账号'
     },
-    accountIndex(id) { return Math.max(0, this.activeAccounts.findIndex(item => Number(item.id) === Number(id))) },
+    openAccountSelector(mode, clan = null) {
+      this.accountSelectorMode = mode
+      this.accountSelectorClan = clan
+      this.accountSearchQuery = ''
+      this.accountSelectorOpen = true
+    },
+    closeAccountSelector() {
+      this.accountSelectorOpen = false
+      this.accountSearchQuery = ''
+      this.accountSelectorClan = null
+    },
+    isSelectedAccount(account) {
+      const selectedId = this.accountSelectorMode === 'new'
+        ? this.newClan.account_id
+        : (this.accountSelectorClan || {}).account_id
+      return Number(account.id) === Number(selectedId)
+    },
+    async selectAccount(account) {
+      if (this.accountSelectorMode === 'new') {
+        if (Number(account.id) !== Number(this.newClan.account_id)) {
+          this.newClan.account_id = account.id
+          this.clearSync()
+        }
+        this.closeAccountSelector()
+        return
+      }
+      const clan = this.accountSelectorClan
+      this.closeAccountSelector()
+      if (!clan || Number(account.id) === Number(clan.account_id)) return
+      await this.runUpdate(() => transferFarmClan(clan.clan_tag, account.id))
+    },
     async load() {
       this.loading = true
       this.error = ''
@@ -177,20 +258,8 @@ export default {
         uni.showModal({ title: '绑定失败', content: e.message, showCancel: false })
       } finally { this.saving = false }
     },
-    onNewClanAccount(event) {
-      const account = this.activeAccounts[Number(event.detail.value)]
-      if (account) {
-        this.newClan.account_id = account.id
-        this.clearSync()
-      }
-    },
     async toggleClan(clan) {
       await this.runUpdate(() => updateFarmClan(clan.clan_tag, { status: clan.status === 'active' ? 'disabled' : 'active' }))
-    },
-    async transferClan(clan, event) {
-      const target = this.activeAccounts[Number(event.detail.value)]
-      if (!target || Number(target.id) === Number(clan.account_id)) return
-      await this.runUpdate(() => transferFarmClan(clan.clan_tag, target.id))
     },
     async runUpdate(action) {
       if (this.saving) return
@@ -212,6 +281,8 @@ export default {
 .form-card, .data-card, .empty-card { margin-bottom: 20rpx; border: 1rpx solid #2a3152; border-radius: 18rpx; background: #191a31; }.form-card { padding: 26rpx; }.form-title { display: block; margin-bottom: 20rpx; font-size: 27rpx; font-weight: 600; }.input, .picker-field { height: 76rpx; margin-bottom: 16rpx; padding: 0 20rpx; border: 1rpx solid #30375b; border-radius: 12rpx; box-sizing: border-box; background: #121326; color: #e9edf6; font-size: 25rpx; }.picker-field { display: flex; align-items: center; justify-content: space-between; color: #aeb7ca; }
 .primary-button { display: flex; height: 78rpx; align-items: center; justify-content: center; border-radius: 12rpx; background: #397fc0; color: #fff; font-size: 26rpx; font-weight: 600; }.primary-button::after { border: 0; }.form-tip { display: block; margin-top: 16rpx; color: #626c84; font-size: 21rpx; line-height: 1.55; }
 .sync-status { margin: 16rpx 0; padding: 18rpx 20rpx; border: 1rpx solid #31405f; border-radius: 12rpx; background: #15182b; }.sync-status.ready { border-color: #345e4b; }.sync-status.failed { border-color: #623d49; }.sync-title, .sync-detail { display: block; }.sync-title { color: #8ebbe5; font-size: 23rpx; font-weight: 600; }.sync-status.ready .sync-title { color: #72c497; }.sync-status.failed .sync-title { color: #cf7e82; }.sync-detail { margin-top: 6rpx; color: #778298; font-size: 21rpx; line-height: 1.5; }
+.search-box { display: flex; height: 82rpx; align-items: center; margin-bottom: 20rpx; padding: 0 18rpx; border: 1rpx solid #2a3152; border-radius: 14rpx; box-sizing: border-box; background: #15162b; }.search-icon { flex-shrink: 0; margin-right: 12rpx; color: #71809a; font-size: 30rpx; }.search-input { flex: 1; min-width: 0; color: #e6eaf3; font-size: 23rpx; }.search-clear { flex-shrink: 0; margin-left: 14rpx; color: #74a9df; font-size: 21rpx; }.result-count { display: block; margin: -8rpx 8rpx 18rpx; color: #657087; font-size: 20rpx; }
 .empty-card { padding: 70rpx 20rpx; color: #677087; font-size: 25rpx; text-align: center; }.data-card { overflow: hidden; }.card-main { display: flex; align-items: center; justify-content: space-between; padding: 25rpx; }.card-copy { min-width: 0; }.card-title, .card-meta { display: block; }.card-title { overflow: hidden; font-size: 28rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.card-meta { margin-top: 8rpx; color: #747e96; font-size: 21rpx; }.status-badge { flex-shrink: 0; margin-left: 18rpx; padding: 6rpx 14rpx; border-radius: 18rpx; background: rgba(67,170,115,.14); color: #6fc595; font-size: 21rpx; }.status-badge.disabled { background: rgba(193,107,110,.12); color: #be777b; }
 .card-actions { display: flex; min-height: 70rpx; align-items: center; justify-content: space-between; padding: 0 25rpx; border-top: 1rpx solid #282e4d; color: #8190ab; font-size: 23rpx; }.action-field { display: flex; align-items: center; gap: 12rpx; padding: 16rpx 0; }.action-link { padding: 18rpx 0 18rpx 30rpx; color: #77aee3; }.bottom-space { height: 50rpx; }
+.selector-mask { position: fixed; z-index: 100; top: 0; right: 0; bottom: 0; left: 0; display: flex; align-items: flex-end; background: rgba(4, 5, 15, .72); }.selector-panel { width: 100%; max-height: 72vh; padding: 28rpx 26rpx calc(28rpx + env(safe-area-inset-bottom)); border-radius: 26rpx 26rpx 0 0; box-sizing: border-box; background: #191a31; }.selector-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 22rpx; }.selector-title { font-size: 29rpx; font-weight: 650; }.selector-close { padding: 10rpx 0 10rpx 20rpx; color: #77aee3; font-size: 23rpx; }.selector-search { display: flex; height: 78rpx; align-items: center; padding: 0 18rpx; border: 1rpx solid #30375b; border-radius: 12rpx; box-sizing: border-box; background: #121326; }.selector-list { height: 520rpx; margin-top: 18rpx; }.selector-item { display: flex; min-height: 94rpx; align-items: center; justify-content: space-between; padding: 16rpx 8rpx; border-bottom: 1rpx solid #292f4d; box-sizing: border-box; }.selector-copy { min-width: 0; }.selector-name, .selector-email { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.selector-name { color: #edf0f7; font-size: 26rpx; }.selector-email { margin-top: 7rpx; color: #707b93; font-size: 21rpx; }.selector-selected { flex-shrink: 0; margin-left: 20rpx; color: #72b7ee; font-size: 21rpx; }.selector-empty { padding: 70rpx 20rpx; color: #677087; font-size: 24rpx; text-align: center; }
 </style>
