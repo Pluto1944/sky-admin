@@ -13,7 +13,7 @@
 一次完整发布可能包含三个相互独立的动作：
 
 1. **Git 发布**：提交代码、创建版本 Tag、推送发布分支和 Tag；
-2. **后端上线**：迁移数据库、重启 `sky-admin.service` / `sky-scheduler.service` 并验证接口；
+2. **后端上线**：迁移数据库、重启 API / Scheduler / Worker 三项服务并验证接口；
 3. **小程序上线**：构建、开发者工具上传、微信公众平台提交审核并发布。
 
 创建或推送 Tag **不会自动完成后端部署，也不会自动发布微信小程序**。执行人必须分别确认三个动作的状态，不得把“Tag 已推送”表述为“线上已发布”。
@@ -317,9 +317,9 @@ npm run ci:upload -- --desc "新增……；优化……；修复……"
 上线操作使用 systemd：
 
 ```bash
-sudo systemctl restart sky-admin.service sky-scheduler.service
-systemctl is-active sky-admin.service sky-scheduler.service
-systemctl status --no-pager sky-admin.service sky-scheduler.service
+sudo systemctl restart sky-admin.service sky-scheduler.service sky-sync-worker.service
+systemctl is-active sky-admin.service sky-scheduler.service sky-sync-worker.service
+systemctl status --no-pager sky-admin.service sky-scheduler.service sky-sync-worker.service
 ```
 
 `systemctl is-active` 刚返回 `active` 时，uvicorn worker 仍可能处于数秒启动窗口。健康检查应允许
@@ -341,7 +341,7 @@ done
 - 相关 `sync_jobs` 的最近状态和运行时间；
 - 服务日志中无持续异常。
 
-两个服务重启并通过基础健康检查后，执行统一运行身份验收：
+三项服务重启并通过基础健康检查后，执行统一运行身份验收：
 
 ```bash
 venv/bin/python scripts/verify_runtime_version.py \
@@ -349,8 +349,8 @@ venv/bin/python scripts/verify_runtime_version.py \
   --expected-commit "$(git rev-parse HEAD)"
 ```
 
-脚本读取 `/api/system/version`，要求 API 与调度器均心跳正常、均运行预期版本和完整 commit、
-启动时没有已跟踪未提交改动，并且两个组件身份一致。任何一项不满足均以非零状态退出；不能仅凭
+脚本读取 `/api/system/version`，要求 API、Scheduler 和生产必需的 Worker 均心跳正常、均运行预期
+版本和完整 commit、启动时没有已跟踪未提交改动，并且组件身份一致。任何一项不满足均以非零状态退出；不能仅凭
 `systemctl is-active` 或磁盘上的 `VERSION` 判断部署完成。调度器心跳存入独立的
 `service_runtime`，任务成功/失败仍只看 `sync_jobs`，两者不得混用。
 
@@ -370,7 +370,7 @@ venv/bin/python scripts/verify_runtime_version.py \
 - [ ] annotated Tag 已创建并推送；
 - [ ] Tag 解引用后的 commit 与发布 commit 一致；
 - [ ] 后端变更已备份、部署并验证；
-- [ ] `/api/system/version` 显示 API 与调度器均为预期 Tag commit、心跳正常且身份一致；
+- [ ] `/api/system/version` 显示 API、Scheduler、Worker 均为预期 Tag commit、心跳正常且身份一致；
 - [ ] 小程序版本号和版本介绍已填写；
 - [ ] 已明确记录上传、审核、发布三个状态；
 - [ ] 发布后完成普通用户入口复测。

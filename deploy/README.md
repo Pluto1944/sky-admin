@@ -376,7 +376,7 @@ sudo systemctl restart sky-admin      # 重启 FastAPI 生效
 sudo systemctl restart sky-scheduler  # 重启调度器生效（若调度器相关代码有改动）
 sudo systemctl restart sky-sync-worker # 重启 M4 Worker
 
-# 两个服务都启动后，核对它们实际加载的 VERSION 与 Git commit
+# 三项应用服务都启动后，核对它们实际加载的 VERSION 与 Git commit
 venv/bin/python scripts/verify_runtime_version.py \
   --expected-version "$(cat VERSION)" \
   --expected-commit "$(git rev-parse HEAD)"
@@ -384,7 +384,7 @@ venv/bin/python scripts/verify_runtime_version.py \
 
 `/api/ping` 只证明 API 可响应；`verify_runtime_version.py` 还会检查调度器和已启用 Worker 的心跳、各组件的
 实际启动提交和启动时工作区状态。它失败时不能把部署标记为完成，应先检查
-`/api/system/version` 与两个 systemd 服务日志。
+`/api/system/version` 与 API、Scheduler、Worker 三项 systemd 服务日志。
 
 ### SSL 证书
 
