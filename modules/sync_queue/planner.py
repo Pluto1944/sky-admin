@@ -58,6 +58,7 @@ class SyncPlanner:
         self.queue = SyncQueueRepository(conn)
 
     def _clan_interests(self, current: datetime) -> list[dict]:
+        current_text = _as_utc(current).isoformat(timespec="seconds")
         cache_by_tag = {
             normalize_tag(row["clan_tag"]): dict(row)
             for row in self.conn.execute("SELECT * FROM current_war_cache").fetchall()
@@ -70,7 +71,7 @@ class SyncPlanner:
                         WHEN alliances.plan_code IN {TIME_LIMITED_PLAN_SQL} AND grants.id IS NOT NULL
                          AND (grants.status!='active' OR
                               (grants.expires_at IS NOT NULL AND
-                               datetime(grants.expires_at) <= datetime('now', '-7 days')))
+                               datetime(grants.expires_at) <= datetime(?, '-7 days')))
                         THEN 'low' ELSE plans.sync_tier
                       END AS sync_tier
                FROM alliance_clans AS clans
@@ -81,7 +82,8 @@ class SyncPlanner:
                                WHERE g.alliance_id=alliances.id)
                WHERE clans.status = 'active' AND alliances.status = 'active'
                  AND plans.status = 'active'
-               ORDER BY clans.id"""
+               ORDER BY clans.id""",
+            (current_text,),
         ).fetchall()
         interests: list[dict] = []
         for row in rows:
@@ -122,6 +124,7 @@ class SyncPlanner:
         return interests
 
     def _cwl_interests(self, current: datetime) -> list[dict]:
+        current_text = _as_utc(current).isoformat(timespec="seconds")
         local_now = current.astimezone(BUSINESS_TZ)
         # The legacy live collector only runs through day 12.  Shadow targets
         # deliberately mirror that boundary until a later M4 cut-over reviews it.
@@ -135,7 +138,7 @@ class SyncPlanner:
                         WHEN alliances.plan_code IN {TIME_LIMITED_PLAN_SQL} AND grants.id IS NOT NULL
                          AND (grants.status!='active' OR
                               (grants.expires_at IS NOT NULL AND
-                               datetime(grants.expires_at) <= datetime('now', '-7 days')))
+                               datetime(grants.expires_at) <= datetime(?, '-7 days')))
                         THEN 'low' ELSE plans.sync_tier
                       END AS sync_tier
                FROM alliance_cwl_teams AS teams
@@ -149,7 +152,7 @@ class SyncPlanner:
                  AND seasons.status IN ('active', 'frozen', 'complete')
                  AND alliances.status = 'active' AND plans.status = 'active'
                ORDER BY teams.id""",
-            (period,),
+            (current_text, period),
         ).fetchall()
         interests: list[dict] = []
         for row in rows:
