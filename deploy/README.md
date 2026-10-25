@@ -517,6 +517,7 @@ sudo tail -f /var/log/sky-scheduler-error.log
 | COS 备份错误 | `/var/log/sky-admin-cos-backup-error.log` | 每日恢复备份错误输出 |
 | COS 归档日志 | `/var/log/sky-admin-cos-archive.log` | 本地历史 SQLite 备份归档输出 |
 | COS 归档错误 | `/var/log/sky-admin-cos-archive-error.log` | 本地历史 SQLite 备份归档错误输出 |
+| 微信代码上传密钥 | `/etc/sky-admin/secrets/miniprogram-ci/private.wx6a46dda85a013a34.key` | 仓库外受限凭据；不进入普通 COS 备份 |
 | Nginx 访问日志 | `/var/log/nginx/sky-admin-access.log` | 请求记录 |
 | Nginx 错误日志 | `/var/log/nginx/sky-admin-error.log` | Nginx 错误 |
 | SSL 证书 | `/etc/letsencrypt/live/api.skycoc.cc/` | HTTPS 证书 |
@@ -546,6 +547,19 @@ sudo systemctl enable --now sky-admin-cos-archive.timer
 挂载 drop-in 把 COSFS 的 `ensure_diskfree` 从 10GB 调整到 1GB。它仍为本地根盘保留空间，
 同时避免小于 10GB 空闲时所有上传都被 COSFS 拒绝；主机根盘应继续保有至少 1GB 空闲空间。
 
+每日恢复备份与机密迁移的边界如下：
+
+| 资产 | 每日 COS 备份 | 新服务器恢复方式 |
+| --- | --- | --- |
+| `league.db` / `war_layout.db` | SQLite Online Backup 一致快照 | 校验 SHA-256 与 `PRAGMA integrity_check` 后恢复 |
+| Git 历史与 Tag | `sky-admin.bundle` | `git bundle verify` 后克隆 |
+| 部署模板与非敏感恢复资料 | `recovery-context.tar.gz` | 仅作重建参考，仍以恢复后的 Git 代码为准 |
+| `.env` 与各类 Token | 不备份 | 从官方控制台重新签发或从独立机密备份恢复 |
+| 微信代码上传密钥 | 不进入普通备份 | 优先重置；或从独立加密副本恢复到固定路径 |
+| `venv`、`node_modules`、构建产物、二维码 | 不备份 | 根据锁文件重建或重新生成 |
+
+`manifest.json` 是一次 COS 备份完成的最终标记；没有该文件的时间戳目录视为不完整，不能用于恢复。
+
 ### 7.2 存储分层与本地备份归档
 
 本地 ext4 是热层：活动 SQLite、Git worktree/镜像、运行目录、虚拟环境和近期回滚副本必须留在本地，
@@ -570,6 +584,48 @@ sudo systemctl --no-pager --full status sky-admin-cos-backup.service sky-admin-c
 venv/bin/python -c 'import sqlite3; db=sqlite3.connect("file:league.db?mode=ro", uri=True); print(db.execute("PRAGMA integrity_check").fetchone()[0])'
 ```
 
+### 7.3 微信小程序代码上传密钥
+
+微信代码上传密钥不是应用数据库或普通恢复资料，运行副本固定放在：
+
+```text
+/etc/sky-admin/secrets/miniprogram-ci/private.wx6a46dda85a013a34.key
+```
+
+安装时使用以下权限；不要把密钥放入仓库、`.env`、日志或未加密 COS 目录：
+
+```bash
+sudo install -d -o root -g ubuntu -m 0750 /etc/sky-admin/secrets/miniprogram-ci
+sudo install -o root -g ubuntu -m 0640 private.wx6a46dda85a013a34.key \
+  /etc/sky-admin/secrets/miniprogram-ci/private.wx6a46dda85a013a34.key
+```
+
+当前每日 COS 恢复备份继续明确排除所有密钥。迁移时优先在微信公众平台重置并下载新密钥；如确需
+保留迁移副本，只能把密钥打包成由服务器外部私钥或密码保护的加密文件后再上传 COS，解密凭据不得
+与密文保存在同一服务器或同一存储账号中。
+
+密钥备份采用以下二选一策略，并在迁移前明确选定：
+
+1. **重置策略（推荐）**：不备份旧密钥，在新服务器部署时从微信公众平台重置并下载新密钥；
+2. **加密迁移策略**：保留一份独立加密副本，迁移完成且预览验证通过后销毁旧服务器运行副本。
+
+无论采用哪种策略，普通每日 COS 备份都不会自动收集 `/etc/sky-admin/secrets/`。因此只恢复
+`rebuild/sky-admin/` 目录并不能恢复微信上传能力，这是预期的安全边界，不是备份遗漏。
+
+新服务器迁移顺序：安装密钥到相同路径 → 将新服务器直连出口加入微信代码上传 IP 白名单 → 执行
+`npm run ci:check` 和 `npm run ci:preview` → 删除旧服务器白名单 → 销毁旧机密钥。代理出口不能代替
+直连出口；项目 CI 脚本会强制微信上传请求绕过代理。
+
+微信官方 CI 工具使用独立依赖目录，不进入小程序依赖树。新服务器恢复前先安装项目 Node 环境，
+然后执行：
+
+```bash
+cd /home/ubuntu/YANG/sky-admin
+bash tools/miniprogram-ci/install.sh
+```
+
+该工具只在人工预览或上传时启动，不配置 systemd、timer 或自动上传任务。
+
 ---
 
 ## 八、从零重建（换服务器时用）
@@ -590,10 +646,11 @@ git -C /home/ubuntu/YANG/sky-admin rev-parse HEAD
 `requirements.txt` 当前使用最低版本范围，并非完全锁定；`pip freeze` 只用于重建后的版本对照和
 排障，不应在发生过入侵的旧主机上直接生成可执行信任链。
 
-在维护窗口停止两个写入服务，并使用 SQLite Online Backup API 创建一致快照：
+在维护窗口停止 API、Scheduler 和 Worker 三个可能写库的服务，并使用 SQLite Online Backup API
+创建一致快照：
 
 ```bash
-sudo systemctl stop sky-scheduler sky-admin
+sudo systemctl stop sky-sync-worker sky-scheduler sky-admin
 install -d -m 0700 /home/ubuntu/sky-admin-rebuild-export
 
 /home/ubuntu/YANG/sky-admin/venv/bin/python - <<'PY'
@@ -639,8 +696,8 @@ shasum -a 256 -c SHA256SUMS
 若不立即重装，重新启动服务并确认状态：
 
 ```bash
-sudo systemctl start sky-admin sky-scheduler
-sudo systemctl --no-pager --full status sky-admin sky-scheduler
+sudo systemctl start sky-admin sky-scheduler sky-sync-worker
+sudo systemctl --no-pager --full status sky-admin sky-scheduler sky-sync-worker
 ```
 
 2026-09-12 审计时 sky-admin HEAD 为
@@ -705,6 +762,17 @@ chown ubuntu:ubuntu /home/ubuntu/YANG/sky-admin/.env
 
 不得在终端、Git diff、日志或文档中打印真实值。生产环境必须显式设置强 `JWT_SECRET`。
 
+微信小程序代码上传密钥不放入 `.env`。按「7.3 微信小程序代码上传密钥」恢复或重新签发后，安装到
+固定路径并核对权限：
+
+```bash
+sudo stat -c '%U:%G %a %n' \
+  /etc/sky-admin/secrets/miniprogram-ci/private.wx6a46dda85a013a34.key
+```
+
+结果应为 `root:ubuntu 640`。随后把新服务器的**直连出口 IP** 加入微信公众平台代码上传白名单；
+旧服务器 IP 暂时保留到新服务器预览验证通过，避免迁移过程中失去上传能力。
+
 ### 8.5 恢复数据库
 
 把已校验的 Online Backup 快照复制到新主机：
@@ -746,6 +814,18 @@ sudo bash /home/ubuntu/YANG/sky-admin/deploy/deploy.sh
 sudo certbot --nginx -d api.skycoc.cc
 ```
 
+重建前端与微信 CI 依赖；两套依赖相互隔离：
+
+```bash
+cd /home/ubuntu/YANG/sky-admin/uni-app
+source ../.frontend-env/activate
+npm ci
+bash patches/apply-patches.sh
+
+cd /home/ubuntu/YANG/sky-admin
+bash tools/miniprogram-ci/install.sh
+```
+
 ### 8.7 Nginx 与备案过渡期（历史）
 
 仓库 `deploy/nginx.conf` 是当前域名部署模板。`deploy/nginx-ip.conf` 仅保留为备案过渡期
@@ -761,22 +841,29 @@ sudo systemctl reload nginx
 ### 8.8 DNS 切换前验收
 
 ```bash
-sudo systemctl is-enabled sky-admin sky-scheduler nginx
-sudo systemctl is-active sky-admin sky-scheduler nginx
+sudo systemctl is-enabled sky-admin sky-scheduler sky-sync-worker nginx
+sudo systemctl is-active sky-admin sky-scheduler sky-sync-worker nginx
 curl --fail --show-error http://127.0.0.1:8000/api/ping
 curl --fail --show-error -H 'Host: api.skycoc.cc' http://127.0.0.1/api/ping
 sudo ss -lntp | grep -E ':(80|443|8000)\b'
-sudo journalctl -u sky-admin -u sky-scheduler -n 100 --no-pager
+sudo journalctl -u sky-admin -u sky-scheduler -u sky-sync-worker -n 100 --no-pager
+
+cd /home/ubuntu/YANG/sky-admin/uni-app
+source ../.frontend-env/activate
+npm run ci:check
+npm run ci:preview -- --desc "新服务器迁移验收"
 ```
 
 验收条件：
 
-- 三个服务均为 enabled/active；
+- API、Scheduler、Worker 和 Nginx 均为 enabled/active；
 - FastAPI 只监听 `127.0.0.1:8000`；
 - 本机 API 和 Nginx 反代均返回成功；
 - 日志没有 `.env` 缺失、数据库锁、迁移失败或持续重启；
 - `league.db` 完整性为 `ok`，关键历史记录数量与旧机最终 manifest 一致；
 - 调度器能列出任务状态，但不要在验收中随意触发会写外部系统的任务。
+- `ci:check` 与真实 `ci:preview` 均成功，证明密钥、直连 IP 白名单和微信工具链已经恢复；
+  迁移验收不执行 `ci:upload`，避免创建无版本意义的开发版本。
 
 本机验收通过后再把 `api.skycoc.cc` A 记录切到新 IP，申请/确认新证书，并执行：
 
@@ -786,3 +873,5 @@ sudo certbot renew --dry-run
 ```
 
 观察一个完整调度周期且无异常后，才能销毁旧服务器。
+确认新服务器能够生成体验二维码后，从微信公众平台删除旧服务器出口 IP 白名单，并销毁旧机上的
+代码上传密钥运行副本；如果采用重置策略，旧密钥已经失效，无需继续保留。

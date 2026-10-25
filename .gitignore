@@ -10,6 +10,7 @@ __pycache__/
 .venv/
 venv/
 .frontend-env/
+tools/miniprogram-ci/node_modules/
 
 # macOS
 .DS_Store

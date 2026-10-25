@@ -59,6 +59,7 @@
 
 - Git annotated Tag 是唯一的发布版本身份，例如 `v1.1.1`；小程序版本号去掉前缀，为 `1.1.1`。
 - 发版前运行 `venv/bin/python scripts/prepare_release_version.py vX.Y.Z`，它同步根目录 `VERSION`、`manifest.json`、包元数据及 `config/release.js`；这些文件必须与最终 Tag 一致后才能构建。
+- 微信官方 `miniprogram-ci` 已用于服务器预览和上传；上传脚本强制读取统一版本号、校验本地/远端 Tag，并绕过服务器代理直连微信。审核和正式发布仍在微信公众平台人工确认。
 - 管理页“关于与版本”显示小程序内置版本，并请求公开的 `/api/system/version` 显示统一服务版本和运行状态；请求失败时回退 `/api/ping`，不阻塞查看。普通用户只看版本与服务状态，`role=admin` 的用户额外看到 API、调度器的短 commit、心跳及启动时工作区告警。组件不一致表示发布尚未完整部署或有服务未重启。
 
 ---
@@ -877,6 +878,15 @@ npm run build:mp-weixin
 
 # 开发构建 + watch 模式
 npm run dev:mp-weixin
+
+# 生产构建并检查密钥、版本和 CI 配置（不调用微信接口）
+npm run ci:check
+
+# 生产构建并生成体验预览二维码
+npm run ci:preview -- --desc "预览说明"
+
+# 生产构建并上传微信开发版本（需要已推送的 annotated Tag）
+npm run ci:upload -- --desc "版本介绍"
 ```
 
 `package.json` 中的脚本已经预设了所需环境变量：
@@ -899,6 +909,13 @@ npm run dev:mp-weixin
 | `UNI_CLI_CONTEXT` | 项目根目录（用于解析 package.json 等） | node_modules 内部路径（需覆盖） |
 | `UNI_INPUT_DIR` | 源码目录（manifest.json / pages.json / App.vue 所在目录） | `src/`（需覆盖） |
 | `UNI_OUTPUT_DIR` | 编译产物输出目录 | `dist/build/{platform}` |
+| `MINIPROGRAM_CI_PRIVATE_KEY_PATH` | 微信代码上传密钥路径；只能指向仓库外的受限权限普通文件 | `/etc/sky-admin/secrets/miniprogram-ci/private.wx6a46dda85a013a34.key` |
+| `MINIPROGRAM_CI_ROBOT` | 微信 CI 机器人编号，范围 1–30 | `1` |
+| `MINIPROGRAM_CI_QR_DIR` | 体验预览二维码输出目录 | `/var/tmp/sky-admin/miniprogram-ci` |
+
+`miniprogram-ci` 会自动读取代理环境变量，而本机代理出口与直连公网 IP 不同。项目脚本在加载
+`miniprogram-ci` 前清除当前进程的代理变量，并把微信域名加入 `NO_PROXY`；微信代码上传白名单应配置
+直连公网 IP `115.159.64.19`。密钥内容、代理地址和代理凭据均不得输出到日志或写入仓库。
 
 #### 1.7 编译产物结构
 
@@ -1000,6 +1017,19 @@ rsync -avz --delete \
 | `webpack` | `^4.47.0` | Webpack 4（必须 4.x，5.x 不兼容） |
 | `postcss` | `^7.0.39` | PostCSS 7（必须 7.x，8.x 不兼容） |
 | `autoprefixer` | `^9.8.8` | Autoprefixer 9（必须 9.x，10.x 需要 PostCSS 8） |
+| `miniprogram-ci` | `2.1.48` | 微信官方预览和代码上传工具；位于独立 `tools/miniprogram-ci/`，不进入小程序依赖树 |
+
+`miniprogram-ci` 的官方包包含大量仅在构建/上传时使用的旧传递依赖，因此不能加入小程序
+`dependencies` 或 `devDependencies`。它使用独立 `package-lock.json`，只在人工执行预览或上传命令时
+加载，不作为常驻进程运行。首次部署或 lockfile 更新后执行：
+
+```bash
+bash tools/miniprogram-ci/install.sh
+```
+
+工具入口和测试分别为 `tools/miniprogram-ci/miniprogram-ci.js`、
+`tools/miniprogram-ci/test-miniprogram-ci.js`；安装脚本会临时绕过本机代理、使用官方 npm registry，
+但不会修改用户或项目的 npm registry 配置。日常仍从 `uni-app/` 执行 `npm run ci:*`。
 
 ---
 

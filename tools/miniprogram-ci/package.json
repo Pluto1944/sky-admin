@@ -1,0 +1,12 @@
+{
+  "name": "sky-admin-miniprogram-ci",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Isolated WeChat miniprogram preview and upload tooling for sky-admin",
+  "engines": {
+    "node": ">=16.1.0"
+  },
+  "dependencies": {
+    "miniprogram-ci": "2.1.48"
+  }
+}

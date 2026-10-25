@@ -16,6 +16,8 @@
 | [`docs/10-api-server.md`](./docs/10-api-server.md) | FastAPI 后端 API 服务 |
 | [`docs/11-uni-app.md`](./docs/11-uni-app.md) | 微信小程序前端（编译环境、同步流程、调试） |
 | [`docs/15-scheduler.md`](./docs/15-scheduler.md) | 周期调度方案设计（含数据表与刷新脚本梳理） |
+| [`docs/26-release-rules.md`](./docs/26-release-rules.md) | 统一版本号、Tag、微信 CI 上传与发布验收流程 |
+| [`deploy/README.md`](./deploy/README.md) | 生产部署、COS 备份、服务器迁移与恢复 |
 | [`docs/CHANGELOG.md`](./docs/CHANGELOG.md) | 版本更新记录 |
 | [`docs/fetch_cwl_data_design.md`](./docs/fetch_cwl_data_design.md) | CWL 数据拉取设计 |
 | [`scripts/README.md`](./scripts/README.md) | 脚本使用说明 |

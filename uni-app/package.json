@@ -4,7 +4,11 @@
   "private": true,
   "scripts": {
     "dev:mp-weixin": "cross-env NODE_ENV=development UNI_PLATFORM=mp-weixin UNI_CLI_CONTEXT=./ UNI_INPUT_DIR=./ UNI_OUTPUT_DIR=./dist/dev/mp-weixin vue-cli-service uni-build --watch",
-    "build:mp-weixin": "cross-env NODE_ENV=production UNI_PLATFORM=mp-weixin UNI_CLI_CONTEXT=./ UNI_INPUT_DIR=./ UNI_OUTPUT_DIR=./dist/build/mp-weixin vue-cli-service uni-build"
+    "build:mp-weixin": "cross-env NODE_ENV=production UNI_PLATFORM=mp-weixin UNI_CLI_CONTEXT=./ UNI_INPUT_DIR=./ UNI_OUTPUT_DIR=./dist/build/mp-weixin vue-cli-service uni-build",
+    "ci:check": "npm run build:mp-weixin && node ../tools/miniprogram-ci/miniprogram-ci.js check",
+    "ci:preview": "npm run build:mp-weixin && node ../tools/miniprogram-ci/miniprogram-ci.js preview",
+    "ci:upload": "npm run build:mp-weixin && node ../tools/miniprogram-ci/miniprogram-ci.js upload",
+    "test:miniprogram-ci": "node ../tools/miniprogram-ci/test-miniprogram-ci.js"
   },
   "dependencies": {
     "@dcloudio/uni-cli-i18n": "^2.0.2-5020320260806001",
