@@ -43,13 +43,13 @@ def parse_args() -> argparse.Namespace:
     for command in ("reset-password", "enable", "disable"):
         item = subparsers.add_parser(command)
         item.add_argument("--username", required=True)
-    transfer = subparsers.add_parser("transfer-creator", help="原子转移唯一创建者")
+    transfer = subparsers.add_parser("transfer-creator", help="原子转移唯一超级管理员")
     transfer.add_argument("--from-username", required=True)
     transfer.add_argument("--to-username", required=True)
     transfer.add_argument("--yes", action="store_true", help="确认执行角色转移")
-    initialize = subparsers.add_parser("initialize-creator", help="无创建者时初始化唯一创建者")
+    initialize = subparsers.add_parser("initialize-creator", help="无超级管理员时初始化唯一超级管理员")
     initialize.add_argument("--username", required=True)
-    initialize.add_argument("--yes", action="store_true", help="确认执行创建者初始化")
+    initialize.add_argument("--yes", action="store_true", help="确认执行超级管理员初始化")
     return parser.parse_args()
 
 
@@ -69,18 +69,18 @@ def main() -> int:
             )
         elif args.command == "transfer-creator":
             if not args.yes:
-                raise ValueError("转移创建者必须显式指定 --yes")
+                raise ValueError("转移超级管理员必须显式指定 --yes")
             source = repository.get_by_username(args.from_username)
             target = repository.get_by_username(args.to_username)
             if source is None or target is None:
-                raise LookupError("创建者转移账号不存在")
+                raise LookupError("超级管理员转移账号不存在")
             _, account = repository.transfer_creator(source["id"], target["id"])
         elif args.command == "initialize-creator":
             if not args.yes:
-                raise ValueError("初始化创建者必须显式指定 --yes")
+                raise ValueError("初始化超级管理员必须显式指定 --yes")
             target = repository.get_by_username(args.username)
             if target is None:
-                raise LookupError("创建者账号不存在")
+                raise LookupError("超级管理员账号不存在")
             account = repository.initialize_creator(target["id"])
         else:
             account = repository.get_by_username(args.username)

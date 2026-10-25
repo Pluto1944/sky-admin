@@ -51,6 +51,7 @@ API 不扫描历史 JSON：部落战页按 `(clan_tag, end_time)` 索引查询�
 | 任务 | 可写入 | 不可做 |
 |---|---|---|
 | `current_wars` | 当前状态、最终普通战档案和玩家事实 | 失败时清空上次快照；写任何旧聚合表 |
+| `farm_monitor` | 当前互刷场次逐部落战争检测投影 | 改登记、匹配或积分事实；写普通 `current_war_cache` |
 | `cwl_live` | 当前月 CWL 分组/单场原始档案 | 写未完成的 `league_results` |
 | `cwl` | 从完整本地档案重建 `league_results` | 外部聚合 API 直写成绩 |
 | `member_combat_stats` | 升级后旧战争的事实物化 | 写旧成员摘要缓存 |
@@ -78,3 +79,7 @@ M4 的 `sync_interests`、`sync_targets`、`sync_tasks` 和 `sync_attempts` 同�
 
 `farm_clan_request` 是互刷新部落验证产生的短期 `sync_interests` 来源，默认 24 小时过期。它只用于
 建立 `clan_profile` 官方资料目标，不是互刷部落绑定事实；即使任务成功，也必须由管理端另行确认绑定。
+
+`farm_round_monitors` 是当前互刷场次的可重建管理投影：权威来源是 COC `currentwar`，唯一键为
+`(round_id, clan_id)`，由登记请求和 `farm_monitor` 更新，管理端监控页消费。它不保存成员宽表；历史
+场次可随业务保留，删除后不影响登记、匹配和积分事实，可按场次快照重新初始化并分批刷新。

@@ -400,7 +400,12 @@ GET  /api/farm-system/dashboard
 POST /api/farm-system/admin/rounds
 PATCH /api/farm-system/admin/rounds/{round_id}
 GET  /api/farm-system/admin/rounds/{round_id}/results
+GET  /api/farm-system/admin/monitor/overview
+GET  /api/farm-system/admin/monitor/clans
+POST /api/farm-system/creator/monitor/refresh
 POST /api/farm-system/rounds/{round_id}/clans/{clan_tag}/register
+GET  /api/farm-system/creator/accounts/{account_id}/dashboard
+POST /api/farm-system/creator/accounts/{account_id}/rounds/{round_id}/clans/{clan_tag}/register
 POST /api/farm-system/creator/matches/{match_id}/revoke
 POST /api/farm-system/creator/matches/{match_id}/reopen
 POST /api/farm-system/creator/rounds/{round_id}/cancel
@@ -409,7 +414,7 @@ POST /api/farm-system/creator/accounts/{account_id}/reset-password
 
 部落详情接口不在 HTTP 请求路径直连 COC API。基本资料读取 `clan_profile_cache`；当前普通部落战
 优先读取 `current_war_cache`，动态添加且尚未进入常规战争同步的部落回退到本轮最近一次登记保存的
-官方战争摘要；互刷部分读取当前场次快照，返回积分、登记状态、互刷对手和预定胜负。创建者和管理员
+官方战争摘要；互刷部分读取当前场次快照，返回积分、登记状态、互刷对手和预定胜负。超级管理员和管理员
 可以查看全部互刷部落，成员只能查看当前账号绑定的部落。响应同时返回 `opponent`：优先选择本轮
 互刷匹配对手，尚未形成匹配时使用当前普通战争对手；公告、位置、人数和等级只读取该标签已有的
 `clan_profile_cache`，外部对手无缓存时返回基础名称和标签，不在详情请求中临时调用 COC API。
@@ -424,7 +429,7 @@ POST /api/farm-system/creator/accounts/{account_id}/reset-password
 `disable`。密码必须交互输入，不能作为命令行参数或写入日志。
 
 `GET /clans` 始终按当前互刷账号 ID 过滤。`/admin/*` 需要 `admin` 或 `creator`；管理员不能
-修改创建者，也不能提升账号角色，创建者可以在 `member / admin` 间调整角色。唯一创建者的初始化、
+修改超级管理员，也不能提升账号角色，超级管理员可以在 `member / admin` 间调整角色。唯一超级管理员的初始化、
 停用或转移不在页面 API 中完成。新增部落只接受 `clan_profile_cache` 中已由受控任务同步成功或保留
 为 stale 的官方资料，HTTP 请求路径不会为了添加部落直接调用 COC API。新增部落前，管理接口先写入
 临时 `farm_clan_request` 同步需求和 `clan_profile` 互动任务，页面轮询任务/缓存状态；Worker 成功写入
@@ -441,12 +446,16 @@ POST /api/farm-system/creator/accounts/{account_id}/reset-password
 对手写 `match_failed` 且积分不变。`not_in_war / war_mismatch / fetch_failed` 均可重试且不改积分。
 重复登记直接返回已保存结果，不再次请求 COC 或重新随机。
 
+部落监控读接口仅聚合当前场次快照、`farm_round_monitors`、匹配和登记事实，不在 HTTP 请求路径调用
+COC API。列表支持状态、账号、搜索、排序和分页。登记获得的官方战争摘要同步回写监控；超级管理员的
+刷新接口只把未结束场次的异常项重新标记为到期，由 `farm_monitor` 调度任务分批执行，不同步等待最多 200 个请求；已完成场次不再提供刷新。
+
 一键登记第一版不新增批次 API：小程序只在当前账号范围内串行调用同一个单部落登记接口，逐项刷新，
 单个失败不会终止后续部落。后端幂等和权限规则与单个登记完全一致。
 
 `/creator/*` 只接受数据库实时角色为 `creator` 的互刷令牌。撤销匹配和整场取消必须填写原因，
 通过反向积分流水恢复余额，不覆盖或删除原始流水；整场取消在单一事务中完成。撤销后的匹配默认不可
-重新登记，只有创建者调用 `reopen` 后双方才恢复为未登记；旧匹配及正反积分流水继续保留。密码重置递增
+重新登记，只有超级管理员调用 `reopen` 后双方才恢复为未登记；旧匹配及正反积分流水继续保留。密码重置递增
 `token_version`，目标账号全部旧令牌立即失效。
 
 灰度期间设置 `FARM_SYSTEM_ALLOWED_ACCOUNT_IDS` 后，登录和每次令牌复核都会检查当前账号 ID；移除账号

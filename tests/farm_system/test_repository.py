@@ -82,14 +82,14 @@ def test_only_one_active_creator_is_allowed(db):
     service = _service(db)
     service.create_account(
         username="creator.one@example.com",
-        display_name="创建者一",
+        display_name="超级管理员一",
         password="strong-password",
         role="creator",
     )
     with pytest.raises(sqlite3.IntegrityError):
         service.create_account(
             username="creator.two@example.com",
-            display_name="创建者二",
+            display_name="超级管理员二",
             password="strong-password",
             role="creator",
         )
@@ -137,7 +137,7 @@ def test_admin_reset_and_disable_invalidate_tokens_and_write_audit(db):
 def test_creator_transfer_is_atomic_and_invalidates_both_tokens(db):
     service = _service(db)
     old = service.create_account(
-        username="creator.one@example.com", display_name="创建者一",
+        username="creator.one@example.com", display_name="超级管理员一",
         password="strong-password", role="creator",
     )
     new = service.create_account(

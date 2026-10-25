@@ -13,6 +13,7 @@
 | `cwl_live` | 战斗日每 2 分钟；准备日按轮次限频 | `cwl_live_group_cache`、`cwl_live_war_cache` | 合并所有联盟已确认月度队伍并按 Tag 去重；第一轮准备日动态 30/2 分钟；后续准备日由上一轮结束触发 |
 | `cwl_assembly` | 月初窗口每 5 分钟 | 名单 revision、集结核对 | 开赛或截止后冻结，不重绑已冻结 revision |
 | `farm_stats` | 30 分钟 | `farm_stats` | API 只读缓存，不在请求内批量访问 COC |
+| `farm_monitor` | 每 1 分钟检查到期批次 | `farm_round_monitors` | 仅当前互刷场次；默认每批 20 个，检测到战争后停拉，未确认项在开始搜战后 60 分钟内有限重试 |
 | `coc_sync` | 6 小时 | `accounts`、部落资料 | COC 身份和当前归属权威同步 |
 | `player_details` | 每天 | 账号详情/活动观察 | 只扫描 high/internal 套餐（及苍穹兼容配置）部落；免费独占部落不逐成员扫描 |
 | `member_combat_stats` | 每天 | `member_war_facts` | 仅补齐旧档案的新版事实 |
@@ -23,6 +24,12 @@
 | `sync_shadow_plan` | 默认关闭；启用后默认每 5 分钟 | `sync_interests`、`sync_targets`、影子 `sync_tasks` | 只读本地联盟配置和缓存；不访问外部 API、不写业务事实、不接管旧任务 |
 | `sync_queue_plan` | 默认关闭；启用后默认每 1 分钟 | 同步需求、目标与 live/shadow 任务 | 按资源类型分阶段接管；Planner 本身不访问外部 API |
 | `war_layout` | 北京时间固定时刻 | 独立运行库、公众号草稿 | 默认仅草稿；群发硬开关不可绕过 |
+
+## 互刷部落监控
+
+`farm_monitor` 不接管普通 `current_wars`，也不写 `current_war_cache`。它只针对互刷当前场次快照，
+将官方战争是否可检测、对手和刷新时间写入 `farm_round_monitors`。页面请求只读该投影；手动刷新只调整
+异常记录的 `next_check_at`，实际外部请求仍由调度器按批次执行。
 
 ## M4.0 影子规划
 

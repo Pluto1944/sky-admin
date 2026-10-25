@@ -11,6 +11,7 @@ from modules.farm_system.management import (
     FarmManagementService,
     FarmPermissionError,
 )
+from modules.farm_system.monitoring import FarmMonitoringService
 from modules.farm_system.clan_sync import FarmClanSyncService
 from modules.farm_system.operations import (
     CreatorPermissionError,
@@ -111,7 +112,7 @@ def require_farm_manager(account: dict = Depends(require_farm_account)) -> dict:
 
 def require_farm_creator(account: dict = Depends(require_farm_account)) -> dict:
     if account["role"] != "creator":
-        raise HTTPException(status_code=403, detail="仅互刷系统创建者可以执行该操作")
+        raise HTTPException(status_code=403, detail="仅互刷系统超级管理员可以执行该操作")
     return account
 
 
@@ -123,7 +124,7 @@ def _management_error(exc: Exception) -> HTTPException:
     if isinstance(exc, sqlite3.IntegrityError):
         detail = "账号名或部落标签已存在"
         if "uq_farm_auth_active_creator" in str(exc):
-            detail = "只能存在一个有效创建者账号"
+            detail = "只能存在一个有效超级管理员账号"
         return HTTPException(status_code=409, detail=detail)
     if isinstance(exc, ClanProfileUnavailableError):
         return HTTPException(status_code=409, detail=str(exc))
@@ -378,6 +379,23 @@ def dashboard(
     return result
 
 
+@router.get(
+    "/creator/accounts/{account_id}/dashboard",
+    dependencies=[Depends(require_farm_system_enabled)],
+)
+def creator_account_dashboard(
+    account_id: int,
+    account: dict = Depends(require_farm_creator),
+    db: Database = Depends(get_db),
+):
+    target = FarmAccountRepository(db.conn).get_by_id(account_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="互刷账号不存在")
+    result = FarmRoundService(db.conn).dashboard({"id": int(target["id"])})
+    result["registration_enabled"] = _registration_enabled()
+    return result
+
+
 @router.post("/admin/rounds", dependencies=[Depends(require_farm_system_enabled)])
 def admin_create_round(
     payload: dict,
@@ -419,6 +437,57 @@ def admin_round_results(
         raise _management_error(exc) from exc
 
 
+@router.get("/admin/monitor/overview", dependencies=[Depends(require_farm_system_enabled)])
+def admin_monitor_overview(
+    round_id: int | None = None,
+    account: dict = Depends(require_farm_manager),
+    db: Database = Depends(get_db),
+):
+    try:
+        return FarmMonitoringService(db.conn).overview(account, round_id)
+    except (ValueError, LookupError, FarmPermissionError) as exc:
+        raise _management_error(exc) from exc
+
+
+@router.get("/admin/monitor/clans", dependencies=[Depends(require_farm_system_enabled)])
+def admin_monitor_clans(
+    round_id: int | None = None,
+    status_filter: str = "attention",
+    account_id: int | None = None,
+    search: str = "",
+    sort: str = "attention",
+    page: int = 1,
+    page_size: int = 30,
+    account: dict = Depends(require_farm_manager),
+    db: Database = Depends(get_db),
+):
+    try:
+        return FarmMonitoringService(db.conn).list_clans(
+            account,
+            round_id=round_id,
+            status_filter=status_filter,
+            account_id=account_id,
+            search=search,
+            sort=sort,
+            page=page,
+            page_size=page_size,
+        )
+    except (ValueError, LookupError, FarmPermissionError) as exc:
+        raise _management_error(exc) from exc
+
+
+@router.post("/creator/monitor/refresh", dependencies=[Depends(require_farm_system_enabled)])
+def creator_refresh_monitor(
+    round_id: int | None = None,
+    account: dict = Depends(require_farm_creator),
+    db: Database = Depends(get_db),
+):
+    try:
+        return FarmMonitoringService(db.conn).request_refresh(account, round_id)
+    except (ValueError, LookupError, FarmPermissionError) as exc:
+        raise _management_error(exc) from exc
+
+
 @router.post(
     "/rounds/{round_id}/clans/{clan_tag}/register",
     dependencies=[
@@ -435,6 +504,31 @@ def register_farm_clan(
 ):
     try:
         return FarmRegistrationService(db.conn, coc_client).register(account, round_id, clan_tag)
+    except RegistrationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(status_code=409, detail="登记结果发生并发冲突，请重试") from exc
+
+
+@router.post(
+    "/creator/accounts/{account_id}/rounds/{round_id}/clans/{clan_tag}/register",
+    dependencies=[
+        Depends(require_farm_system_enabled),
+        Depends(require_farm_registration_enabled),
+    ],
+)
+def creator_register_farm_clan(
+    account_id: int,
+    round_id: int,
+    clan_tag: str,
+    account: dict = Depends(require_farm_creator),
+    db: Database = Depends(get_db),
+    coc_client: CocApiClient = Depends(get_farm_coc_client),
+):
+    try:
+        return FarmRegistrationService(db.conn, coc_client).register_for_account(
+            account, account_id, round_id, clan_tag
+        )
     except RegistrationError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     except sqlite3.IntegrityError as exc:

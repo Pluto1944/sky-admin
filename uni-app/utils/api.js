@@ -221,9 +221,45 @@ export function getFarmRoundResults(roundId) {
   return farmRequest(`/api/farm-system/admin/rounds/${encodeURIComponent(roundId)}/results`)
 }
 
+export function getFarmMonitorOverview(roundId = null) {
+  const query = roundId ? `?round_id=${encodeURIComponent(roundId)}` : ''
+  return farmRequest(`/api/farm-system/admin/monitor/overview${query}`)
+}
+
+export function getFarmMonitorClans(options = {}) {
+  const params = [
+    `status_filter=${encodeURIComponent(options.statusFilter || 'attention')}`,
+    `sort=${encodeURIComponent(options.sort || 'attention')}`,
+    `page=${encodeURIComponent(options.page || 1)}`,
+    `page_size=${encodeURIComponent(options.pageSize || 30)}`
+  ]
+  if (options.roundId) params.push(`round_id=${encodeURIComponent(options.roundId)}`)
+  if (options.accountId) params.push(`account_id=${encodeURIComponent(options.accountId)}`)
+  if (options.search) params.push(`search=${encodeURIComponent(options.search)}`)
+  return farmRequest(`/api/farm-system/admin/monitor/clans?${params.join('&')}`)
+}
+
+export function refreshFarmMonitor(roundId = null) {
+  const query = roundId ? `?round_id=${encodeURIComponent(roundId)}` : ''
+  return farmRequest(`/api/farm-system/creator/monitor/refresh${query}`, 'POST')
+}
+
 export function registerFarmClan(roundId, clanTag) {
   return farmRequest(
     `/api/farm-system/rounds/${encodeURIComponent(roundId)}/clans/${encodeURIComponent(clanTag)}/register`,
+    'POST'
+  )
+}
+
+export function getFarmCreatorAccountDashboard(accountId) {
+  return farmRequest(
+    `/api/farm-system/creator/accounts/${encodeURIComponent(accountId)}/dashboard`
+  )
+}
+
+export function registerFarmClanForAccount(accountId, roundId, clanTag) {
+  return farmRequest(
+    `/api/farm-system/creator/accounts/${encodeURIComponent(accountId)}/rounds/${encodeURIComponent(roundId)}/clans/${encodeURIComponent(clanTag)}/register`,
     'POST'
   )
 }

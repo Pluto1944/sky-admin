@@ -98,7 +98,7 @@ export default {
   },
   onShow() { this.load() },
   methods: {
-    roleLabel(role) { return ({ creator: '创建者', admin: '管理员', member: '成员' })[role] || '成员' },
+    roleLabel(role) { return ({ creator: '超级管理员', admin: '管理员', member: '成员' })[role] || '成员' },
     roleIndex(role) { return Math.max(0, ROLES.indexOf(role)) },
     canEditAccount(account) {
       if (account.role === 'creator') return false

@@ -25,6 +25,7 @@
 | 互刷管理审计 | `farm_audit_logs` | `id` | 账号创建、密码和状态变更等受控操作审计 |
 | 互刷场次 | `farm_rounds` | `id` | 全联盟统一时间、场次状态和时间锁定 |
 | 互刷场次部落 | `farm_round_clans` | `(round_id, clan_id)` | 创建场次时的部落、归属和积分快照及登记状态 |
+| 互刷场次监控 | `farm_round_monitors` | `(round_id, clan_id)` | 当前场次战争检测状态、对手、检查时间和重试调度投影 |
 | 互刷匹配 | `farm_matches` | `id` / `(round_id, pair_key)` | 内部匹配或外部匹配失败及一次性平分随机结果 |
 | 互刷积分流水 | `farm_score_ledger` | `id` | 胜负积分前后余额和后续反向冲销事实 |
 | 互刷登记尝试 | `farm_registration_attempts` | `id` | 每次手工登记的状态、时间校验和排障摘要 |
@@ -129,7 +130,7 @@ M5 手动刷新复用同一 `sync_targets` 和 `sync_tasks`：按 `resource_type
 
 `farm_auth_accounts` 与 `wechat_users` 完全分离。账号统一使用邮箱登录，邮箱规范化后唯一，角色只允许
 `creator / admin / member`，状态只允许 `active / disabled`；部分唯一索引保证同一时刻最多一个
-有效创建者。密码只保存带随机盐的 `scrypt-v1` 哈希。修改或重置密码、启停账号都会递增
+有效超级管理员。密码只保存带随机盐的 `scrypt-v1` 哈希。修改或重置密码、启停账号都会递增
 `token_version`，使全部旧互刷令牌失效。
 
 `farm_clans` 从 F1 起预留账号与部落归属，使用 `clan_tag_key` 比较规范化标签并兼容 COC 标签中的
@@ -147,6 +148,10 @@ F4 的 `farm_matches`、`farm_score_ledger` 和 `farm_registration_attempts` 分
 可重试观测。一个场次的同一规范化部落对最多一条有效匹配，同一匹配同一部落最多一条基础胜负流水。
 内部双方结果、两笔流水、物化积分和场次状态在同一事务提交；失败全部回滚。登记尝试只保存必要的
 官方状态、时间和对手摘要，不保存成员宽表、API Token 或授权头。
+
+`farm_round_monitors` 是可重建的当前场次管理投影，不是登记或积分事实。场次创建时按参与快照初始化；
+登记请求和 `farm_monitor` 调度任务写入官方战争状态、对手、检查时间、错误和下次检查时间。删除后可从
+`farm_round_clans`、最近登记摘要和 COC 官方接口分批恢复。
 `farm_auth_events` 只记录账号 ID（可空）、结果和时间，用于统计成功、无效凭证、停用、限流和未进入
 灰度范围；它不保存提交的用户名、密码、令牌或客户端授权头。
 
@@ -216,6 +221,7 @@ F4 的 `farm_matches`、`farm_score_ledger` 和 `farm_registration_attempts` 分
 | `farm_stats` / 部落资料缓存 | 对应调度任务重新抓取 |
 | `farm_fill_accounts` | 不可由 COC 重建；从一致性备份恢复，或由已确认来源显式重新导入 |
 | `farm_auth_accounts` / `farm_clans` / `farm_rounds` / `farm_round_clans` / `farm_matches` / `farm_score_ledger` / `farm_audit_logs` | 私有管理事实，不可由 COC 重建；从一致性备份恢复 |
+| `farm_round_monitors` | 可从场次快照、登记摘要和 COC API 分批重建的当前场次投影 |
 | `farm_registration_attempts` | 可丢弃观测记录；不作为匹配或积分事实 |
 | `farm_auth_events` | 可丢弃认证观测记录；不作为账号或授权事实 |
 | `cwl_assembly_cache` 未冻结记录 | 由月初检查窗口重新核对；冻结结果不可用重算值替换 |

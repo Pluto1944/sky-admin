@@ -37,9 +37,9 @@ class FarmManagementService:
         _assert_manager(actor)
         role = payload.get("role") or "member"
         if role == "creator":
-            raise FarmPermissionError("创建者账号只能通过受控运维入口初始化或转移")
+            raise FarmPermissionError("超级管理员账号只能通过受控运维入口初始化或转移")
         if actor["role"] != "creator" and role != "member":
-            raise FarmPermissionError("只有创建者可以设置管理员或创建者角色")
+            raise FarmPermissionError("只有超级管理员可以设置管理员或超级管理员角色")
         return self.auth.create_account(
             username=payload.get("username", ""),
             display_name=payload.get("display_name", ""),
@@ -59,12 +59,12 @@ class FarmManagementService:
             (requested_role is not None and requested_role != "creator")
             or requested_status == "disabled"
         ):
-            raise FarmPermissionError("创建者账号不能在页面中停用或降级")
+            raise FarmPermissionError("超级管理员账号不能在页面中停用或降级")
         if actor["role"] != "creator":
             if target["role"] == "creator":
-                raise FarmPermissionError("管理员不能修改创建者账号")
+                raise FarmPermissionError("管理员不能修改超级管理员账号")
             if requested_role is not None and requested_role != target["role"]:
-                raise FarmPermissionError("只有创建者可以修改账号角色")
+                raise FarmPermissionError("只有超级管理员可以修改账号角色")
         return self.accounts.update_account(
             account_id,
             display_name=payload.get("display_name"),

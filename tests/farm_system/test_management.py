@@ -60,7 +60,7 @@ def test_admin_cannot_modify_creator_or_promote_member(db):
     with pytest.raises(FarmPermissionError):
         service.create_account(
             creator,
-            {"username": "creator.two@example.com", "display_name": "创建者二",
+            {"username": "creator.two@example.com", "display_name": "超级管理员二",
              "password": "strong-password", "role": "creator"},
         )
 

@@ -595,6 +595,32 @@ CREATE TABLE IF NOT EXISTS farm_round_clans (
 CREATE INDEX IF NOT EXISTS idx_farm_round_clans_account_status
 ON farm_round_clans(round_id, account_id_snapshot, registration_status);
 
+CREATE TABLE IF NOT EXISTS farm_round_monitors (
+    round_id        INTEGER NOT NULL,
+    clan_id         INTEGER NOT NULL,
+    war_status      TEXT NOT NULL DEFAULT 'unchecked'
+                    CHECK(war_status IN (
+                        'unchecked', 'not_in_war', 'preparation', 'in_war',
+                        'war_ended', 'cwl', 'error'
+                    )),
+    opponent_tag    TEXT,
+    opponent_name   TEXT,
+    official_time   TEXT,
+    source          TEXT,
+    checked_at      TEXT,
+    next_check_at   TEXT,
+    error           TEXT,
+    check_count     INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    PRIMARY KEY(round_id, clan_id),
+    FOREIGN KEY(round_id) REFERENCES farm_rounds(id) ON DELETE RESTRICT,
+    FOREIGN KEY(clan_id) REFERENCES farm_clans(id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS idx_farm_round_monitors_due
+ON farm_round_monitors(round_id, next_check_at, war_status);
+
 CREATE TABLE IF NOT EXISTS farm_matches (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     round_id          INTEGER NOT NULL,
@@ -1725,6 +1751,7 @@ class Database:
             "sync_attempts", "sync_tasks", "sync_targets", "sync_interests",
             "farm_auth_events",
             "farm_registration_attempts", "farm_score_ledger", "farm_matches",
+            "farm_round_monitors",
             "farm_round_clans", "farm_rounds",
             "farm_audit_logs", "farm_clans", "farm_auth_accounts",
             "alliance_cwl_teams", "alliance_cwl_seasons",

@@ -201,6 +201,39 @@ def test_member_cannot_register_another_accounts_clan(db):
     assert client.calls == 0
 
 
+def test_creator_can_register_for_target_account_and_is_recorded_as_operator(db):
+    creator, first, _, clan_a, _, round_row = _setup_pair(db)
+    result = FarmRegistrationService(
+        db.conn,
+        FakeCocClient(_war("#AAA", "#OUTSIDE")),
+    ).register_for_account(creator, first["id"], round_row["id"], "#AAA")
+
+    assert result["registration_status"] == "match_failed"
+    registered_by = db.conn.execute(
+        "SELECT registered_by FROM farm_round_clans WHERE round_id = ? AND clan_id = ?",
+        (round_row["id"], clan_a["id"]),
+    ).fetchone()[0]
+    requested_by = db.conn.execute(
+        "SELECT requested_by FROM farm_registration_attempts WHERE round_id = ? AND clan_id = ?",
+        (round_row["id"], clan_a["id"]),
+    ).fetchone()[0]
+    assert registered_by == creator["id"]
+    assert requested_by == creator["id"]
+
+
+def test_only_creator_can_register_for_target_account(db):
+    _, first, second, _, _, round_row = _setup_pair(db)
+    client = FakeCocClient(_war("#AAA", "#BBB"))
+
+    with pytest.raises(RegistrationError) as exc:
+        FarmRegistrationService(db.conn, client).register_for_account(
+            second, first["id"], round_row["id"], "#AAA"
+        )
+
+    assert exc.value.status_code == 403
+    assert client.calls == 0
+
+
 def test_second_ledger_failure_rolls_back_whole_settlement(db):
     _, first, _, clan_a, clan_b, round_row = _setup_pair(db)
 

@@ -7,6 +7,7 @@
     cwl_live    当月 CWL 联赛组与逐场战争（战斗日 2 分钟，准备日按轮次限频）
     cwl_assembly 正式名单与各联赛部落集结检查（每月 1 日 14:00 至 3 日 16:00）
     farm_stats  互刷部落统计（每 30 分钟）
+    farm_monitor 互刷场次部落监控（每分钟分批检查到期部落）
     coc_sync    COC 玩家档案（每 6 小时）
     cwl         CWL 联赛战绩（每天触发，day==12 才真正拉取）
     player_details 玩家详情（每天，赛季进攻与活动估算）
@@ -125,6 +126,24 @@ def _run_farm_stats() -> dict:
     if not success:
         return {"status": "failed", "reason": "0 个部落写入成功"}
     return {"status": "success", "reason": f"同步 {success} 个互刷部落"}
+
+
+def _run_farm_monitor() -> dict:
+    """分批检查当前互刷场次中尚未确认战争状态的部落。"""
+    if os.getenv("FARM_SYSTEM_ENABLED", "false").strip().lower() not in {
+        "1", "true", "yes", "on",
+    }:
+        return {"status": "skipped", "reason": "互刷系统未开启"}
+
+    from modules.coc_sync.official.api_client import CocApiClient
+    from modules.farm_system.monitoring import FarmMonitoringService
+
+    db = Database(config.DB_PATH)
+    db.init_schema()
+    try:
+        return FarmMonitoringService(db.conn, CocApiClient()).run_due()
+    finally:
+        db.close()
 
 
 CURRENT_WAR_REFRESH_MINUTES = {
@@ -1814,6 +1833,11 @@ JOBS = {
         "name": "互刷部落统计",
         "interval": 30,
         "run": _run_farm_stats,
+    },
+    "farm_monitor": {
+        "name": "互刷部落监控",
+        "interval": 1,
+        "run": _run_farm_monitor,
     },
     "coc_sync": {
         "name": "COC玩家档案",

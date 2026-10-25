@@ -15,6 +15,15 @@
         <text class="menu-arrow">›</text>
       </view>
 
+      <view class="menu-card" @tap="openSection('/pages/farm/admin-monitor')">
+        <view class="menu-icon icon-monitor">监</view>
+        <view class="menu-copy">
+          <text class="menu-name">部落监控</text>
+          <text class="menu-desc">战争、登记、匹配与预定胜负</text>
+        </view>
+        <text class="menu-arrow">›</text>
+      </view>
+
       <view class="menu-card" @tap="openSection('/pages/farm/admin-clans')">
         <view class="menu-icon icon-clan">部</view>
         <view class="menu-copy">
@@ -74,7 +83,7 @@ export default {
 .menu-list { padding-top: 2rpx; }
 .menu-card { display: flex; min-height: 116rpx; align-items: center; margin-bottom: 16rpx; padding: 16rpx 20rpx; border: 1rpx solid #292945; border-radius: 14rpx; box-sizing: border-box; background: #18182d; }
 .menu-icon { display: flex; width: 58rpx; height: 58rpx; flex-shrink: 0; align-items: center; justify-content: center; margin-right: 18rpx; border-radius: 13rpx; font-size: 23rpx; font-weight: 700; }
-.icon-round { background: #20304d; color: #73afe7; }.icon-clan { background: #243044; color: #91b4d4; }.icon-account { background: #302d45; color: #ad9edb; }
+.icon-round { background: #20304d; color: #73afe7; }.icon-monitor { background: #343044; color: #d0a45f; }.icon-clan { background: #243044; color: #91b4d4; }.icon-account { background: #302d45; color: #ad9edb; }
 .menu-copy { min-width: 0; flex: 1; }.menu-name, .menu-desc { display: block; }.menu-name { color: #e8ebf3; font-size: 26rpx; font-weight: 600; }.menu-desc { margin-top: 7rpx; color: #778198; font-size: 21rpx; line-height: 1.5; }
 .menu-arrow { flex-shrink: 0; margin-left: 12rpx; color: #606b83; font-size: 36rpx; }
 </style>

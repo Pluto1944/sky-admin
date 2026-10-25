@@ -245,17 +245,17 @@ class FarmAccountRepository:
         return updated
 
     def transfer_creator(self, from_account_id: int, to_account_id: int) -> tuple[sqlite3.Row, sqlite3.Row]:
-        """原子转移唯一创建者；受控运维脚本专用。"""
+        """原子转移唯一超级管理员；受控运维脚本专用。"""
         source = self.get_by_id(from_account_id)
         target = self.get_by_id(to_account_id)
         if source is None or target is None:
-            raise LookupError("创建者转移账号不存在")
+            raise LookupError("超级管理员转移账号不存在")
         if int(source["id"]) == int(target["id"]):
-            raise ValueError("新旧创建者不能是同一账号")
+            raise ValueError("新旧超级管理员不能是同一账号")
         if source["role"] != "creator" or source["status"] != "active":
-            raise ValueError("原账号不是有效创建者")
+            raise ValueError("原账号不是有效超级管理员")
         if target["status"] != "active":
-            raise ValueError("新创建者账号必须处于启用状态")
+            raise ValueError("新超级管理员账号必须处于启用状态")
         now = now_iso()
         with self.conn:
             self.conn.execute(
@@ -282,16 +282,16 @@ class FarmAccountRepository:
         old_creator = self.get_by_id(int(source["id"]))
         new_creator = self.get_by_id(int(target["id"]))
         if old_creator is None or new_creator is None:  # pragma: no cover
-            raise RuntimeError("创建者转移后无法读取账号")
+            raise RuntimeError("超级管理员转移后无法读取账号")
         return old_creator, new_creator
 
     def initialize_creator(self, account_id: int) -> sqlite3.Row:
         """Promote one active account when no active creator exists."""
         target = self.get_by_id(account_id)
         if target is None:
-            raise LookupError("创建者账号不存在")
+            raise LookupError("超级管理员账号不存在")
         if target["status"] != "active":
-            raise ValueError("创建者账号必须处于启用状态")
+            raise ValueError("超级管理员账号必须处于启用状态")
         current = self.conn.execute(
             """SELECT id FROM farm_auth_accounts
                WHERE role='creator' AND status='active' LIMIT 1"""
@@ -299,7 +299,7 @@ class FarmAccountRepository:
         if current is not None:
             if int(current["id"]) == int(target["id"]):
                 return target
-            raise ValueError("已经存在有效创建者，请使用创建者转移命令")
+            raise ValueError("已经存在有效超级管理员，请使用超级管理员转移命令")
         now = now_iso()
         next_version = int(target["token_version"]) + 1
         with self.conn:
@@ -319,7 +319,7 @@ class FarmAccountRepository:
             )
         result = self.get_by_id(int(target["id"]))
         if result is None:  # pragma: no cover
-            raise RuntimeError("创建者初始化后无法读取账号")
+            raise RuntimeError("超级管理员初始化后无法读取账号")
         return result
 
     def _audit(

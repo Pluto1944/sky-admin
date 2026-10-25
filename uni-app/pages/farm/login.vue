@@ -16,7 +16,7 @@
         <input v-model="password" class="field-input" password placeholder="请输入密码" maxlength="128" @confirm="submit" />
       </view>
       <button class="login-button" :loading="loading" :disabled="loading" @tap="submit">登录</button>
-      <text class="login-help">没有公开注册入口 · 忘记密码请联系创建者</text>
+      <text class="login-help">没有公开注册入口 · 忘记密码请联系超级管理员</text>
     </view>
   </view>
 </template>

@@ -1,4 +1,4 @@
-"""互刷创建者纠错操作：反向流水撤销与整场取消。"""
+"""互刷超级管理员纠错操作：反向流水撤销与整场取消。"""
 from __future__ import annotations
 
 import json
@@ -15,7 +15,7 @@ class CreatorPermissionError(PermissionError):
 
 def _assert_creator(actor: dict) -> None:
     if actor.get("role") != "creator":
-        raise CreatorPermissionError("仅互刷系统创建者可以执行该操作")
+        raise CreatorPermissionError("仅互刷系统超级管理员可以执行该操作")
 
 
 def _reason(value: str) -> str:
@@ -143,7 +143,7 @@ class FarmCreatorOperations:
                        SET registration_status='not_registered', match_id=NULL,
                            opponent_tag=NULL, opponent_name=NULL, result=NULL,
                            score_after=NULL, registered_at=NULL, registered_by=NULL,
-                           last_error='已由创建者重新开放', updated_at=?
+                           last_error='已由超级管理员重新开放', updated_at=?
                        WHERE round_id=? AND match_id=?
                          AND registration_status='revoked'""",
                     (now, int(match["round_id"]), int(match_id)),

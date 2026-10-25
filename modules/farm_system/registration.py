@@ -17,6 +17,7 @@ from shared.db.connection import now_iso
 from .rounds import FINAL_REGISTRATION_STATUSES, NON_REGISTERABLE_STATUSES
 from .scoring import decide_match
 from .tags import coc_tag_key
+from .monitoring import save_monitor_error, save_monitor_snapshot
 
 
 _SETTLEMENT_LOCK = threading.RLock()
@@ -68,9 +69,35 @@ class FarmRegistrationService:
         self.before_second_ledger = before_second_ledger
 
     def register(self, actor: dict, round_id: int, clan_tag: str) -> dict:
+        return self._register(actor, int(actor["id"]), round_id, clan_tag)
+
+    def register_for_account(
+        self, actor: dict, account_id: int, round_id: int, clan_tag: str
+    ) -> dict:
+        if actor.get("role") != "creator":
+            raise RegistrationError(
+                "creator_required", "仅互刷系统超级管理员可以代账号登记", status_code=403
+            )
+        target = self.conn.execute(
+            "SELECT id, status FROM farm_auth_accounts WHERE id = ?",
+            (int(account_id),),
+        ).fetchone()
+        if target is None:
+            raise RegistrationError(
+                "account_not_found", "互刷账号不存在", status_code=404
+            )
+        if target["status"] != "active":
+            raise RegistrationError(
+                "account_disabled", "目标互刷账号已停用，不能登记", status_code=409
+            )
+        return self._register(actor, int(target["id"]), round_id, clan_tag)
+
+    def _register(
+        self, actor: dict, owner_account_id: int, round_id: int, clan_tag: str
+    ) -> dict:
         round_row = self._round(round_id)
         source = self._round_clan(round_id, clan_tag)
-        if int(source["account_id_snapshot"]) != int(actor["id"]):
+        if int(source["account_id_snapshot"]) != int(owner_account_id):
             raise RegistrationError("clan_not_owned", "该部落不属于当前账号", status_code=404)
         if source["registration_status"] in NON_REGISTERABLE_STATUSES:
             return self._result_payload(round_id, int(source["clan_id"]), reused=True)
@@ -87,11 +114,25 @@ class FarmRegistrationService:
         try:
             raw = self.coc_client.get_current_war(source["clan_tag_snapshot"])
         except CocApiError as exc:
+            save_monitor_error(
+                self.conn,
+                round_id=round_id,
+                clan_id=int(source["clan_id"]),
+                error=str(exc),
+                source="registration",
+            )
             return self._record_retry(
                 actor, source, "fetch_failed", "coc_api_error", str(exc),
                 duration_ms=self._duration_ms(attempt_started),
             )
         except Exception as exc:
+            save_monitor_error(
+                self.conn,
+                round_id=round_id,
+                clan_id=int(source["clan_id"]),
+                error=str(exc),
+                source="registration",
+            )
             return self._record_retry(
                 actor, source, "fetch_failed", "unexpected_fetch_error", str(exc),
                 duration_ms=self._duration_ms(attempt_started),
@@ -101,6 +142,13 @@ class FarmRegistrationService:
             raw,
             {"tag": source["clan_tag_snapshot"], "name": source["clan_name_snapshot"],
              "category": "farm"},
+        )
+        save_monitor_snapshot(
+            self.conn,
+            round_id=round_id,
+            clan_id=int(source["clan_id"]),
+            normalized=normalized,
+            source="registration",
         )
         summary = self._official_summary(normalized)
         duration_ms = self._duration_ms(attempt_started)
@@ -241,6 +289,21 @@ class FarmRegistrationService:
                             match_id, opponent["clan_tag_snapshot"], opponent["clan_name_snapshot"],
                             "win" if won else "loss", before + delta, now, int(actor["id"]),
                             now, now, int(round_row["id"]), clan_id,
+                        ),
+                    )
+                monitor_status = summary.get("status")
+                if monitor_status in {"preparation", "in_war", "war_ended"}:
+                    self.conn.execute(
+                        """UPDATE farm_round_monitors
+                           SET war_status=?, opponent_tag=?, opponent_name=?,
+                               official_time=?, source='registration_inferred',
+                               checked_at=?, next_check_at=NULL, error=NULL,
+                               check_count=check_count + 1, updated_at=?
+                           WHERE round_id=? AND clan_id=?""",
+                        (
+                            monitor_status, source["clan_tag_snapshot"],
+                            source["clan_name_snapshot"], official_time, now, now,
+                            int(round_row["id"]), int(target["clan_id"]),
                         ),
                     )
                 self._record_attempt_sql(

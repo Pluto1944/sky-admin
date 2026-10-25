@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from shared.db.connection import now_iso
@@ -148,6 +148,18 @@ class FarmRoundService:
                     for clan in candidates
                 ],
             )
+            first_check_at = (
+                datetime.fromisoformat(scheduled_at) + timedelta(minutes=5)
+            ).isoformat(timespec="seconds")
+            self.conn.executemany(
+                """INSERT INTO farm_round_monitors
+                   (round_id, clan_id, war_status, next_check_at, created_at, updated_at)
+                   VALUES (?, ?, 'unchecked', ?, ?, ?)""",
+                [
+                    (round_id, int(clan["id"]), first_check_at, now, now)
+                    for clan in candidates
+                ],
+            )
             self._audit(
                 actor_id=int(actor["id"]), action="round.created", round_id=round_id,
                 before=None,
@@ -183,6 +195,16 @@ class FarmRoundService:
                    WHERE id = ?""",
                 (scheduled_at, kind, next_status, now, int(round_id)),
             )
+            if scheduled_at != row["scheduled_at"]:
+                first_check_at = (
+                    datetime.fromisoformat(scheduled_at) + timedelta(minutes=5)
+                ).isoformat(timespec="seconds")
+                self.conn.execute(
+                    """UPDATE farm_round_monitors
+                       SET next_check_at = ?, updated_at = ?
+                       WHERE round_id = ? AND war_status = 'unchecked'""",
+                    (first_check_at, now, int(round_id)),
+                )
             self._audit(
                 actor_id=int(actor["id"]), action="round.updated", round_id=int(round_id),
                 before={"scheduled_at": row["scheduled_at"],

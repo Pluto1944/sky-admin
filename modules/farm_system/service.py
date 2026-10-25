@@ -32,7 +32,7 @@ class FarmAuthService:
         if not verify_password(password, row["password_hash"]):
             raise InvalidCredentialsError("账号或密码错误")
         if row["status"] != "active":
-            raise DisabledAccountError("账号已停用，请联系创建者")
+            raise DisabledAccountError("账号已停用，请联系超级管理员")
         return self.repository.mark_login(int(row["id"]))
 
     def create_account(

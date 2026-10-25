@@ -218,6 +218,26 @@
       }
     },
     {
+      "path": "pages/farm/admin-monitor",
+      "style": {
+        "navigationBarTitleText": "部落监控",
+        "navigationBarBackgroundColor": "#1a1a2e",
+        "navigationBarTextStyle": "white",
+        "backgroundColor": "#0f0f23",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
+      "path": "pages/farm/admin-monitor-clans",
+      "style": {
+        "navigationBarTitleText": "监控部落列表",
+        "navigationBarBackgroundColor": "#1a1a2e",
+        "navigationBarTextStyle": "white",
+        "backgroundColor": "#0f0f23",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
       "path": "pages/farm/admin-clan-detail",
       "style": {
         "navigationBarTitleText": "部落详情",
