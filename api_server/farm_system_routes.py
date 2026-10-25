@@ -270,6 +270,25 @@ def clan_detail(
     }
 
 
+@router.post(
+    "/clans/{clan_tag}/detail-refresh",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_farm_system_enabled)],
+)
+def request_clan_detail_refresh(
+    clan_tag: str,
+    account: dict = Depends(require_farm_account),
+    db: Database = Depends(get_db),
+):
+    try:
+        result = FarmClanSyncService(db.conn).request_detail_profiles(
+            account, clan_tag
+        )
+    except (ValueError, LookupError, FarmPermissionError) as exc:
+        raise _management_error(exc) from exc
+    return {"refresh": result}
+
+
 @router.post("/admin/clans", dependencies=[Depends(require_farm_system_enabled)])
 def admin_create_clan(
     payload: dict,

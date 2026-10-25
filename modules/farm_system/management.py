@@ -162,10 +162,6 @@ class FarmManagementService:
             opponent_tag = farm_registration["opponent_tag"]
             opponent_name = farm_registration.get("opponent_name")
             opponent_source = "farm_registration"
-        elif current_war and isinstance(current_war.get("opponent"), dict):
-            opponent_tag = current_war["opponent"].get("tag")
-            opponent_name = current_war["opponent"].get("name")
-            opponent_source = "current_war"
 
         opponent = None
         if opponent_tag:

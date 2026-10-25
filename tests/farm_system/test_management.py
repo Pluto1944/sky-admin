@@ -227,7 +227,7 @@ def test_account_reads_cached_clan_detail_without_live_api(db):
         service.get_clan_detail(outsider, "#YC0C")
 
 
-def test_clan_detail_falls_back_to_current_round_registration_summary(db):
+def test_clan_detail_does_not_use_normal_war_as_farm_opponent(db):
     creator = dict(_account(db, "creator.one", "creator"))
     member = dict(_account(db, "member.one", "member"))
     _cache_profile(db)
@@ -259,6 +259,4 @@ def test_clan_detail_falls_back_to_current_round_registration_summary(db):
     assert result["current_war_source"] == "registration_attempt"
     assert result["current_war"]["opponent"]["name"] == "登记战争对手"
     assert result["current_war_updated_at"] == "2026-10-24T12:10:00+00:00"
-    assert result["opponent"]["source"] == "current_war"
-    assert result["opponent"]["clan_tag"] == "#WAR"
-    assert result["opponent"]["profile"] is None
+    assert result["opponent"] is None

@@ -172,6 +172,13 @@ export function getFarmClanDetail(clanTag) {
   return farmRequest(`/api/farm-system/clans/${encodeURIComponent(clanTag)}/detail`)
 }
 
+export function requestFarmClanDetailRefresh(clanTag) {
+  return farmRequest(
+    `/api/farm-system/clans/${encodeURIComponent(clanTag)}/detail-refresh`,
+    'POST'
+  )
+}
+
 export function createFarmClan(payload) {
   return farmRequest('/api/farm-system/admin/clans', 'POST', payload)
 }

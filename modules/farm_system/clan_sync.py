@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from modules.sync_queue.config import active_live_resource_types
 from modules.sync_queue.planner import SyncPlanner
+from modules.sync_queue.refresh_policy import PROFILE_INTERVAL_SECONDS, as_utc, parse_time
 from modules.sync_queue.repository import SyncQueueError, SyncQueueRepository
 
 from .management import _assert_manager
@@ -121,6 +122,159 @@ class FarmClanSyncService:
             error=error,
             task_id=int(task["id"]),
             task_status=task_status,
+        )
+
+    def request_detail_profiles(
+        self,
+        actor: dict,
+        clan_tag: str,
+        *,
+        now: datetime | None = None,
+    ) -> dict:
+        """Queue stale profile facts used by one authorized farm detail page.
+
+        The read path remains cache-only.  Opening the page submits this
+        separate mutation, and only the source clan plus its current farm
+        opponent are eligible.  Current-war and farm-result facts are never
+        queued here.
+        """
+        from .management import FarmManagementService
+
+        current = as_utc(now)
+        detail = FarmManagementService(self.conn).get_clan_detail(actor, clan_tag)
+        source = detail["clan"]
+        requested = [
+            {
+                "clan_tag": coc_tag_key(source["clan_tag"]),
+                "clan_name": source["clan_name"],
+                "kind": "source",
+            }
+        ]
+        opponent = detail.get("opponent")
+        if opponent and opponent.get("source") == "farm_registration":
+            requested.append(
+                {
+                    "clan_tag": coc_tag_key(opponent.get("clan_tag")),
+                    "clan_name": opponent.get("clan_name"),
+                    "kind": "opponent",
+                }
+            )
+
+        profiles = []
+        seen = set()
+        for item in requested:
+            tag = item["clan_tag"]
+            if not tag or tag in seen:
+                continue
+            seen.add(tag)
+            profiles.append(
+                self._request_detail_profile(
+                    actor,
+                    source,
+                    tag=tag,
+                    clan_name=item["clan_name"],
+                    kind=item["kind"],
+                    now=current,
+                )
+            )
+        return {
+            "clan_tag": coc_tag_key(source["clan_tag"]),
+            "refresh_interval_seconds": PROFILE_INTERVAL_SECONDS,
+            "profiles": profiles,
+        }
+
+    def _request_detail_profile(
+        self,
+        actor: dict,
+        source,
+        *,
+        tag: str,
+        clan_name: str | None,
+        kind: str,
+        now: datetime,
+    ) -> dict:
+        cache = self._profile_cache_row(tag)
+        updated_at = cache["updated_at"] if cache is not None else None
+        updated = parse_time(updated_at)
+        has_profile = bool(cache is not None and cache["data_json"])
+        if has_profile and updated is not None and now - updated < timedelta(
+            seconds=PROFILE_INTERVAL_SECONDS
+        ):
+            return {
+                "clan_tag": tag,
+                "kind": kind,
+                "accepted": False,
+                "reason": "fresh",
+                "task_status": None,
+                "profile_updated_at": updated_at,
+            }
+
+        source_key = f"detail:{int(source['id'])}:{tag}"
+        self.queue.upsert_interest(
+            source_type=self.SOURCE_TYPE,
+            source_key=source_key,
+            resource_type="clan_profile",
+            resource_key=tag,
+            priority="interactive",
+            desired_interval_seconds=PROFILE_INTERVAL_SECONDS,
+            expires_at=(now + timedelta(seconds=self.INTEREST_SECONDS)).isoformat(
+                timespec="seconds"
+            ),
+            metadata={
+                "farm_account_id": int(source["account_id"]),
+                "requested_by": int(actor["id"]),
+                "category": "farm",
+                "clan_name": clan_name or tag,
+                "trigger": "farm_detail_page_open",
+                "kind": kind,
+            },
+            now=now,
+        )
+        SyncPlanner(self.conn).reconcile_targets(
+            now=now,
+            live_resource_types=active_live_resource_types(),
+        )
+        try:
+            queued = self.queue.enqueue_interactive_task(
+                "clan_profile",
+                tag,
+                cooldown_seconds=PROFILE_INTERVAL_SECONDS,
+                now=now,
+                payload={
+                    "farm_account_id": int(source["account_id"]),
+                    "requested_by": int(actor["id"]),
+                    "trigger": "farm_detail_page_open",
+                    "kind": kind,
+                },
+            )
+        except SyncQueueError as exc:
+            return {
+                "clan_tag": tag,
+                "kind": kind,
+                "accepted": False,
+                "reason": "planner_pending",
+                "task_status": None,
+                "profile_updated_at": updated_at,
+                "message": str(exc),
+            }
+        task = queued.get("task") or {}
+        return {
+            "clan_tag": tag,
+            "kind": kind,
+            "accepted": bool(queued.get("accepted")),
+            "reason": queued.get("reason"),
+            "task_status": task.get("status"),
+            "profile_updated_at": updated_at,
+        }
+
+    def _profile_cache_row(self, tag: str):
+        rows = self.conn.execute(
+            """SELECT clan_tag, status, data_json, error, updated_at, attempted_at
+               FROM clan_profile_cache"""
+        ).fetchall()
+        return next(
+            (row for row in rows if coc_tag_key(row["clan_tag"]) == tag),
+            None,
         )
 
     def _tag(self, value: str) -> str:
