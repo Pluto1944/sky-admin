@@ -35,10 +35,10 @@ def test_sheet_name_and_shell_score_normalization():
 def test_parse_published_roster_uses_part4_member_rows():
     rows = [
         {"苍穹联赛报名": "说明", "col1": "", "col2": "", "col3": "", "col4": ""},
-        {"苍穹联赛报名": "实战:冠三 15/15", "col1": "#AAA", "col2": "部落名", "col3": "首领:首领完整昵称", "col4": "管理:管A、管B 开战/捐兵给一份额外"},
-        {"苍穹联赛报名": "甲", "col1": "乙", "col2": "丙", "col3": "丁", "col4": "戊"},
-        {"苍穹联赛报名": "己", "col1": "庚", "col2": "辛", "col3": "壬", "col4": "癸"},
-        {"苍穹联赛报名": "子", "col1": "丑", "col2": "寅", "col3": "卯", "col4": "辰"},
+        {"苍穹联赛报名": "实战:冠三 15/15", "col1": "#AAA", "col2": "部落名", "col3": "首领:首领完整昵称", "col4": "管理:管A、管B 开战/捐兵给一份额外", "col5": "替补:2人"},
+        {"苍穹联赛报名": "甲", "col1": "乙", "col2": "丙", "col3": "丁", "col4": "戊", "col5": "替补甲"},
+        {"苍穹联赛报名": "己", "col1": "庚", "col2": "辛", "col3": "壬", "col4": "癸", "col5": "替补乙"},
+        {"苍穹联赛报名": "子", "col1": "丑", "col2": "寅", "col3": "卯", "col4": "辰", "col5": ""},
         {"苍穹联赛报名": "不应读取", "col1": "尾注", "col2": "", "col3": "", "col4": ""},
     ]
     roster = parse_published_roster(rows, [_team()])
@@ -47,6 +47,7 @@ def test_parse_published_roster_uses_part4_member_rows():
     ]
     assert roster["teams"][0]["leader_name"] == "首领完整昵称"
     assert roster["teams"][0]["manager_names"] == "管A、管B"
+    assert roster["teams"][0]["substitutes"] == ["替补甲", "替补乙"]
 
 
 def test_parse_shell_roster_strips_scores_and_rejects_missing_heading():
@@ -65,6 +66,8 @@ def test_membership_signature_ignores_heading_metadata():
     first = {"teams": [{"clan_tag": "#AAA", "members": ["甲"], "leader_name": "全名"}]}
     second = {"teams": [{"clan_tag": "#AAA", "members": ["甲"], "leader_name": "简称", "manager_names": "管A"}]}
     assert roster_membership_signature(first) == roster_membership_signature(second)
+    second["teams"][0]["substitutes"] = ["替补"]
+    assert roster_membership_signature(first) != roster_membership_signature(second)
 
 
 def test_compare_roster_members_preserves_duplicate_counts():
@@ -72,13 +75,19 @@ def test_compare_roster_members_preserves_duplicate_counts():
         ["同名", "同名", "缺席"],
         [
             {"account_name": "同名", "player_tag": "#A", "clan_role": "member", "town_hall_level": 16},
+            {"account_name": "替补", "player_tag": "#S", "clan_role": "member", "town_hall_level": 17},
             {"account_name": "额外", "player_tag": "#B", "clan_role": "admin", "town_hall_level": 17},
         ],
+        ["替补", "未到替补"],
     )
     assert result["present_count"] == 1
     assert [item["name"] for item in result["missing_members"]] == ["同名", "缺席"]
     assert result["extra_members"][0]["name"] == "额外"
     assert result["extra_members"][0]["role"] == "admin"
+    assert result["substitute_present_count"] == 1
+    assert result["substitute_missing_count"] == 1
+    assert result["substitute_present_members"][0]["status"] == "substitute_present"
+    assert result["substitute_missing_members"][0]["name"] == "未到替补"
 
 
 def _seed_api(db):
@@ -97,6 +106,7 @@ def _seed_api(db):
         "leader_name": "首领完整昵称",
         "manager_names": "管A、管B",
         "members": ["甲", "乙"],
+        "substitutes": ["替补"],
     }]}
     cursor = db.conn.execute(
         """INSERT INTO cwl_roster_snapshots
@@ -106,7 +116,11 @@ def _seed_api(db):
     )
     payload = compare_roster_members(
         ["甲", "乙"],
-        [{"account_name": "甲", "player_tag": "#P1", "clan_role": "leader", "town_hall_level": 18}],
+        [
+            {"account_name": "甲", "player_tag": "#P1", "clan_role": "leader", "town_hall_level": 18},
+            {"account_name": "替补", "player_tag": "#S1", "clan_role": "member", "town_hall_level": 17},
+        ],
+        ["替补"],
     )
     db.conn.execute(
         """INSERT INTO cwl_assembly_cache
@@ -126,6 +140,7 @@ def test_assembly_summary_and_detail_read_only_cache(db, monkeypatch):
     summary = routes.cwl_assembly(db)
     assert summary["status"] == "ready"
     assert summary["summary"]["missing_count"] == 1
+    assert summary["summary"]["substitute_present_count"] == 1
     assert summary["teams"][0]["present_count"] == 1
 
     league = routes.cwl_live("2026-10", db)
@@ -136,6 +151,7 @@ def test_assembly_summary_and_detail_read_only_cache(db, monkeypatch):
     assert detail["snapshot_revision"] == 1
     assert detail["missing_members"][0]["name"] == "乙"
     assert detail["present_members"][0]["town_hall_level"] == 18
+    assert detail["substitute_present_members"][0]["name"] == "替补"
 
     with pytest.raises(HTTPException) as exc:
         routes.cwl_assembly_detail("#OUT", db)

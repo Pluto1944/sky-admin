@@ -1629,7 +1629,11 @@ def _run_cwl_assembly(force: bool = False, now: datetime | None = None) -> dict:
 
         try:
             members = service.fetch_clan_members(clan_tag, team.get("team_name"))
-            comparison = compare_roster_members(team.get("members") or [], members)
+            comparison = compare_roster_members(
+                team.get("members") or [],
+                members,
+                team.get("substitutes") or [],
+            )
         except Exception as exc:  # noqa: BLE001 - 单部落失败隔离并保留成功缓存
             failed += 1
             if cached:

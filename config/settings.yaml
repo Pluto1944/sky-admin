@@ -159,9 +159,6 @@ cwl_registration:
     - misael
     - AltriaPendragon
     - 葉丶
-    - 飞的煎饼
-    - 幻想鄉
-    - "Timo⚡️Z⚔️ephyr™"
 
   # 已弃用（兼容历史）
   camp_sheet_name: 战营名单
@@ -197,11 +194,11 @@ cwl_registration:
   # 队伍定义
   teams:
     # === 实战队伍 ===
-    - name: 泰坦三
+    - name: 泰坦二
       clan_tag: "#JJPP"
       leader: leader7
       member_count: 15
-      league_level: "Titan League III"
+      league_level: "Titan League II"
       manager: ""
       category: combat
       reserved_slots: 0
@@ -214,8 +211,8 @@ cwl_registration:
       category: combat
       reserved_slots: 0
     - name: 冠三
-      clan_tag: "#2C822CJJC"
-      leader: Plutoleader6
+      clan_tag: "#CYYL"
+      leader: leader2
       member_count: 15
       league_level: "Champion League III"
       manager: ""
@@ -230,32 +227,32 @@ cwl_registration:
       category: combat
       reserved_slots: 0
     - name: 冠三
-      clan_tag: "#R2GGR2"
-      leader: ""
+      clan_tag: "#2C822CJJC"
+      leader: Plutoleader6
       member_count: 15
       league_level: "Champion League III"
       manager: ""
       category: combat
       reserved_slots: 0
-    - name: 定级一队
-      clan_tag: "#RRRVRRRP"
-      leader: 妹子大佬
+    - name: 大一晋级队
+      clan_tag: "#UUP2"
+      leader: leader
       member_count: 15
-      league_level: "Unranked"
+      league_level: "Master League I"
       manager: ""
       category: combat
       reserved_slots: 0
-    - name: 定级二队
-      clan_tag: "#RRRVRRRQ"
-      leader: 妹子大佬
+    - name: 定级一队
+      clan_tag: "#2CUYYVVV2"
+      leader: 登悟
       member_count: 30
       league_level: "Unranked"
       manager: ""
       category: combat
       reserved_slots: 0
-    - name: 定级三队
-      clan_tag: "#RRRVRRRG"
-      leader: 妹子大佬
+    - name: 定级二队
+      clan_tag: "#2CRRRUU2Q"
+      leader: 鄂
       member_count: 30
       league_level: "Unranked"
       manager: ""
@@ -270,6 +267,14 @@ cwl_registration:
       manager: ""
       category: shell
       reserved_slots: 0
+    - name: 大一
+      clan_tag: "#2R8RCPY0J"
+      leader: 官
+      member_count: 30
+      league_level: "Master League I"
+      manager: ""
+      category: shell
+      reserved_slots: 0
     - name: 大二
       clan_tag: "#2JQ8GC2UY"
       leader: leader8
@@ -278,17 +283,9 @@ cwl_registration:
       manager: ""
       category: shell
       reserved_slots: 0
-    - name: 大三
+    - name: 水一
       clan_tag: "#2CU9JPYU8"
       leader: 南门
-      member_count: 30
-      league_level: "Master League III"
-      manager: ""
-      category: shell
-      reserved_slots: 0
-    - name: 水一
-      clan_tag: "#2JQR89P9G"
-      leader: leader6
       member_count: 30
       league_level: "Crystal League I"
       manager: ""
@@ -343,13 +340,18 @@ cwl_registration:
     - "虚伪、"
 
   # 黑白名单
-  black_list:
-    - 花海
-    - 逸仙
-    - misi
-    - MiSi
-    - Ghost-Almighty
-  white_list: []
+  black_list: []
+  white_list:
+    - [belial95, "#CYYL"]
+    - ["10°C✨Godwin", "#2GGGGGGG"]
+    - [winggod, "#2GGGGGGG"]
+
+  # 额外替补不占正式名额，按目标部落显示在 Part4 右侧。
+  substitutes:
+    - account_name: 飞的煎饼
+      clan_tag: "#2R9Y209LY"
+    - account_name: MiSi
+      clan_tag: "#2R8RCPY0J"
 
   new_combat_insert_start: 30
   new_normal_insert_start: 45    # 已废弃

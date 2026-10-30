@@ -907,6 +907,9 @@ def _cwl_assembly_item(team: dict, cache: dict | None) -> dict:
         "present_count": payload.get("present_count", 0),
         "missing_count": payload.get("missing_count", 0),
         "extra_count": payload.get("extra_count", 0),
+        "substitute_count": payload.get("substitute_count", 0),
+        "substitute_present_count": payload.get("substitute_present_count", 0),
+        "substitute_missing_count": payload.get("substitute_missing_count", 0),
         "updated_at": (cache or {}).get("updated_at"),
         "attempted_at": (cache or {}).get("attempted_at"),
         "locked_at": (cache or {}).get("locked_at"),
@@ -941,6 +944,13 @@ def _build_cwl_assembly(db: Database, period: str, teams: list[dict]) -> dict:
             "locked_team_count": sum(bool(item.get("locked_at")) for item in items),
             "missing_count": sum(item["missing_count"] for item in items),
             "extra_count": sum(item["extra_count"] for item in items),
+            "substitute_count": sum(item["substitute_count"] for item in items),
+            "substitute_present_count": sum(
+                item["substitute_present_count"] for item in items
+            ),
+            "substitute_missing_count": sum(
+                item["substitute_missing_count"] for item in items
+            ),
         },
         "teams": items,
     }
@@ -977,6 +987,8 @@ def _build_cwl_assembly_detail(
     result.update({
         "snapshot_revision": snapshot.get("revision") if snapshot else None,
         "missing_members": payload.get("missing_members", []),
+        "substitute_missing_members": payload.get("substitute_missing_members", []),
+        "substitute_present_members": payload.get("substitute_present_members", []),
         "extra_members": payload.get("extra_members", []),
         "present_members": payload.get("present_members", []),
     })

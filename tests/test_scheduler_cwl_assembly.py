@@ -28,10 +28,10 @@ def _seed_teams(path):
 
 def _published_rows():
     return [
-        {"苍穹联赛报名": "实战:队伍1 5/5", "col1": "#AAA", "col2": "部落1", "col3": "首领:首领完整1", "col4": "管理:管A 开战/捐兵给一份额外"},
-        {"苍穹联赛报名": "甲", "col1": "乙", "col2": "丙", "col3": "丁", "col4": "戊"},
-        {"苍穹联赛报名": "实战:队伍2 5/5", "col1": "#BBB", "col2": "部落2", "col3": "", "col4": ""},
-        {"苍穹联赛报名": "己", "col1": "庚", "col2": "辛", "col3": "壬", "col4": "癸"},
+        {"苍穹联赛报名": "实战:队伍1 5/5", "col1": "#AAA", "col2": "部落1", "col3": "首领:首领完整1", "col4": "管理:管A 开战/捐兵给一份额外", "col5": "替补:1人"},
+        {"苍穹联赛报名": "甲", "col1": "乙", "col2": "丙", "col3": "丁", "col4": "戊", "col5": "替补甲"},
+        {"苍穹联赛报名": "实战:队伍2 5/5", "col1": "#BBB", "col2": "部落2", "col3": "", "col4": "", "col5": ""},
+        {"苍穹联赛报名": "己", "col1": "庚", "col2": "辛", "col3": "壬", "col4": "癸", "col5": ""},
     ]
 
 
@@ -52,7 +52,7 @@ def test_assembly_scheduler_snapshots_once_freezes_started_and_preserves_cache(t
     def fetch_members(self, clan_tag, clan_name=None):
         if clan_tag == "#BBB" and fail_b["value"]:
             raise RuntimeError("temporary")
-        names = ["甲", "乙", "丙", "丁", "戊"] if clan_tag == "#AAA" else ["己", "庚", "辛", "壬", "额外"]
+        names = ["甲", "乙", "丙", "丁", "戊", "替补甲"] if clan_tag == "#AAA" else ["己", "庚", "辛", "壬", "额外"]
         return [
             {"account_name": name, "player_tag": f"#{clan_tag[-1]}{i}", "clan_role": "member", "town_hall_level": 17}
             for i, name in enumerate(names)
@@ -76,6 +76,7 @@ def test_assembly_scheduler_snapshots_once_freezes_started_and_preserves_cache(t
     }
     assert rows["#AAA"]["status"] == "started"
     assert rows["#AAA"]["locked_at"]
+    assert json.loads(rows["#AAA"]["data_json"])["substitute_present_count"] == 1
     assert rows["#BBB"]["status"] == "checking"
     before = json.loads(rows["#BBB"]["data_json"])
     assert before["missing_count"] == 1

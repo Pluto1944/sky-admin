@@ -31,7 +31,7 @@ TEAMS = [
 | `clan_tag` | COC 部落标签 | 唯一 |
 | `category` | `"combat"` / `"shell"` | — |
 | `member_count` | 队伍容量 | — |
-| `reserved_slots` | 预留空位（>0 留空位 / <0 多招备选） | — |
+| `reserved_slots` | 正式容量调整（>0 留空位 / <0 扩大正式容量） | — |
 | `leader` | 领队名称 | — |
 | `league_level` | 联赛等级 | — |
 | `manager` | 管理员 | 被 `_assign_managers()` 覆盖 |
@@ -468,6 +468,16 @@ for team_index, team in enumerate(teams):
 
 白名单是最高优先级。白名单插入完成后仍会尝试维持升降级边界：普通成员优先被挤压和顺延；如果白名单目标与升降级边界无法同时满足，以白名单目标为准并打印告警日志。展示字段保持不变，仍按现有规则标记 `↑升级` / `↓降级`、`新` 等，不新增内部补位标签。
 
+### 阶段 8.5：额外替补（`attach_substitutes`）
+
+`substitutes` 每项指定 `(account_name, clan_tag)`。替补会在正式队伍完成后
+附加到目标队伍的 `substitutes` 列表，不进入 `members`，因此：
+
+- 不参与排序、升降级和管理员分配；
+- 不占 `member_count`，不触发末位成员顺延；
+- 不在 Part1 排序名单中占位，Part2 以“替补”单独留痕；
+- Part4 前 5 列仍为正式成员，第 6 列展示替补。
+
 ### 阶段 9：管理员分配（`_assign_managers`）
 
 三级优先级：
@@ -494,6 +504,7 @@ NEW_NORMAL_INSERT_START = 45     # 已废弃（改为追加到实战末尾）
 BLACK_LIST = {"账号昵称"}                         # 阶段0按 account_name 精确过滤，区分大小写
 WHITE_LIST = [("账号昵称", "#目标部落TAG")]        # 阶段8强制插入
 EXCLUDED_CAMP_NAMES = {"战营账号昵称", ...}        # 导入与排序双阶段过滤
+SUBSTITUTES = [{"account_name": "替补昵称", "clan_tag": "#目标部落TAG"}]
 ```
 
 ### 编号与队伍的映射关系
@@ -525,9 +536,9 @@ EXCLUDED_CAMP_NAMES = {"战营账号昵称", ...}        # 导入与排序双阶
 | Part | 内容 | 说明 |
 |------|------|------|
 | Part1 | 排序名单（含白名单） | 完整名单 |
-| Part2 | 队伍明细（逐队展示） | 队伍分配明细 |
+| Part2 | 队伍明细（逐队展示） | 正式队员 + 单独替补行 |
 | Part3 | 离队/缺失/黑名单 | 名单4 + 黑名单命中 |
-| Part4 | 联赛名单排布网格（5列） | 见 `05-roster-output.md` |
+| Part4 | 联赛名单排布网格（6列） | 前5列正式成员，第6列替补 |
 
 **ARRANGEMENT_OUTPUT_HEADERS**（13 列）：
 ```
@@ -600,6 +611,7 @@ registrations.team_name 回写格式：`"{team_index} {team_alias} {coc_name} {c
 | 队伍数变化 | 不特殊处理 | 贪心填充自然消化 |
 | 黑名单 | 前置过滤 | 最早排除 |
 | 白名单 | 填队后处理 | 强制插入，溢出连锁 |
+| 额外替补 | 正式分队后附加 | 不占容量，不顺延正式成员 |
 
 ---
 
@@ -634,6 +646,7 @@ v2.x 的排序流程是：`sort_accounts()` 完全重排 → `fill_teams()` 贪�
 | 升降级 | `apply_promotion_relegation` 局部微调（历史） | 阶段2 在上月分组上配对交换 |
 | 黑名单 | 无 | 阶段0 前置过滤 |
 | 白名单 | 无 | 阶段8 填队后强制插入 |
+| 额外替补 | 无 | 阶段8.5 附加到目标队伍右侧 |
 | 新人安排 | 按综合分填空位 | 战营从编号30插入，普通营追加到实战末尾 |
 
 ---

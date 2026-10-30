@@ -258,7 +258,46 @@ def test_arrange_and_export_appends_part4_grid(player_service, reg_repo):
     assert captured["target"] == "名单.xlsx"
     assert captured["sheet_name"] == "名单_2026-08"
     assert captured["title_indices"]
-    assert all(len(row) == 5 for row in captured["grid"])
+    assert all(len(row) == 6 for row in captured["grid"])
     titles = [captured["grid"][i][0] for i in captured["title_indices"]]
     assert any("实战: 实战测试队" in title for title in titles)
     assert any("壳子: 壳子测试队" in title for title in titles)
+
+
+def test_substitutes_are_rendered_in_sixth_column_without_using_capacity(
+    player_service, reg_repo
+):
+    """替补应保持正式队伍人数，并在 Part4 第六列单独展示。"""
+    _seed(player_service, reg_repo)
+    fake_io = FakeExcelIO()
+    arranger = _arranger(player_service, reg_repo, fake_io)
+    captured: dict = {}
+    arranger._append_part4_to_sheet = lambda target, sheet, grid, titles: captured.update(
+        grid=grid, title_indices=titles
+    )
+    substitutes = [
+        {"account_name": "替补甲", "clan_tag": "#TEST1"},
+        {"account_name": "替补乙", "clan_tag": "#TEST2"},
+    ]
+
+    ordered, team_results, _movements, _sheet = arranger.arrange_and_export(
+        "2026-08",
+        "名单.xlsx",
+        teams=_teams(),
+        combat_min_match_value=0,
+        substitutes=substitutes,
+    )
+
+    assert [len(team["members"]) for team in team_results] == [2, 1]
+    assert [team["substitutes"][0]["account_name"] for team in team_results] == [
+        "替补甲", "替补乙",
+    ]
+    assert {item["account_name"] for item in ordered}.isdisjoint({"替补甲", "替补乙"})
+    grid = captured["grid"]
+    first_title, second_title = captured["title_indices"]
+    assert grid[first_title + 1][5] == "替补甲"
+    assert grid[second_title + 1][5] == "替补乙"
+    substitute_rows = [
+        row for row in fake_io.last_written_rows if row.get("movement") == "替补"
+    ]
+    assert [row["account_name"] for row in substitute_rows] == ["替补甲", "替补乙"]

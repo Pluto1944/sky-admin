@@ -8,6 +8,7 @@
   - final_list: baseline_rebuilder.build_final_list() 的输出线性名单
   - teams: TEAMS 配置
   - white_list: [(account_name, clan_tag)] 白名单
+  - substitutes: 不占正式容量的额外替补（由编排器在正式分队后附加）
 
 输出：
   - team_results: 各队伍分配明细列表
@@ -308,6 +309,86 @@ def apply_whitelist(
 
         # 检查超员，连锁后移
         _cascade_overflow(team_results, teams, target_idx, name_to_team_idx)
+
+    return team_results
+
+
+def attach_substitutes(
+    team_results: list[dict],
+    substitutes: list[dict] | None,
+    candidates: list[dict] | None = None,
+) -> list[dict]:
+    """把额外替补附加到目标队伍，不改变正式成员和队伍容量。
+
+    ``substitutes`` 每项使用 ``account_name`` + ``clan_tag``。候选人资料
+    仅用于补充 Tag/归属人等展示字段；替补始终保存在
+    ``team_result['substitutes']``，不进入 ``members``，因此不触发溢出顺延。
+    """
+    for team in team_results:
+        team.setdefault("substitutes", [])
+    if not substitutes:
+        return team_results
+
+    def normalized_tag(value: object) -> str:
+        text = str(value or "").strip().upper()
+        return text if text.startswith("#") else f"#{text}" if text else ""
+
+    team_by_tag = {
+        normalized_tag(team.get("clan_tag")): team
+        for team in team_results
+        if normalized_tag(team.get("clan_tag"))
+    }
+    candidate_by_name = {
+        str(item.get("account_name") or "").strip(): item
+        for item in (candidates or [])
+        if str(item.get("account_name") or "").strip()
+    }
+    formal_names = {
+        str(member.get("account_name") or "").strip()
+        for team in team_results
+        for member in team.get("members", [])
+        if str(member.get("account_name") or "").strip()
+    }
+    seen: set[str] = set()
+    for spec in substitutes:
+        if not isinstance(spec, dict):
+            print(f"[WARNING] 忽略非法替补配置：{spec!r}", file=sys.stderr)
+            continue
+        account_name = str(spec.get("account_name") or "").strip()
+        clan_tag = normalized_tag(spec.get("clan_tag"))
+        if not account_name or not clan_tag:
+            print(f"[WARNING] 替补配置缺少昵称或部落 Tag：{spec!r}", file=sys.stderr)
+            continue
+        if account_name in seen:
+            print(f"[WARNING] 忽略重复替补：{account_name}", file=sys.stderr)
+            continue
+        target = team_by_tag.get(clan_tag)
+        if target is None:
+            print(
+                f"[WARNING] 替补目标部落未在队伍配置中："
+                f"account={account_name}, clan_tag={clan_tag}",
+                file=sys.stderr,
+            )
+            continue
+        if account_name in formal_names:
+            print(
+                f"[WARNING] 替补已在正式名单中，忽略替补身份：{account_name}",
+                file=sys.stderr,
+            )
+            continue
+
+        member = dict(candidate_by_name.get(account_name) or {})
+        member.update({
+            "account_name": account_name,
+            "movement": "替补",
+            "league_type": target.get("category"),
+            "cur_team": f"{target.get('team_index')} {target.get('team_name')}",
+            "team_alias": target.get("team_name"),
+            "team_name": target.get("coc_name") or None,
+            "is_substitute": True,
+        })
+        target["substitutes"].append(member)
+        seen.add(account_name)
 
     return team_results
 

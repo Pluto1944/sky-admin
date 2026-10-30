@@ -41,26 +41,39 @@ def normalize_roster_heading(value: Any, label: str) -> str:
     return text
 
 
-def roster_membership_signature(roster: dict) -> list[tuple[str | None, tuple[str, ...]]]:
-    """只比较影响集结结果的部落与正式成员，忽略抬头元数据。"""
+def roster_membership_signature(
+    roster: dict,
+) -> list[tuple[str | None, tuple[str, ...], tuple[str, ...]]]:
+    """比较影响集结结果的正式成员与替补，忽略抬头元数据。"""
     return [
-        (normalize_tag(team.get("clan_tag")), tuple(team.get("members") or []))
+        (
+            normalize_tag(team.get("clan_tag")),
+            tuple(team.get("members") or []),
+            tuple(team.get("substitutes") or []),
+        )
         for team in roster.get("teams", [])
     ]
 
 
 def parse_published_roster(rows: list[dict], teams: list[dict]) -> dict:
-    """按当月 ``league_teams`` 从 Part4 五列表格中解析正式名单。
+    """按当月 ``league_teams`` 从 Part4 表格解析正式名单和替补。
 
     每个队伍抬头的 ``col1`` 是 clan tag，随后 ``ceil(member_count / 5)``
-    行是五列成员网格。人数不足时允许空单元格，但当月每个队伍抬头必须且只能出现
+    行的前五列是正式成员，第六列是不占正式容量的替补。人数不足时
+    允许空单元格，但当月每个队伍抬头必须且只能出现
     一次，避免把残缺或错误月份的表格锁成正式快照。
     """
     if not rows:
         raise ValueError("正式名单子表为空")
-    columns = list(rows[0].keys())[:5]
-    if len(columns) < 2 or "col1" not in columns:
-        raise ValueError("正式名单不是预期的 Part4 五列表格")
+    columns: list[str] = []
+    for row in rows:
+        for column in row:
+            if column not in columns:
+                columns.append(column)
+    formal_columns = columns[:5]
+    substitute_column = columns[5] if len(columns) > 5 else None
+    if len(formal_columns) < 2 or "col1" not in formal_columns:
+        raise ValueError("正式名单不是预期的 Part4 表格")
 
     headings: dict[str, list[int]] = defaultdict(list)
     for index, row in enumerate(rows):
@@ -82,11 +95,16 @@ def parse_published_roster(rows: list[dict], teams: list[dict]) -> dict:
         capacity = max(0, int(team.get("member_count") or 0))
         member_rows = max(1, math.ceil(capacity / 5))
         names = []
+        substitutes = []
         for row in rows[start:start + member_rows]:
-            for column in columns:
+            for column in formal_columns:
                 name = normalize_roster_name(row.get(column), team.get("category") or "combat")
                 if name:
                     names.append(name)
+            if substitute_column:
+                substitute = normalize_roster_name(row.get(substitute_column), "combat")
+                if substitute:
+                    substitutes.append(substitute)
         if not names:
             raise ValueError(f"正式名单中部落 {tag} 没有成员")
 
@@ -100,14 +118,15 @@ def parse_published_roster(rows: list[dict], teams: list[dict]) -> dict:
             # leader_name 与 league_teams.leader 是同一位首领；正式表的官方完整
             # 昵称优先，缺失时才回退到配置简称。
             "leader_name": normalize_roster_heading(
-                heading.get(columns[3]) if len(columns) > 3 else None,
+                heading.get(formal_columns[3]) if len(formal_columns) > 3 else None,
                 "首领",
             ) or str(team.get("leader") or "").strip(),
             "manager_names": normalize_roster_heading(
-                heading.get(columns[4]) if len(columns) > 4 else None,
+                heading.get(formal_columns[4]) if len(formal_columns) > 4 else None,
                 "管理",
             ),
             "members": names,
+            "substitutes": substitutes,
         })
 
     return {"teams": parsed_teams}
@@ -118,8 +137,12 @@ def roster_content_hash(roster: dict) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def compare_roster_members(roster_names: list[str], current_members: list[dict]) -> dict:
-    """按精确昵称和出现次数比较正式名单与当前成员。"""
+def compare_roster_members(
+    roster_names: list[str],
+    current_members: list[dict],
+    substitute_names: list[str] | None = None,
+) -> dict:
+    """按精确昵称和出现次数比较正式名单、替补与当前成员。"""
     by_name: dict[str, deque] = defaultdict(deque)
     for member in current_members:
         name = str(member.get("account_name") or member.get("name") or "").strip()
@@ -145,6 +168,28 @@ def compare_roster_members(roster_names: list[str], current_members: list[dict])
                 "town_hall_level": None,
             })
 
+    substitute_present = []
+    substitute_missing = []
+    for position, substitute_name in enumerate(substitute_names or [], start=1):
+        name = str(substitute_name or "").strip()
+        if not name:
+            continue
+        if by_name[name]:
+            member = by_name[name].popleft()
+            consumed[name] += 1
+            substitute_present.append(
+                _member_view(member, "substitute_present", position, name)
+            )
+        else:
+            substitute_missing.append({
+                "name": name,
+                "status": "substitute_missing",
+                "roster_position": position,
+                "player_tag": None,
+                "role": None,
+                "town_hall_level": None,
+            })
+
     extras = []
     seen_occurrences = Counter()
     for member in current_members:
@@ -161,7 +206,12 @@ def compare_roster_members(roster_names: list[str], current_members: list[dict])
         "present_count": len(present),
         "missing_count": len(missing),
         "extra_count": len(extras),
+        "substitute_count": len(substitute_present) + len(substitute_missing),
+        "substitute_present_count": len(substitute_present),
+        "substitute_missing_count": len(substitute_missing),
         "missing_members": missing,
+        "substitute_missing_members": substitute_missing,
+        "substitute_present_members": substitute_present,
         "extra_members": extras,
         "present_members": present,
     }

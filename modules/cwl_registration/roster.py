@@ -33,11 +33,12 @@ from config import (
     NEW_NORMAL_INSERT_START,
     PROMOTION_RELEGATION_CONFIG,
     SORT_WEIGHTS,
+    SUBSTITUTES,
     TEAMS,
     WHITE_LIST,
 )
 from modules.cwl_registration.baseline_rebuilder import build_final_list
-from modules.cwl_registration.team_builder import build_teams
+from modules.cwl_registration.team_builder import attach_substitutes, build_teams
 from modules.cwl_registration.repository import RegistrationRepository
 from modules.cwl_registration.sorter import sort_accounts
 from modules.alliance.cwl_config import sync_sky_league_teams
@@ -332,6 +333,7 @@ class LeagueArranger:
         teams: list[dict] | None = None,
         combat_min_match_value: float | None = None,
         star_data: dict[str, int] | None = None,
+        substitutes: list[dict] | None = None,
     ) -> tuple[list[dict], list[dict], list[dict], dict[str, int]]:
         """生成排序名单 + 队伍分配（含升降级），并回写数据库。
 
@@ -361,6 +363,19 @@ class LeagueArranger:
             升降级日志可能为空列表（无星数数据或无候选）。
         """
         teams_cfg = teams if teams is not None else TEAMS
+        # 显式注入自定义 teams 的测试/外部调用不应意外套用
+        # 生产全局替补；如需替补必须同时显式传入。
+        if substitutes is not None:
+            substitutes_cfg = substitutes
+        elif teams is None:
+            substitutes_cfg = SUBSTITUTES
+        else:
+            substitutes_cfg = []
+        substitute_names = {
+            str(item.get("account_name") or "").strip()
+            for item in substitutes_cfg
+            if isinstance(item, dict) and str(item.get("account_name") or "").strip()
+        }
 
         # 通过 COC API 获取所有队伍的部落真实名称和首领，注入 teams_cfg
         # （config.py TEAMS 中的信息不完整，首次编排时必须走 API 补全，
@@ -379,7 +394,32 @@ class LeagueArranger:
         self._write_league_teams(period, teams_cfg)
 
         # registrations.period = 联赛时间，直接查询
-        accounts = self._load_accounts(period)
+        all_accounts = self._load_accounts(period)
+        substitute_candidates = [
+            account for account in all_accounts
+            if account.get("account_name") in substitute_names
+        ]
+        candidate_names = {
+            account.get("account_name") for account in substitute_candidates
+        }
+        # 替补可以没有报名；此时仅从真实账号档案补齐 Tag，
+        # 不创建临时 accounts 记录，也不把替补写入正式排序。
+        for name in sorted(substitute_names - candidate_names):
+            tag = self.player_service.resolve_tag_by_name(name)
+            account = self.player_service.get(tag) if tag else None
+            substitute_candidates.append({
+                "account_name": name,
+                "player_tag": tag,
+                "player_name": account.get("player_name") if account else None,
+                "trophies": account.get("trophies") if account else None,
+                "match_value": None,
+                "history_score": account.get("history_score") if account else None,
+                "reg_id": None,
+            })
+        accounts = [
+            account for account in all_accounts
+            if account.get("account_name") not in substitute_names
+        ]
         ordered = sort_accounts(accounts, weights or SORT_WEIGHTS)
 
         # CWL 实际发生月 = 联赛时间 - 1（league_results.period 语义）
@@ -393,6 +433,10 @@ class LeagueArranger:
         prev_combat_regs: list[dict] = []
         if cwl_period:
             prev_combat_regs = self._load_prev_combat_from_league_results(cwl_period)
+            prev_combat_regs = [
+                item for item in prev_combat_regs
+                if item.get("account_name") not in substitute_names
+            ]
 
         # 从 league_teams 表读取上月队伍配置（用于升降级分组）
         prev_teams_cfg = self._load_prev_teams_config(cwl_period) if cwl_period else None
@@ -414,8 +458,16 @@ class LeagueArranger:
         team_results = build_teams(
             final_list=final_list,
             teams=teams_cfg,
-            white_list=WHITE_LIST,
+            white_list=[
+                item for item in WHITE_LIST
+                if item and item[0] not in substitute_names
+            ],
             manager_candidates=MANAGER_CANDIDATES,
+        )
+        attach_substitutes(
+            team_results,
+            substitutes_cfg,
+            substitute_candidates,
         )
 
         # 注入 movement 标识 + 修正 league_type（供导出展示）
@@ -624,7 +676,7 @@ class LeagueArranger:
         """构建 Part4 联赛名单排布网格（备份留底）。
 
         返回 (grid, title_row_indices):
-          - grid: list[list[str]]，每行 5 列，可直接拼入 combined_rows
+          - grid: list[list[str]]，每行 6 列；前 5 列是正式名单，第 6 列是替补
           - title_row_indices: 抬头行在 grid 中的行索引列表
         """
         # clan_name / leader_name 已在 arrange() 阶段通过 COC API 注入 teams_cfg，
@@ -636,7 +688,7 @@ class LeagueArranger:
             cat = "实战" if tr["category"] == LEAGUE_COMBAT else "壳子"
             # 记录抬头行索引
             title_indices.append(len(grid))
-            # 抬头 5 列：队伍信息 | clan_tag | 部落名 | 首领 | 管理
+            # 抬头 6 列：队伍信息 | clan_tag | 部落名 | 首领 | 管理 | 替补
             cap_info = f"{tr['filled_count']}/{tr['member_count']}"
             col1 = f"{cat}: {tr['team_name']} {cap_info}"
             col2 = tr.get("clan_tag", "")
@@ -644,12 +696,16 @@ class LeagueArranger:
             leader_name = tr.get("leader_name", "")
             col4 = f"首领:{leader_name}" if leader_name else ""
             col5 = f"管理:{tr.get('manager', '')} 开战/捐兵给一份额外"
-            grid.append([col1, col2, col3, col4, col5])
+            substitutes = tr.get("substitutes") or []
+            col6 = f"替补:{len(substitutes)}人" if substitutes else ""
+            grid.append([col1, col2, col3, col4, col5, col6])
 
             members = tr["members"]
             is_shell = tr["category"] == LEAGUE_SHELL
-            for j in range(0, len(members), 5):
-                chunk = members[j:j + 5]
+            member_chunks = [members[j:j + 5] for j in range(0, len(members), 5)]
+            row_count = max(len(member_chunks), len(substitutes))
+            for row_index in range(row_count):
+                chunk = member_chunks[row_index] if row_index < len(member_chunks) else []
                 row: list[str] = []
                 for m in chunk:
                     name = m.get("account_name", "")
@@ -659,10 +715,14 @@ class LeagueArranger:
                     else:
                         row.append(name)
                 row.extend([""] * (5 - len(row)))
+                substitute_name = ""
+                if row_index < len(substitutes):
+                    substitute_name = substitutes[row_index].get("account_name", "")
+                row.append(substitute_name)
                 grid.append(row)
 
             if i < len(team_results) - 1:
-                grid.append(["", "", "", "", ""])
+                grid.append(["", "", "", "", "", ""])
 
         return grid, title_indices
 
@@ -675,6 +735,7 @@ class LeagueArranger:
         teams: list[dict] | None = None,
         combat_min_match_value: float | None = None,
         star_data: dict[str, int] | None = None,
+        substitutes: list[dict] | None = None,
     ) -> tuple[list[dict], list[dict], list[dict], str]:
         """生成名单并导出到表格的新 sheet。
 
@@ -684,7 +745,7 @@ class LeagueArranger:
         返回 (含 team_name 排序名单, 队伍分配结果, 升降级日志, 实际 sheet 名)。
         """
         ordered, team_results, movements, star_data = self.arrange(
-            period, weights, teams, combat_min_match_value, star_data
+            period, weights, teams, combat_min_match_value, star_data, substitutes
         )
 
         # 拼接输出行：排序名单 + 空白分隔 + 队伍明细
@@ -714,6 +775,8 @@ class LeagueArranger:
                 cap_info = f"{tr['filled_count']}/{tr['member_count'] - tr['reserved_empty']}+{tr['reserved_empty']}"
             else:
                 cap_info = f"{tr['filled_count']}/{tr['member_count']}"
+            substitute_count = len(tr.get("substitutes") or [])
+            substitute_info = f" 替补:{substitute_count}人" if substitute_count else ""
             clan_tag = tr.get("clan_tag", "")
             clan_name = tr.get("coc_name", "") or ""
             leader_name = tr.get("leader_name", "")
@@ -728,7 +791,7 @@ class LeagueArranger:
                 f"{config_leader}"
                 f"{clan_leader}"
                 f"管理:{tr.get('manager', '')} 开战/捐兵给一份额外 "
-                f"满员:{cap_info}"
+                f"满员:{cap_info}{substitute_info}"
             )
             # 队伍标题行
             combined_rows.append(
@@ -744,6 +807,14 @@ class LeagueArranger:
                 member_row = {h: m.get(h) for h in ARRANGEMENT_OUTPUT_HEADERS}
                 member_row["team_name"] = coc_name or None
                 combined_rows.append(member_row)
+            # 替补不进入正式 members，在工作名单中单独留痕。
+            for substitute in tr.get("substitutes") or []:
+                substitute_row = {
+                    h: substitute.get(h) for h in ARRANGEMENT_OUTPUT_HEADERS
+                }
+                substitute_row["movement"] = "替补"
+                substitute_row["team_name"] = coc_name or None
+                combined_rows.append(substitute_row)
             # 队伍之间空一行
             combined_rows.append({h: None for h in ARRANGEMENT_OUTPUT_HEADERS})
 
@@ -797,7 +868,7 @@ class LeagueArranger:
                 combined_rows.append({h: None for h in ARRANGEMENT_OUTPUT_HEADERS})
 
         # ===== Part 4: 联赛名单排布（备份留底） =====
-        # Part4 独立写入（5 列 grid），不混入 combined_rows 的 dict，
+        # Part4 独立写入（6 列 grid，第 6 列为替补），不混入 combined_rows 的 dict，
         # 避免 ARRANGEMENT_OUTPUT_HEADERS 中多余列在 Part4 区域产生空列。
         # 在 combined_rows 末尾追加空行占位，让 write_sheet 预留空间，
         # 然后用 updateRangeRequest 覆盖写入 Part4 数据。
@@ -816,7 +887,7 @@ class LeagueArranger:
             sheet=sheet_name,
         )
 
-        # 追加 Part4（5 列 grid，覆盖空行占位）
+        # 追加 Part4（6 列 grid，覆盖空行占位）
         self._append_part4_to_sheet(target, sheet_name, grid, title_indices)
 
         return ordered, team_results, movements, sheet_name
@@ -828,7 +899,7 @@ class LeagueArranger:
         grid: list[list[str]],
         title_indices: list[int],
     ) -> None:
-        """将 Part4 网格追加到已有 sheet 末尾（5 列，不经过 header 映射）。
+        """将 Part4 网格追加到已有 sheet 末尾（6 列，不经过 header 映射）。
 
         在 write_sheet 调用前已预留行数，这里直接用 updateRangeRequest
         从已有数据末尾写入 Part4，不删表重建，保持原有格式不变。
@@ -849,24 +920,31 @@ class LeagueArranger:
         # Part4 行数：空行 + 标题 + grid
         part4_total = 2 + len(grid)
         start_row = total_rows - part4_total
+        column_count = max((len(row) for row in grid), default=6)
 
         # 构建 Part4 矩阵
         matrix: list[list[dict]] = []
         # 空行
-        matrix.append([adapter._cell("") for _ in range(5)])
+        matrix.append([adapter._cell("") for _ in range(column_count)])
         # 标题行
-        matrix.append([adapter._cell("=== 联赛名单排布（备份留底） ===")] + [adapter._cell("") for _ in range(4)])
+        matrix.append(
+            [adapter._cell("=== 联赛名单排布（备份留底） ===")]
+            + [adapter._cell("") for _ in range(column_count - 1)]
+        )
         # grid 行
         for i, row in enumerate(grid):
             fmt = {"fontColor": {"red": 255, "green": 0, "blue": 0, "alpha": 255}} if i in title_indices else None
             cells = [adapter._cell(v, fmt) for v in row]
-            while len(cells) < 5:
+            while len(cells) < column_count:
                 cells.append(adapter._cell(""))
             matrix.append(cells)
 
         # 分片写入
         from shared.io_adapter.tencent_doc import _MAX_UPDATE_ROWS, _MAX_UPDATE_CELLS
-        rows_per_chunk = min(_MAX_UPDATE_ROWS, max(_MAX_UPDATE_CELLS // 5, 1))
+        rows_per_chunk = min(
+            _MAX_UPDATE_ROWS,
+            max(_MAX_UPDATE_CELLS // column_count, 1),
+        )
         for chunk_start in range(0, len(matrix), rows_per_chunk):
             chunk = matrix[chunk_start:chunk_start + rows_per_chunk]
             adapter._batch_update(
@@ -937,7 +1015,7 @@ class LeagueArranger:
         # 2. 走完整编排流程（排序/填充/升降级），与 arrange_and_export 数据一致
         _ordered, team_results, _movements, _star_data = self.arrange(period)
 
-        # 3. 生成 Part4 网格（5 列）
+        # 3. 生成 Part4 网格（前 5 列正式成员 + 第 6 列替补）
         grid, title_indices = self._build_part4_grid(team_results)
 
         # 4. 拼接：前 20 行固定文字 + Part4 网格

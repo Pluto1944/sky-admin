@@ -89,5 +89,6 @@ PROMOTION_RELEGATION_CONFIG: dict = _cwl["promotion_relegation"]
 MANAGER_CANDIDATES: list = _cwl["manager_candidates"]
 BLACK_LIST: set = set(_cwl["black_list"])
 WHITE_LIST: list = _cwl["white_list"]
+SUBSTITUTES: list[dict] = _cwl.get("substitutes", [])
 NEW_COMBAT_INSERT_START: int = _cwl["new_combat_insert_start"]
 NEW_NORMAL_INSERT_START: int = _cwl["new_normal_insert_start"]

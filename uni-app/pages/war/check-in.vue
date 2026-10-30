@@ -25,6 +25,7 @@
                 <view class="summary-metric"><text class="metric-number">{{ arrivalDetail.official_count || 0 }}</text><text class="metric-label">正式名单</text></view>
                 <view class="summary-metric"><text class="metric-number success-number">{{ arrivalDetail.present_count || 0 }}</text><text class="metric-label">已到位</text></view>
                 <view class="summary-metric"><text class="metric-number missing-number">{{ arrivalDetail.missing_count || 0 }}</text><text class="metric-label">未到位</text></view>
+                <view class="summary-metric"><text class="metric-number substitute-number">{{ arrivalDetail.substitute_present_count || 0 }}/{{ arrivalDetail.substitute_count || 0 }}</text><text class="metric-label">替补到位</text></view>
                 <view class="summary-metric"><text class="metric-number extra-number">{{ arrivalDetail.extra_count || 0 }}</text><text class="metric-label">额外成员</text></view>
               </view>
               <text class="updated-at">{{ assemblyStatusLabel(arrivalDetail.status) }}{{ arrivalDetail.updated_at ? ' · 更新于 ' + formatTime(arrivalDetail.updated_at) : '' }}</text>
@@ -34,7 +35,7 @@
               <view class="member-list-header"><text class="arrival-name-col">昵称</text><text class="arrival-role-col">职位</text><text class="arrival-th-col">大本</text></view>
               <view v-if="!arrivalMembers.length" class="arrival-empty">暂无可展示的成员核对结果</view>
               <view v-for="(member, index) in arrivalMembers" :key="index" class="arrival-member-row" :class="'arrival-' + member.status">
-                <view class="arrival-name-col arrival-name-wrap"><text class="arrival-dot"></text><text class="arrival-member-name">{{ member.name }}</text></view>
+                <view class="arrival-name-col arrival-name-wrap"><text class="arrival-dot"></text><text class="arrival-member-name">{{ member.name }}</text><text v-if="arrivalMemberStatusLabel(member.status)" class="arrival-status-label">{{ arrivalMemberStatusLabel(member.status) }}</text></view>
                 <text class="arrival-role-col">{{ roleLabel(member.role) }}</text>
                 <text class="arrival-th-col">{{ member.town_hall_level ? 'TH' + member.town_hall_level : '-' }}</text>
               </view>
@@ -47,6 +48,7 @@
                 <view class="summary-metric"><text class="metric-number">{{ arrivalSummary.team_count || 0 }}</text><text class="metric-label">全部队伍</text></view>
                 <view class="summary-metric"><text class="metric-number">{{ arrivalSummary.checked_team_count || 0 }}</text><text class="metric-label">已检查</text></view>
                 <view class="summary-metric"><text class="metric-number missing-number">{{ arrivalSummary.missing_count || 0 }}</text><text class="metric-label">未到位</text></view>
+                <view class="summary-metric"><text class="metric-number substitute-number">{{ arrivalSummary.substitute_present_count || 0 }}/{{ arrivalSummary.substitute_count || 0 }}</text><text class="metric-label">替补到位</text></view>
                 <view class="summary-metric"><text class="metric-number extra-number">{{ arrivalSummary.extra_count || 0 }}</text><text class="metric-label">额外成员</text></view>
               </view>
               <text v-if="arrivalUpdatedAt" class="updated-at">数据更新于 {{ formatTime(arrivalUpdatedAt) }}</text>
@@ -67,6 +69,7 @@
                 <view class="arrival-count"><text class="arrival-count-number">{{ team.official_count || 0 }}</text><text>正式</text></view>
                 <view class="arrival-count"><text class="arrival-count-number success-number">{{ team.present_count || 0 }}</text><text>到位</text></view>
                 <view class="arrival-count"><text class="arrival-count-number missing-number">{{ team.missing_count || 0 }}</text><text>未到</text></view>
+                <view class="arrival-count"><text class="arrival-count-number substitute-number">{{ team.substitute_present_count || 0 }}/{{ team.substitute_count || 0 }}</text><text>替补</text></view>
                 <view class="arrival-count"><text class="arrival-count-number extra-number">{{ team.extra_count || 0 }}</text><text>额外</text></view>
               </view>
               <view class="arrival-card-footer"><text>{{ assemblyStatusLabel(team.status) }}</text><text>{{ team.updated_at ? formatTime(team.updated_at) : '等待首次检查' }}</text></view>
@@ -221,6 +224,8 @@ export default {
       if (!this.arrivalDetail) return []
       return []
         .concat(this.arrivalDetail.missing_members || [])
+        .concat(this.arrivalDetail.substitute_missing_members || [])
+        .concat(this.arrivalDetail.substitute_present_members || [])
         .concat(this.arrivalDetail.extra_members || [])
         .concat(this.arrivalDetail.present_members || [])
     },
@@ -369,6 +374,9 @@ export default {
     roleLabel(role) {
       return { leader: '首领', coLeader: '副首领', admin: '长老', member: '成员' }[role] || '-'
     },
+    arrivalMemberStatusLabel(status) {
+      return { substitute_present: '替补已到', substitute_missing: '替补未到' }[status] || ''
+    },
     assemblyStatusLabel(status) {
       return { checking: '检查中', started: '联赛已开启 · 已冻结', cutoff: '截止时未开启 · 已冻结', error: '同步异常', waiting_check: '等待首次检查' }[status] || '等待检查'
     }
@@ -387,7 +395,7 @@ export default {
 .state-text { color: #8890a0; font-size: 28rpx; }.error-text { margin: 0 32rpx 20rpx; color: #e17055; font-size: 26rpx; text-align: center; }.retry-btn { color: #5fa8ff; font-size: 26rpx; }
 .summary-card, .team-card, .empty-card { margin-bottom: 20rpx; border: 1rpx solid #2a2a4a; border-radius: 14rpx; background: #18182d; }
 .summary-card { padding: 20rpx; }.summary-heading { display: flex; align-items: center; }.summary-title { color: #fff; font-size: 29rpx; font-weight: 600; }.summary-period { margin-left: auto; color: #74b9ff; font-size: 23rpx; }
-.summary-metrics { margin-top: 20rpx; display: flex; }.summary-metric { flex: 1; display: flex; flex-direction: column; align-items: center; }.metric-number { color: #f0f0f5; font-size: 34rpx; font-weight: 600; }.warning-number { color: #fdcb6e; }.success-number { color: #55c99b !important; }.missing-number { color: #ff7675 !important; }.extra-number { color: #55c99b !important; }.metric-label { margin-top: 5rpx; color: #747c91; font-size: 21rpx; }.updated-at { display: block; margin-top: 18rpx; color: #596178; font-size: 20rpx; text-align: center; }
+.summary-metrics { margin-top: 20rpx; display: flex; }.summary-metric { min-width: 0; flex: 1; display: flex; flex-direction: column; align-items: center; }.metric-number { color: #f0f0f5; font-size: 34rpx; font-weight: 600; }.warning-number { color: #fdcb6e; }.success-number { color: #55c99b !important; }.missing-number { color: #ff7675 !important; }.substitute-number { color: #fdcb6e !important; }.extra-number { color: #55c99b !important; }.metric-label { margin-top: 5rpx; color: #747c91; font-size: 20rpx; white-space: nowrap; }.updated-at { display: block; margin-top: 18rpx; color: #596178; font-size: 20rpx; text-align: center; }
 .cache-warning, .team-warning { padding: 12rpx 15rpx; border-radius: 8rpx; color: #fdcb6e; background: rgba(253,203,110,.1); font-size: 21rpx; line-height: 1.5; }.cache-warning { margin-bottom: 18rpx; }.team-warning { margin: 0 18rpx 16rpx; }
 .empty-card { padding: 80rpx 20rpx; display: flex; flex-direction: column; align-items: center; }.empty-title { color: #aab4c8; font-size: 27rpx; }.empty-hint { margin-top: 12rpx; color: #66708a; font-size: 22rpx; }
 .team-card { overflow: hidden; }.team-card.collapsed .team-header { border-bottom: 0; }.team-header { min-height: 76rpx; padding: 14rpx 18rpx; display: flex; align-items: center; box-sizing: border-box; border-bottom: 1rpx solid #282844; }.team-identity { min-width: 0; display: flex; align-items: center; }.category-badge { flex-shrink: 0; margin-right: 10rpx; padding: 3rpx 9rpx; border-radius: 6rpx; color: #9fc9ff; background: rgba(74,144,217,.18); font-size: 20rpx; }.category-shell { color: #d9b8ff; background: rgba(162,111,212,.16); }.team-name { max-width: 230rpx; overflow: hidden; color: #f0f0f5; font-size: 27rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.team-alias { flex-shrink: 0; margin-left: 8rpx; color: #66708a; font-size: 20rpx; }.team-header-actions { margin-left: auto; flex-shrink: 0; display: flex; align-items: center; }.countdown { flex-shrink: 0; color: #74b9ff; font-size: 22rpx; }.countdown.inactive { color: #8d95a8; }.countdown.warning { color: #fdcb6e; }.countdown.urgent { color: #ff7675; font-weight: 600; }.collapse-btn { margin-left: 12rpx; padding: 9rpx 6rpx 9rpx 12rpx; color: #8d95a8; font-size: 21rpx; }
@@ -398,5 +406,5 @@ export default {
 .status-footer { margin: 6rpx 0 20rpx; color: #66708a; font-size: 21rpx; text-align: center; }.bottom-space { height: 100rpx; }
 .arrival-team-card { cursor: pointer; }.arrival-arrow { margin-left: auto; color: #66708a; font-size: 38rpx; line-height: 1; }.arrival-card-body { padding: 20rpx 12rpx 14rpx; display: flex; }.arrival-count { flex: 1; display: flex; flex-direction: column; align-items: center; color: #747c91; font-size: 20rpx; }.arrival-count-number { margin-bottom: 4rpx; color: #f0f0f5; font-size: 29rpx; font-weight: 600; }.arrival-card-footer { padding: 0 18rpx 16rpx; display: flex; justify-content: space-between; color: #66708a; font-size: 20rpx; }
 .detail-back { height: 58rpx; margin-bottom: 16rpx; display: flex; align-items: center; color: #74b9ff; font-size: 24rpx; }.detail-back-icon { margin-right: 8rpx; font-size: 40rpx; line-height: 1; }.arrival-detail-title { min-width: 0; overflow: hidden; color: #f0f0f5; font-size: 28rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.member-list-card { overflow: hidden; border: 1rpx solid #2a2a4a; border-radius: 14rpx; background: #18182d; }.member-list-header, .arrival-member-row { min-height: 64rpx; padding: 10rpx 16rpx; display: flex; align-items: center; box-sizing: border-box; }.member-list-header { color: #747c91; background: #202037; font-size: 21rpx; }.arrival-member-row { border-top: 1rpx solid #292943; color: #d8dce8; font-size: 23rpx; }.arrival-name-col { min-width: 0; flex: 1; }.arrival-name-wrap { display: flex; align-items: center; }.arrival-role-col { width: 112rpx; color: #8d95a8; text-align: center; }.arrival-th-col { width: 82rpx; color: #aab4c8; text-align: right; }.arrival-dot { width: 10rpx; height: 10rpx; margin-right: 10rpx; flex-shrink: 0; border-radius: 50%; background: #66708a; }.arrival-member-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.arrival-missing { color: #ff8a86; background: rgba(255,118,117,.06); }.arrival-missing .arrival-dot { background: #ff7675; }.arrival-extra { color: #65d6a7; background: rgba(0,184,148,.06); }.arrival-extra .arrival-dot { background: #00b894; }.arrival-present .arrival-dot { background: #66708a; }.arrival-empty { padding: 70rpx 20rpx; color: #66708a; font-size: 24rpx; text-align: center; }
+.member-list-card { overflow: hidden; border: 1rpx solid #2a2a4a; border-radius: 14rpx; background: #18182d; }.member-list-header, .arrival-member-row { min-height: 64rpx; padding: 10rpx 16rpx; display: flex; align-items: center; box-sizing: border-box; }.member-list-header { color: #747c91; background: #202037; font-size: 21rpx; }.arrival-member-row { border-top: 1rpx solid #292943; color: #d8dce8; font-size: 23rpx; }.arrival-name-col { min-width: 0; flex: 1; }.arrival-name-wrap { display: flex; align-items: center; }.arrival-role-col { width: 112rpx; color: #8d95a8; text-align: center; }.arrival-th-col { width: 82rpx; color: #aab4c8; text-align: right; }.arrival-dot { width: 10rpx; height: 10rpx; margin-right: 10rpx; flex-shrink: 0; border-radius: 50%; background: #66708a; }.arrival-member-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.arrival-status-label { margin-left: 10rpx; flex-shrink: 0; color: #fdcb6e; font-size: 18rpx; }.arrival-missing { color: #ff8a86; background: rgba(255,118,117,.06); }.arrival-missing .arrival-dot { background: #ff7675; }.arrival-extra { color: #65d6a7; background: rgba(0,184,148,.06); }.arrival-extra .arrival-dot { background: #00b894; }.arrival-substitute_present { color: #f5d783; background: rgba(253,203,110,.08); }.arrival-substitute_present .arrival-dot { background: #fdcb6e; }.arrival-substitute_missing { color: #a89b78; background: rgba(253,203,110,.04); }.arrival-substitute_missing .arrival-dot { border: 1rpx solid #c8a957; background: transparent; }.arrival-present .arrival-dot { background: #66708a; }.arrival-empty { padding: 70rpx 20rpx; color: #66708a; font-size: 24rpx; text-align: center; }
 </style>

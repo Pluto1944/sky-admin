@@ -12,7 +12,7 @@
 
 **目标**：
 1. Part 1-4 在同一个 sheet 内按序输出，自上而下清晰分层
-2. Part4 用独立 5 列写入，避免 Part1-3 的 13 列表头在底部产生多余空白列
+2. Part4 用独立 6 列写入，避免 Part1-3 的 13 列表头在底部产生多余空白列；前 5 列为正式成员，第 6 列为替补
 3. 公示发布独立于编排工作文档，写入另一个腾讯文档供成员查看
 
 ---
@@ -34,7 +34,7 @@ arrange_and_export(period, target)
   │   → 写入 Part1-3 + 空行占位
   │
   └─ _append_part4_to_sheet(target, sheet_name, grid, title_indices)
-      → 独立 5 列覆盖写入 Part4
+      → 独立 6 列覆盖写入 Part4（第 6 列为替补）
 ```
 
 ### 公示发布数据流
@@ -42,7 +42,7 @@ arrange_and_export(period, target)
 ```
 publish_part4_to_doc(period, publish_doc_id)
   ├─ self.arrange(period)            → team_results
-  ├─ _build_part4_grid(team_results) → grid (5 列)
+  ├─ _build_part4_grid(team_results) → grid (6 列)
   ├─ PUBLISH_FIXED_ROWS (前 20 行固定文字) + grid → combined_rows
   └─ _write_publish_sheet(publish_doc_id, sheet_name, combined_rows)
 ```
@@ -72,12 +72,12 @@ publish_part4_to_doc(period, publish_doc_id)
 │  account_name | player_tag | movement:缺失(N★) | ...   │
 │  [黑名单] N人                                          │
 │  account_name | player_tag | movement:黑名单            │
-├─ Part 4: 网格排布（5 列独立写入）──────────────────────┤
+├─ Part 4: 网格排布（6 列独立写入）──────────────────────┤
 │  === 联赛名单排布（备份留底） ===                       │
 │  实战: 泰坦二 15/15  #2QQ  泰坦二  首领:xxx  管理:yyy  │
-│  player1   │ player2   │ player3   │ player4   │ player5│
-│  player6   │ player7   │ player8   │ player9   │ player10│
-│  player11  │ player12  │ player13  │ player14  │ player15│
+│  player1  │ player2  │ player3  │ player4  │ player5  │ 替补1 │
+│  player6  │ player7  │ player8  │ player9  │ player10 │       │
+│  player11 │ player12 │ player13 │ player14 │ player15 │       │
 │  (空行)                                                │
 │  壳子: 大一 30/30  #AAAAA  大一  首领:aaa  管理:bbb    │
 │  p1 600    │ p2 610    │ p3 580    │ p4 590    │ p5 600 │
@@ -164,7 +164,9 @@ title = f"{cat}: {tr['team_name']} {league_info}{clan_tag} {clan_name} {config_l
 
 ### 成员行
 
-每个成员按 `ARRANGEMENT_OUTPUT_HEADERS` 字段填入，`team_name` 列统一填入 COC 真实名称。
+每个正式成员按 `ARRANGEMENT_OUTPUT_HEADERS` 字段填入，`team_name` 列统一填入 COC
+真实名称。队伍配置有额外替补时，在正式成员之后追加 `movement=替补`
+的独立行；该行用于运营留痕，不计入正式容量和排名。
 
 ---
 
@@ -196,7 +198,7 @@ title = f"{cat}: {tr['team_name']} {league_info}{clan_tag} {clan_name} {config_l
 
 ## 七、Part 4：联赛名单排布（备份留底）
 
-**写入方式**：独立 5 列写入，不经过 `ARRANGEMENT_OUTPUT_HEADERS` 的 dict 映射
+**写入方式**：独立 6 列写入，前 5 列是正式成员，第 6 列是替补。
 
 **原因**：避免 Part1-3 的 13 列表头在 Part4 区域产生多余的空白列，保持表格整洁。
 
@@ -214,13 +216,13 @@ for _ in range(part4_row_count):
 
 self.excel_io.write_sheet(target, combined_rows, headers=ARRANGEMENT_OUTPUT_HEADERS, sheet=sheet_name)
 
-# 追加 Part4（5 列 grid，覆盖空行占位）
+# 追加 Part4（6 列 grid，覆盖空行占位）
 self._append_part4_to_sheet(target, sheet_name, grid, title_indices)
 ```
 
 **阶段 2** — `_append_part4_to_sheet` 用 `updateRangeRequest` 覆盖写入：
 - 计算起始行（总行数 - Part4 行数）
-- 构建 5 列矩阵（空行 + 标题行 + grid 行）
+- 构建 6 列矩阵（空行 + 标题行 + grid 行）
 - 抬头行红色字体
 - 分片写入（按 `_MAX_UPDATE_ROWS` / `_MAX_UPDATE_CELLS` 限制）
 
@@ -232,8 +234,8 @@ def _build_part4_grid(self, team_results: list[dict]) -> tuple[list[list[str]], 
 
 | # | 规则 | 说明 |
 |---|------|------|
-| 1 | **列数** | 固定 5 列 |
-| 2 | **抬头行** | col1=队伍信息+满员、col2=clan_tag、col3=部落名（COC API）、col4=首领（COC API）、col5=管理信息 |
+| 1 | **列数** | 固定 6 列；前 5 列正式成员，第 6 列替补 |
+| 2 | **抬头行** | col1=队伍信息+满员、col2=clan_tag、col3=部落名、col4=首领、col5=管理、col6=替补人数 |
 | 3 | **队伍顺序** | 按 `team_results` 原始顺序（实战在前、壳子在后） |
 | 4 | **每行 5 人** | 15 人队伍 = 3 行成员，30 人队伍 = 6 行成员 |
 | 5 | **实战队伍** | 单元格只显示 `account_name` |
@@ -242,6 +244,7 @@ def _build_part4_grid(self, team_results: list[dict]) -> tuple[list[list[str]], 
 | 8 | **队伍间分隔** | 一空行（最后一队除外） |
 | 9 | **部落信息** | 通过 `_fetch_clan_info()` 批量 COC API 查询 + 缓存 |
 | 10 | **返回值** | `(grid: list[list[str]], title_indices: list[int])` |
+| 11 | **替补** | 每行第 6 列最多一人，不计入 `member_count` / `filled_count` |
 
 ### 壳子 `match_value` 取整
 
@@ -272,7 +275,7 @@ def publish_part4_to_doc(self, period: str, publish_doc_id: str) -> str:
     # 2. 走完整编排流程（与 arrange_and_export 数据一致）
     _ordered, team_results, _movements, _star_data = self.arrange(period)
 
-    # 3. 生成 Part4 网格（5 列）
+    # 3. 生成 Part4 网格（前 5 列正式成员 + 第 6 列替补）
     grid, title_indices = self._build_part4_grid(team_results)
 
     # 4. 拼接：前 20 行固定文字 + Part4 网格
@@ -308,7 +311,7 @@ def publish_part4_to_doc(self, period: str, publish_doc_id: str) -> str:
 | 方法 | 位置 | 功能 |
 |------|------|------|
 | `arrange_and_export()` | `roster.py` | 编排+导出主入口，输出 Part1-4 到单个 sheet |
-| `_build_part4_grid()` | `roster.py` | 构建 Part4 5 列网格 + 抬头行索引 |
+| `_build_part4_grid()` | `roster.py` | 构建 Part4 6 列网格 + 抬头行索引 |
 | `_append_part4_to_sheet()` | `roster.py` | 用 `updateRangeRequest` 将 Part4 覆盖写入已有 sheet |
 | `_fetch_clan_info()` | `roster.py` | 批量 COC API 查询部落名称和首领，带缓存 |
 | `publish_part4_to_doc()` | `roster.py` | 将 Part4 网格发布到公示文档 |
@@ -343,9 +346,10 @@ def publish_part4_to_doc(self, period: str, publish_doc_id: str) -> str:
 | 8 | 壳子队伍 | Part4 单元格含 `名称 匹配值`，匹配值为整数 |
 | 9 | 实战队伍 | Part4 单元格只含 `名称` |
 | 10 | 不足 5 人队伍 | Part4 末尾单元格为空 |
-| 11 | Part4 抬头行 5 列完整 | col1=队伍信息、col2=clan_tag、col3=部落名、col4=首领、col5=管理 |
+| 11 | Part4 抬头行 6 列完整 | col1=队伍信息、col2=clan_tag、col3=部落名、col4=首领、col5=管理、col6=替补 |
 | 12 | COC API 查询失败 | 部落名/首领为空，不影响整体输出 |
 | 13 | tag 格式非法 | 跳过 API 查询，不报 404 |
 | 14 | 公示发布 | 前 20 行固定公告 + Part4 网格，抬头行红色字体 |
 | 15 | 公示 sheet 已存在 | 删后重建，内容为最新 |
 | 16 | 同期重跑后新增黑名单 | 被过滤账号的三个编排字段为空，且不出现在 Part1/2/4 |
+| 17 | 配置额外替补 | 正式人数和分队不变，Part2 标记“替补”，Part4 第 6 列展示 |
